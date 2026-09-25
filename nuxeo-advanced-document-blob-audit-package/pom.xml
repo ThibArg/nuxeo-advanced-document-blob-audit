@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.nuxeo.advanced.document.blob.audit</groupId>
+    <artifactId>nuxeo-advanced-document-blob-audit-parent</artifactId>
+    <version>2025.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>nuxeo-advanced-document-blob-audit-package</artifactId>
+  <packaging>zip</packaging>
+  <name>Nuxeo Advanced Document Blob Audit - Marketplace Package</name>
+
+  <dependencies>
+    <!-- Base distribution(s) for the MP -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.distribution</groupId>
+      <artifactId>nuxeo-nxr-server</artifactId>
+      <type>zip</type>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Additional bundles to be deployed by the MP -->
+    <dependency>
+      <groupId>org.nuxeo.advanced.document.blob.audit</groupId>
+      <artifactId>nuxeo-advanced-document-blob-audit-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.nuxeo.build</groupId>
+        <artifactId>ant-assembly-maven-plugin</artifactId>
+        <configuration>
+          <buildFiles>
+            <buildFile>${basedir}/src/main/assemble/assembly.xml</buildFile>
+          </buildFiles>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: nuxeo-advanced-document-blob-audit-core
+Bundle-SymbolicName: nuxeo-advanced-document-blob-audit-core;singleton:=true
+Bundle-Version: 1.0.0
+Bundle-Vendor: Nuxeo
+Bundle-ActivationPolicy: lazy
+Bundle-ClassPath: .
+Nuxeo-Component: OSGI-INF/blobdiff-service-contrib.xml,
+ OSGI-INF/blobdiff-doctype-contrib.xml,
+ OSGI-INF/blobdiff-init-contrib.xml,
+ OSGI-INF/blobdiff-pageprovider-contrib.xml,
+ OSGI-INF/blobaudit-listener-contrib.xml,
+ OSGI-INF/blobaudit-audit-contrib.xml,
+ OSGI-INF/blobaudit-vocabulary-contrib.xml

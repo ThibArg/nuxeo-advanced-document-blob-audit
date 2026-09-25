@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:nxs="http://www.nuxeo.org/ecm/schemas/blobdiff/"
+           targetNamespace="http://www.nuxeo.org/ecm/schemas/blobdiff/">
+
+  <xs:include schemaLocation="core-types.xsd" />
+
+  <!-- Identity of what was compared -->
+  <xs:element name="sourceId" type="xs:string" />
+  <xs:element name="sourceRepository" type="xs:string" />
+  <xs:element name="xpath" type="xs:string" />
+
+  <!-- Ties this document back to its audit entry, which is written synchronously -->
+  <xs:element name="correlationId" type="xs:string" />
+
+  <!-- Who / when -->
+  <xs:element name="user" type="xs:string" />
+  <xs:element name="date" type="xs:date" />
+
+  <!-- Blob identity: digests double as a short-circuit, a rename changes neither -->
+  <xs:element name="mimeType" type="xs:string" />
+  <xs:element name="oldFilename" type="xs:string" />
+  <xs:element name="newFilename" type="xs:string" />
+  <xs:element name="oldDigest" type="xs:string" />
+  <xs:element name="newDigest" type="xs:string" />
+
+  <!-- Short, listable summary; the full diff stays in the blob below -->
+  <xs:element name="summary" type="xs:string" />
+  <xs:element name="added" type="xs:long" />
+  <xs:element name="removed" type="xs:long" />
+  <xs:element name="changed" type="xs:long" />
+  <xs:element name="truncated" type="xs:boolean" />
+  <xs:element name="status" type="xs:string" />
+
+  <!-- The diff itself: a blob, so it stays out of the SQL/Mongo record and out of full-text -->
+  <xs:element name="diff" type="nxs:content" />
+
+</xs:schema>

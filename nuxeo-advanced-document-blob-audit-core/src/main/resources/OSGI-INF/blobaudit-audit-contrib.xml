@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.audit">
+
+  <require>org.nuxeo.audit.service.AuditComponent.defaultContrib</require>
+
+  <extension target="org.nuxeo.audit.service.AuditComponent" point="routes">
+    <documentation>
+      In LTS 2025 the AuditRouter silently drops entries whose eventId is not declared in a route.
+      Keep this in sync with BlobAuditConstants.EVENT_BLOB_MODIFIED.
+    </documentation>
+    <route name="advanced-document-blob-audit">
+      <backend name="default" />
+      <event name="blobContentModified" />
+    </route>
+  </extension>
+
+</component>

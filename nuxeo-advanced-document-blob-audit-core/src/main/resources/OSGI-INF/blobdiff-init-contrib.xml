@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.BlobDiffInitComponent">
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+  <implementation class="org.nuxeo.audit.advanced.blob.BlobDiffInitComponent" />
+</component>

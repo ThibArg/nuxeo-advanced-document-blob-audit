@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.config">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <!--
+    The feature ships disabled; tests turn it on.
+    maxBlobSize must stay comfortably above the size of a minimal .xlsx: an empty XSSF workbook is
+    already a few kilobytes of zipped XML, so a tight cap here would silently skip every spreadsheet
+    fixture and turn the integration tests green for the wrong reason.
+    The size guardrail is exercised separately by blobaudit-test-smallblob-config.xml.
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <maxBlobSize>1048576</maxBlobSize>
+      <maxLines>1000</maxLines>
+      <maxDiffEntries>500</maxDiffEntries>
+      <docTypes />
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+    </config>
+  </extension>
+
+</component>

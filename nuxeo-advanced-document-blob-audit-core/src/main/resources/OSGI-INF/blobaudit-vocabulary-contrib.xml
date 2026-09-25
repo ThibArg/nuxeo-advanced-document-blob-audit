@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.vocabulary">
+
+  <require>org.nuxeo.ecm.platform.audit.web.access.directories</require>
+
+  <extension target="org.nuxeo.ecm.directory.GenericDirectory" point="directories">
+    <documentation>
+      Shipping the i18n files is not enough: for blobContentModified to show up in the Web UI
+      "Performed Actions" filter, it must exist as a row of the eventTypes vocabulary.
+      dataLoadingPolicy=reject_duplicate keeps the platform rows untouched and only adds ours.
+    </documentation>
+    <directory name="eventTypes">
+      <dataFile>directories/eventtypes-blobaudit.csv</dataFile>
+      <dataLoadingPolicy>reject_duplicate</dataLoadingPolicy>
+    </directory>
+  </extension>
+
+</component>

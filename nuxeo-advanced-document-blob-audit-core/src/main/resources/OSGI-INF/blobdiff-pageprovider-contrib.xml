@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.pageproviders">
+
+  <extension target="org.nuxeo.ecm.platform.query.api.PageProviderService" point="providers">
+
+    <!-- Rebuilds the "list of diffs for this document" view without storing anything on it -->
+    <coreQueryPageProvider name="BLOB_DIFFS_FOR_DOCUMENT">
+      <pattern>
+        SELECT * FROM BlobDiff WHERE bdiff:sourceId = ? AND ecm:isTrashed = 0
+        ORDER BY bdiff:date DESC
+      </pattern>
+      <parameter>0</parameter>
+      <pageSize>20</pageSize>
+      <maxPageSize>100</maxPageSize>
+    </coreQueryPageProvider>
+
+    <!-- Retention purge: everything older than the given date -->
+    <coreQueryPageProvider name="BLOB_DIFFS_OLDER_THAN">
+      <pattern>
+        SELECT * FROM BlobDiff WHERE bdiff:date &lt; ? ORDER BY bdiff:date
+      </pattern>
+      <parameter>0</parameter>
+      <pageSize>100</pageSize>
+    </coreQueryPageProvider>
+
+  </extension>
+
+</component>

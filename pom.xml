@@ -1,0 +1,109 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.nuxeo</groupId>
+    <artifactId>nuxeo-parent</artifactId>
+    <version>2025.24</version>
+  </parent>
+
+  <groupId>org.nuxeo.advanced.document.blob.audit</groupId>
+  <artifactId>nuxeo-advanced-document-blob-audit-parent</artifactId>
+  <version>2025.1.0-SNAPSHOT</version>
+  <name>Nuxeo Advanced Document Blob Audit - Parent</name>
+  <description>
+    Audits what actually changed inside a binary (Excel, Word, PDF, text) and stores the diff in a
+    dedicated, access-restricted document. Standalone: does not depend on
+    nuxeo-advanced-document-audit.
+  </description>
+  <packaging>pom</packaging>
+
+  <properties>
+    <!-- Skip Nuxeo enforcer rules by default -->
+    <nuxeo.skip.enforcer>true</nuxeo.skip.enforcer>
+    <nuxeo.target.version>2025.*</nuxeo.target.version>
+    <pushReleaseChanges>false</pushReleaseChanges>
+  </properties>
+  <modules>
+    <module>nuxeo-advanced-document-blob-audit-core</module>
+    <module>nuxeo-advanced-document-blob-audit-package</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.nuxeo.advanced.document.blob.audit</groupId>
+        <artifactId>nuxeo-advanced-document-blob-audit-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.nuxeo.advanced.document.blob.audit</groupId>
+        <artifactId>nuxeo-advanced-document-blob-audit-package</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <repositories>
+    <repository>
+      <id>maven-public</id>
+      <url>https://packages.nuxeo.com/repository/maven-public/</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <updatePolicy>always</updatePolicy>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+    <repository>
+      <id>maven-private</id>
+      <url>https://packages.nuxeo.com/repository/maven-private/</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <updatePolicy>always</updatePolicy>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+  <pluginRepositories>
+    <pluginRepository>
+      <id>maven-public</id>
+      <url>https://packages.nuxeo.com/repository/maven-public/</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </pluginRepository>
+  </pluginRepositories>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-release-plugin</artifactId>
+        <version>3.1.1</version>
+        <configuration>
+          <projectVersionPolicyId>SemVerVersionPolicy</projectVersionPolicyId>
+          <tagNameFormat>@{project.version}</tagNameFormat>
+          <autoVersionSubmodules>true</autoVersionSubmodules>
+          <scmReleaseCommitComment>Release @{releaseLabel}</scmReleaseCommitComment>
+          <scmDevelopmentCommitComment>Post Release @{releaseLabel}</scmDevelopmentCommitComment>
+          <pushChanges>${pushReleaseChanges}</pushChanges>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>versions-maven-plugin</artifactId>
+        <version>2.18.0</version>
+        <configuration>
+          <ruleSet/>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

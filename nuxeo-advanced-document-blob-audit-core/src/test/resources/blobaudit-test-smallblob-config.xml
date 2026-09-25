@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.smallblob">
+
+  <require>org.nuxeo.audit.advanced.blob.test.config</require>
+
+  <!-- Overrides maxBlobSize only, to exercise the size guardrail on a tiny fixture. -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <maxBlobSize>512</maxBlobSize>
+      <maxLines>1000</maxLines>
+      <maxDiffEntries>500</maxDiffEntries>
+      <docTypes />
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+    </config>
+  </extension>
+
+</component>

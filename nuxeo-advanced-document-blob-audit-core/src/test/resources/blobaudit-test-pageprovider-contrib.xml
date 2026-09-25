@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.pageproviders">
+
+  <extension target="org.nuxeo.ecm.platform.query.api.PageProviderService" point="providers">
+
+    <!--
+      Audit page providers must use org.nuxeo.audit.provider.AuditPageProvider with NXQL syntax:
+      the legacy HQL provider was removed in LTS 2025.
+    -->
+    <genericPageProvider name="BLOBAUDIT_ENTRIES"
+                         class="org.nuxeo.audit.provider.AuditPageProvider">
+      <property name="coreSession">#{documentManager}</property>
+      <pattern>
+        SELECT * FROM LogEntry WHERE eventId = ? AND docUUID = ? ORDER BY eventDate DESC
+      </pattern>
+      <parameter>0</parameter>
+      <parameter>1</parameter>
+      <pageSize>50</pageSize>
+    </genericPageProvider>
+
+  </extension>
+
+</component>

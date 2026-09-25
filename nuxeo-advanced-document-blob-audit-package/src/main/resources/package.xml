@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<package type="addon"
+         name="nuxeo-advanced-document-blob-audit"
+         version="@VERSION@">
+  <title>Nuxeo Advanced Document Blob Audit</title>
+  <description>
+    Audits what actually changed inside a binary - Excel cell by cell, Word and PDF paragraph by
+    paragraph, text line by line - and stores the diff in a dedicated, access-restricted BlobDiff
+    document rather than in the audit log or on the source document.
+
+    Disabled by default. Enable and scope it through the "config" extension point of
+    org.nuxeo.audit.advanced.blob.BlobDiffComponent before using it in production: diffing binaries
+    is costly, and it copies business content into a document whose permissions differ from the
+    source.
+
+    Standalone: does not depend on nuxeo-advanced-document-audit.
+  </description>
+  <vendor>Hyland</vendor>
+  <vendor>Hyland</vendor>
+
+  <installer restart="true" />
+  <uninstaller restart="true" />
+  <!-- <hotreload-support>false</hotreload-support> -->
+  <!-- <require-terms-and-conditions-acceptance>false</require-terms-and-conditions-acceptance> -->
+  <!-- Nuxeo Validation: none | inprocess | primary_validation | nuxeo_certified -->
+  <nuxeo-validation>none</nuxeo-validation>
+  <!-- Production State: production_ready | testing | proto -->
+  <production-state>testing</production-state>
+  <supported>false</supported>
+  <platforms>
+    <platform>lts-@NUXEO_TARGET_VERSION@</platform>
+  </platforms>
+
+  <dependencies>
+    <package>nuxeo-web-ui</package>
+  </dependencies>
+  <!-- Conflicts with other packages -->
+  <!-- <conflicts> -->
+  <!-- <package>a-conflicting-package:1.0.0:1.0.0</package> -->
+  <!-- </conflicts> -->
+  <!-- Provides features of other packages -->
+  <!-- <provides> -->
+  <!-- <package>an-embedded-package:1.0.0:1.0.0</package> -->
+  <!-- </provides> -->
+  <license>Apache License, Version 2.0</license>
+  <license-url>https://www.apache.org/licenses/LICENSE-2.0</license-url>
+  <!-- Visibility: PRIVATE | MARKETPLACE | DEV | PUBLIC -->
+  <visibility>PUBLIC</visibility>
+
+</package>

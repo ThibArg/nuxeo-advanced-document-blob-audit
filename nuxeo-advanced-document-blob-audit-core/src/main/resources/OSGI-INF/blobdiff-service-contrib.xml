@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.BlobDiffComponent">
+
+  <implementation class="org.nuxeo.audit.advanced.blob.BlobDiffComponent" />
+
+  <service>
+    <provide interface="org.nuxeo.audit.advanced.blob.BlobDiffService" />
+  </service>
+
+  <extension-point name="config">
+    <object class="org.nuxeo.audit.advanced.blob.BlobDiffConfigDescriptor" />
+    <documentation>
+      Global switch and guardrails. Disabled by default on purpose: diffing binaries is costly and
+      copies business content into a separate, differently secured document.
+    </documentation>
+  </extension-point>
+
+  <extension-point name="extractors">
+    <object class="org.nuxeo.audit.advanced.blob.ExtractorDescriptor" />
+    <documentation>
+      Registers a BlobTextExtractor for a set of mime types. Lowest "order" wins, so a specialised
+      extractor overrides a catch-all one. Supporting a new format means contributing here.
+    </documentation>
+  </extension-point>
+
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="false">
+      <maxBlobSize>10485760</maxBlobSize>
+      <!--
+        maxLines bounds running time, which stays O(n*m) even with Hirschberg. Measured on JDK 17,
+        one paragraph modified: 304 ms at 4900 lines, ~1.1 s at 10000, ~4.6 s at 20000.
+        A 200-page Word document extracts to roughly 5000 paragraphs.
+      -->
+      <maxLines>10000</maxLines>
+      <maxDiffEntries>5000</maxDiffEntries>
+      <!-- Empty docTypes means "every type". Narrow this down in production. -->
+      <docTypes />
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+    </config>
+  </extension>
+
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+
+    <!-- Spreadsheets: cell-level, keyed diff. The most valuable case. -->
+    <extractor name="spreadsheet" order="10"
+               class="org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</mimeType>
+        <mimeType>application/vnd.ms-excel</mimeType>
+        <mimeType>application/vnd.ms-excel.sheet.macroenabled.12</mimeType>
+      </mimeTypes>
+      <property name="useFormulas">true</property>
+    </extractor>
+
+    <!-- Plain text family: cheapest and most accurate. -->
+    <extractor name="plainText" order="20"
+               class="org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor">
+      <mimeTypes>
+        <mimeType>text/*</mimeType>
+        <mimeType>application/json</mimeType>
+        <mimeType>application/xml</mimeType>
+        <mimeType>application/x-yaml</mimeType>
+        <mimeType>application/javascript</mimeType>
+        <mimeType>application/sql</mimeType>
+      </mimeTypes>
+      <property name="trimLines">true</property>
+      <property name="skipBlankLines">true</property>
+    </extractor>
+
+    <!-- Word, PDF, ODT, RTF... via the platform any2text converter: no new code. -->
+    <extractor name="converter" order="90"
+               class="org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.wordprocessingml.document</mimeType>
+        <mimeType>application/msword</mimeType>
+        <mimeType>application/vnd.oasis.opendocument.text</mimeType>
+        <mimeType>application/rtf</mimeType>
+        <mimeType>application/pdf</mimeType>
+      </mimeTypes>
+      <property name="converter">any2text</property>
+      <property name="minLineLength">1</property>
+    </extractor>
+
+  </extension>
+
+</component>
