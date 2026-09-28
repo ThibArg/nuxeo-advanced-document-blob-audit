@@ -7,7 +7,7 @@
 > 
 > Once ready it will forked to Nuxeo Presales Github Sandboxes.
 
-Audit **what actually changed inside a file**: Excel spreadsheets cell by cell, Word documents and PDFs paragraph by paragraph, and text formats line by line.
+Audit **what actually changed inside a file**: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents and PDFs paragraph by paragraph, and text formats line by line.
 
 A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
 
@@ -42,7 +42,8 @@ No external diff library is required.
 |-----------|----------|------|---------|
 | SpreadsheetExtractor | xlsx, xlsm, xls | keyed, cell-based | Excellent — Sheet1!B12: 100 → 120 |
 | PlainTextExtractor | txt, json, xml, csv, yaml, source files | positional, line-based | Excellent |
-| ConverterTextExtractor | docx, doc, odt, rtf, **pdf** | positional, paragraph-based | Good (Word), indicative (PDF) |
+| PresentationExtractor | pptx, pptm, ppsx, potx | positional, paragraph-based, slide-aware | Good — text boxes, tables, notes |
+| ConverterTextExtractor | docx, doc, odt, rtf, **pdf**, ppt (legacy) | positional, paragraph-based | Good (Word), indicative (PDF) |
 
 `ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`.
 
@@ -146,7 +147,7 @@ In production, restrict the feature to specific document types. Computing diffs 
 
 This version supports values from `0` to `1`. At component startup, an invalid value is clamped to the nearest supported bound and a `WARN` is logged. For example, `-1` becomes `0`, while `2` becomes `1`. Future versions may raise the maximum when richer image-analysis modes are implemented.
 
-At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>`, and `pdf:page:<page>:image:<ordinal>`. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
+At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>`, and `pdf:page:<page>:image:<ordinal>` and `powerpoint:slide:<slide>:image:<media-part>` (suffixed `#2`, `#3`… when the same image is placed several times on one slide). For PowerPoint, only pictures placed on slides (including inside groups) are inventoried; layouts/masters and linked pictures are ignored. Legacy `.ppt` gets text diff only. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
 
 ## Build
 
@@ -196,6 +197,40 @@ Without the route, the audit entry is silently ignored.
 
 Without the vocabulary entry, it does not appear in Web UI filters.
 
+## Known Limitations
+
+### Text Extraction
+- **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared: restyling a Word paragraph or a PowerPoint text box produces no diff.
+- **Scanned PDFs / image-only content.** Without OCR, nothing is extracted: status stays `ok` with an empty diff.
+- **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
+- **Positional counters are not an exact edit script.** A removal immediately followed by an addition is coalesced into a modification, so fully rewritten blocks report a mix of removals, additions and modifications (totals remain consistent).
+- **Quadratic running time.** Hirschberg keeps memory linear, but time stays O(n × m): `maxLines` must remain bounded.
+- **Truncation.** Beyond `maxLines` (extraction) or `maxDiffEntries` (reporting), the diff is partial and flagged `truncated`.
+
+### Excel
+- **Row/column insertions inflate the diff.** Keys are absolute cell references, so inserting a row shifts every cell below it (see `TestExcelDiff#testInsertingARowShiftsCellsAndInflatesTheDiff`).
+- **Renaming a sheet** invalidates all its keys: every cell is reported as removed then added.
+- Formulas are compared as formulas (default), not on their computed value.
+
+### PowerPoint
+- **Only OOXML is analyzed in depth** (`.pptx`, `.pptm`, `.ppsx`, `.potx`). Legacy binary `.ppt` falls back to `any2text`: flat text, no slide structure, no image inventory.
+- **Not extracted:** SmartArt, charts, embedded OLE objects, text inherited from layouts/masters, comments, alt-text, hidden-slide status.
+- **Slide moves** are reported as a removal plus an addition of the same content.
+- **Slide titles** come from the title placeholder; slides without one get a bare `## Slide` marker, which may lower alignment quality on decks with many untitled slides.
+
+### Images (`imageAnalysisLevel=1`)
+- **Digest-based only.** Detects additions, removals and byte-level replacements; no OCR, no visual/pixel comparison. Re-encoding an identical-looking image is reported as a change.
+- **Resizing, moving or cropping** an image without changing its bytes is not detected (except Excel, where the anchor is part of the key).
+- **Position-sensitive keys.** PowerPoint keys include the slide number and PDF keys the page number and ordinal: inserting a slide/page before an image reports it as removed + added.
+- **Word** keys are media part names: the same image used in several places appears once.
+- **Linked (external) images** and images in PowerPoint layouts/masters are ignored.
+- Image extraction failure silently falls back to the text-only result (logged as WARN).
+
+### Security and Operations
+- **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
+- **No retention job is shipped.** `BLOB_DIFFS_OLDER_THAN` is provided, but cleanup must be scheduled by the integrator.
+- `blobContentModified` must be declared both in the audit route and in the `eventTypes` vocabulary, or entries are lost / hidden.
+
 ## Tests
 
 Run all tests:
@@ -207,7 +242,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test
 Run only the fast tests (without a Nuxeo runtime):
 
 ```bash
-mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,TestTextDifferScaling,TestExcelDiff,TestPlainTextExtractor,TestExtractorSelection'
+mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,TestTextDifferScaling,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection'
 ```
 
 | Class | Runtime? | Purpose |
@@ -217,6 +252,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestExcelDiff | No | Complete Excel processing chain |
 | TestPlainTextExtractor | No | txt / json / xml / csv |
 | TestExtractorSelection | No | MIME type matching |
+| TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobAuditIntegration | Yes | End-to-end validation |

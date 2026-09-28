@@ -46,6 +46,7 @@ public class BlobAuditTestHelper {
     public static final String XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     public static final String DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    public static final String PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
     private BlobAuditTestHelper() {
         // utility class

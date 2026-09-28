@@ -56,6 +56,19 @@
       <property name="useFormulas">true</property>
     </extractor>
 
+    <!-- PowerPoint OOXML: slide-aware, paragraph-level positional diff (Apache POI XSLF). -->
+    <extractor name="presentation" order="15"
+               class="org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.presentation</mimeType>
+        <mimeType>application/vnd.ms-powerpoint.presentation.macroenabled.12</mimeType>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.slideshow</mimeType>
+        <mimeType>application/vnd.ms-powerpoint.slideshow.macroenabled.12</mimeType>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.template</mimeType>
+      </mimeTypes>
+      <property name="includeNotes">true</property>
+    </extractor>
+
     <!-- Plain text family: cheapest and most accurate. -->
     <extractor name="plainText" order="20"
                class="org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor">
@@ -80,6 +93,8 @@
         <mimeType>application/vnd.oasis.opendocument.text</mimeType>
         <mimeType>application/rtf</mimeType>
         <mimeType>application/pdf</mimeType>
+        <!-- legacy binary .ppt: text only, no image inventory -->
+        <mimeType>application/vnd.ms-powerpoint</mimeType>
       </mimeTypes>
       <property name="converter">any2text</property>
       <property name="minLineLength">1</property>

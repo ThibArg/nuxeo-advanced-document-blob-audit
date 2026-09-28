@@ -30,6 +30,12 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellReference;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFGroupShape;
+import org.apache.poi.xslf.usermodel.XSLFPictureData;
+import org.apache.poi.xslf.usermodel.XSLFPictureShape;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.ecm.core.api.Blob;
@@ -44,6 +50,9 @@ public class ImageInventoryExtractor {
         }
         if (mime.contains("spreadsheetml") || mime.contains("ms-excel")) {
             return extractSpreadsheet(blob);
+        }
+        if (mime.contains("presentationml")) {
+            return extractPresentation(blob);
         }
         if ("application/pdf".equals(mime)) {
             return extractPdf(blob);
@@ -130,5 +139,42 @@ public class ImageInventoryExtractor {
 
     protected String digest(byte[] bytes) throws Exception {
         return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    /**
+     * PowerPoint: one entry per picture placed on a slide, keyed by
+     * {@code powerpoint:slide:<n>:image:<media-part>}. The same media part used twice on one slide
+     * gets a {@code #2}, {@code #3}... suffix so no placement is lost. Pictures inside group shapes
+     * are included; layouts and masters are not (they belong to the template, not the content).
+     */
+    protected DiffableContent extractPresentation(Blob blob) throws Exception {
+        List<ContentLine> images = new ArrayList<>();
+        try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
+            int slideNumber = 0;
+            for (XSLFSlide slide : show.getSlides()) {
+                slideNumber++;
+                java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+                collectSlidePictures(slide.getShapes(), "powerpoint:slide:" + slideNumber + ":image:", images, seen);
+            }
+        }
+        return DiffableContent.keyed(images, false);
+    }
+
+    protected void collectSlidePictures(List<? extends XSLFShape> shapes, String prefix, List<ContentLine> images,
+            java.util.Map<String, Integer> seen) throws Exception {
+        for (XSLFShape shape : shapes) {
+            if (shape instanceof XSLFGroupShape group) {
+                collectSlidePictures(group.getShapes(), prefix, images, seen);
+            } else if (shape instanceof XSLFPictureShape picture) {
+                XSLFPictureData data = picture.getPictureData();
+                if (data == null) {
+                    continue; // linked (external) picture: no embedded bytes to digest
+                }
+                String name = data.getFileName();
+                int count = seen.merge(name, 1, Integer::sum);
+                String key = prefix + name + (count > 1 ? "#" + count : "");
+                images.add(ContentLine.of(key, digest(data.getData())));
+            }
+        }
     }
 }
