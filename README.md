@@ -44,7 +44,7 @@ No external diff library is required.
 | PlainTextExtractor | txt, json, xml, csv, yaml, source files | positional, line-based | Excellent |
 | ConverterTextExtractor | docx, doc, odt, rtf, **pdf** | positional, paragraph-based | Good (Word), indicative (PDF) |
 
-`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`.
+`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). The current contribution enables Word, PDF, OpenDocument Text, and RTF without format-specific extraction code. Additional Tika-recognized formats, such as PowerPoint, can be enabled by contributing their MIME types to this extractor.
 
 ### Adding a Format
 
@@ -150,13 +150,27 @@ nuxeo-advanced-document-blob-audit-package/target/
 
 ## Points of Attention
 
-### Retrieving the Previous Binary
+### Retrieving the Exact Binary Pair
 
-`BlobDiffWork` does not transport the old blob itself, only its storage key, which is resolved again through `BlobManager`.
+`BlobDiffWork` does not transport `Blob` instances directly. When the work is scheduled, both sides of the comparison are frozen using their blob provider identifiers, storage keys, filenames, MIME types, digests, and lengths.
 
-This assumes binary garbage collection is not overly aggressive.
+The new blob is explicitly written to its `BlobProvider` before the work is queued. The work therefore never reloads the current blob property from the source document. This guarantees that a queued comparison always uses the exact pair that triggered the event, even if the source document is modified again before the asynchronous work starts.
 
-This is the most fragile architectural aspect of the solution. Comparing the current version against version N-1 would be a more robust approach.
+For example:
+
+```text
+v1 -> v2  schedules work #1
+v2 -> v3  schedules work #2
+
+work #1 compares v1 -> v2
+work #2 compares v2 -> v3
+```
+
+Work #1 cannot accidentally compare `v1 -> v3`.
+
+Both storage keys are resolved through `BlobManager` during work execution. The remaining dependency is that both providers and binaries stay available until the queued work completes. If either frozen blob can no longer be resolved, the persistent `BlobDiff` is created with an `error` status instead of storing a misleading diff.
+
+Writing the new blob before commit may leave an unreferenced binary when the user transaction is rolled back. Such a binary is not referenced by a document and is expected to be handled by the regular binary garbage-collection process.
 
 ### Confidentiality
 
