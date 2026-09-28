@@ -15,7 +15,6 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -31,7 +30,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.nuxeo.ecm.core.api.Blob;
-import org.nuxeo.ecm.core.api.Blobs;
+import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 
 /**
  * Fixture builders shared by the tests.
@@ -53,14 +52,14 @@ public class BlobAuditTestHelper {
     }
 
     public static Blob blob(byte[] bytes, String mimeType, String filename) throws IOException {
-        Blob blob = Blobs.createBlob(new ByteArrayInputStream(bytes));
+        Blob blob = new ByteArrayBlob(bytes);
         blob.setMimeType(mimeType);
         blob.setFilename(filename);
         return blob;
     }
 
     public static Blob textBlob(String content, String mimeType, String filename) throws IOException {
-        Blob blob = Blobs.createBlob(content, mimeType, StandardCharsets.UTF_8.name());
+        Blob blob = new ByteArrayBlob(content.getBytes(StandardCharsets.UTF_8), mimeType, StandardCharsets.UTF_8.name());
         blob.setFilename(filename);
         return blob;
     }

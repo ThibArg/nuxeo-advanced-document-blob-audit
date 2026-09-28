@@ -38,12 +38,9 @@ import org.nuxeo.runtime.api.Framework;
 /**
  * Asynchronous side of the blob diff: extraction and comparison never run in the user transaction.
  * <p>
- * <b>Known architectural weakness.</b> The previous blob is not passed by value - a {@code Blob} is
- * not a safe work payload - only its provider id and storage key are, and the blob is re-resolved
- * at execution time. This works because the binary store does not delete a binary as soon as it is
- * dereferenced; orphans are only removed by the binaries GC. If your GC is scheduled aggressively,
- * a diff can be lost (recorded with an {@code error} status). The robust alternative is to diff
- * version N-1 against the current version instead.
+ * Both sides are frozen by provider id and storage key when the work is scheduled. The work never
+ * rereads the blob property from the current document, because a later save could otherwise make a
+ * queued v1 -> v2 work compare v1 -> v3.
  *
  * @since 1.0
  */
@@ -67,6 +64,18 @@ public class BlobDiffWork extends AbstractWork {
 
     protected final long oldLength;
 
+    protected final String newBlobProviderId;
+
+    protected final String newBlobKey;
+
+    protected final String newFilename;
+
+    protected final String newMimeType;
+
+    protected final String newDigest;
+
+    protected final long newLength;
+
     protected final String principal;
 
     protected final long eventTime;
@@ -75,8 +84,9 @@ public class BlobDiffWork extends AbstractWork {
 
     public BlobDiffWork(String repositoryName, String docId, String xpath, String oldBlobProviderId,
             String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest, long oldLength,
-            String principal, long eventTime, String correlationId) {
-        super(repositoryName + ':' + docId + ':' + xpath + ':' + eventTime + ":blobDiff");
+            String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
+            String newDigest, long newLength, String principal, long eventTime, String correlationId) {
+        super(repositoryName + ':' + docId + ':' + xpath + ':' + correlationId + ":blobDiff");
         setDocument(repositoryName, docId);
         this.xpath = xpath;
         this.oldBlobProviderId = oldBlobProviderId;
@@ -85,6 +95,12 @@ public class BlobDiffWork extends AbstractWork {
         this.oldMimeType = oldMimeType;
         this.oldDigest = oldDigest;
         this.oldLength = oldLength;
+        this.newBlobProviderId = newBlobProviderId;
+        this.newBlobKey = newBlobKey;
+        this.newFilename = newFilename;
+        this.newMimeType = newMimeType;
+        this.newDigest = newDigest;
+        this.newLength = newLength;
         this.principal = principal;
         this.eventTime = eventTime;
         this.correlationId = correlationId;
@@ -103,20 +119,20 @@ public class BlobDiffWork extends AbstractWork {
     @Override
     public void work() {
         setStatus("Diffing");
-        // Privileged session: by design the modifying user has no write access to the diff
-        // container, and may not even be allowed to read it.
         openSystemSession();
-        DocumentModel source = session.getDocument(new IdRef(docId));
-        Blob newBlob = (Blob) source.getPropertyValue(xpath);
-        Blob oldBlob = resolveOldBlob();
 
+        DocumentModel source = session.getDocument(new IdRef(docId));
+        Blob oldBlob = resolveBlob(oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest, oldLength,
+                "previous");
+        Blob newBlob = resolveBlob(newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength,
+                "new");
         BlobDiffService service = Framework.getService(BlobDiffService.class);
+
         DiffResult result = null;
         String status = STATUS_OK;
-        if (oldBlob == null) {
-            // The previous binary is gone (aggressive binaries GC, provider reconfiguration...).
-            // Recorded rather than silently dropped: an audit trail must say when it failed.
-            log.warn("Previous blob {} is no longer readable, cannot diff {} ({})", oldBlobKey, docId, xpath);
+        if (oldBlob == null || newBlob == null) {
+            log.warn("Frozen blob pair ({}, {}) is no longer fully readable, cannot diff {} ({})", oldBlobKey,
+                    newBlobKey, docId, xpath);
             status = STATUS_ERROR;
         } else {
             try {
@@ -136,32 +152,27 @@ public class BlobDiffWork extends AbstractWork {
         setStatus("Done");
     }
 
-    /**
-     * Re-hydrates the previous blob from its storage key, through its blob provider.
-     * <p>
-     * {@code BlobManager} has no {@code readBlob(BlobInfo, String)}: reading from a key goes
-     * through {@link BlobProvider#readBlob(BlobInfo)}. The {@code BlobInfo} members are public
-     * fields, not setters.
-     */
-    protected Blob resolveOldBlob() {
-        if (oldBlobKey == null) {
+    /** Re-hydrates one frozen side of the comparison through its blob provider. */
+    protected Blob resolveBlob(String providerId, String key, String filename, String mimeType, String digest,
+            long length, String side) {
+        if (key == null) {
             return null;
         }
         try {
-            BlobProvider provider = lookupProvider(oldBlobProviderId);
+            BlobProvider provider = lookupProvider(providerId);
             if (provider == null) {
-                log.warn("No blob provider {} to resolve previous blob {}", oldBlobProviderId, oldBlobKey);
+                log.warn("No blob provider {} to resolve {} blob {}", providerId, side, key);
                 return null;
             }
             BlobInfo info = new BlobInfo();
-            info.key = oldBlobKey;
-            info.filename = oldFilename;
-            info.mimeType = oldMimeType;
-            info.digest = oldDigest;
-            info.length = Long.valueOf(oldLength);
+            info.key = key;
+            info.filename = filename;
+            info.mimeType = mimeType;
+            info.digest = digest;
+            info.length = Long.valueOf(length);
             return provider.readBlob(info);
-        } catch (Exception e) { // NOSONAR - a missing previous binary must not fail the work
-            log.warn("Cannot resolve previous blob {} from provider {}", oldBlobKey, oldBlobProviderId, e);
+        } catch (Exception e) { // NOSONAR - a missing frozen binary must not fail the work
+            log.warn("Cannot resolve {} blob {} from provider {}", side, key, providerId, e);
             return null;
         }
     }
