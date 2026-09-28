@@ -181,6 +181,10 @@ For sensitive deployments (SecNumCloud, personal data, regulated environments), 
 
 Without OCR, text extraction returns nothing. The status remains `ok` but the diff is empty.
 
+### PowerPoint Diff
+
+`PresentationExtractor` (Apache POI XSLF, already provided by the platform) emits one `## Slide: <title>` marker per slide, then each text paragraph in drawing order (group shapes included), table rows as `[table] a | b | c`, and speaker notes as `[notes] ...` (disable with the `includeNotes=false` extractor property). Slide numbers are deliberately **not** part of the text: inserting or deleting a slide yields a compact diff instead of shifting every following slide. Image keys, on the other hand, do carry the slide number (see Known Limitations).
+
 ### Excel Row Insertions
 
 Because keys are absolute cell references (`Sheet1!B12`), inserting a row shifts all cells below it and artificially inflates the diff.
