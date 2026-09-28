@@ -44,7 +44,7 @@ No external diff library is required.
 | PlainTextExtractor | txt, json, xml, csv, yaml, source files | positional, line-based | Excellent |
 | ConverterTextExtractor | docx, doc, odt, rtf, **pdf** | positional, paragraph-based | Good (Word), indicative (PDF) |
 
-`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). The current contribution enables Word, PDF, OpenDocument Text, and RTF without format-specific extraction code. Additional Tika-recognized formats, such as PowerPoint, can be enabled by contributing their MIME types to this extractor.
+`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`.
 
 ### Adding a Format
 
@@ -124,6 +124,7 @@ Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
     <maxBlobSize>10485760</maxBlobSize>
     <maxLines>10000</maxLines>
     <maxDiffEntries>5000</maxDiffEntries>
+    <imageAnalysisLevel>0</imageAnalysisLevel>
     <docTypes>
       <docType>Contract</docType>
     </docTypes>
@@ -135,6 +136,17 @@ Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
 ```
 
 In production, restrict the feature to specific document types. Computing diffs for every binary in a repository is rarely worth the cost.
+
+#### Image Analysis Level
+
+`imageAnalysisLevel` is optional and defaults to `0` when omitted.
+
+- `0`: no image analysis. This preserves the current text/cell-only behavior and adds no image-processing cost.
+- `1`: reserved for digest-based image inventory, allowing extractors to report image additions, removals, and replacements. The configuration contract is available now; image extraction itself is implemented per format in subsequent changes.
+
+This version supports values from `0` to `1`. At component startup, an invalid value is clamped to the nearest supported bound and a `WARN` is logged. For example, `-1` becomes `0`, while `2` becomes `1`. Future versions may raise the maximum when richer image-analysis modes are implemented.
+
+At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>`, and `pdf:page:<page>:image:<ordinal>`. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
 
 ## Build
 
@@ -156,21 +168,7 @@ nuxeo-advanced-document-blob-audit-package/target/
 
 The new blob is explicitly written to its `BlobProvider` before the work is queued. The work therefore never reloads the current blob property from the source document. This guarantees that a queued comparison always uses the exact pair that triggered the event, even if the source document is modified again before the asynchronous work starts.
 
-For example:
-
-```text
-v1 -> v2  schedules work #1
-v2 -> v3  schedules work #2
-
-work #1 compares v1 -> v2
-work #2 compares v2 -> v3
-```
-
-Work #1 cannot accidentally compare `v1 -> v3`.
-
-Both storage keys are resolved through `BlobManager` during work execution. The remaining dependency is that both providers and binaries stay available until the queued work completes. If either frozen blob can no longer be resolved, the persistent `BlobDiff` is created with an `error` status instead of storing a misleading diff.
-
-Writing the new blob before commit may leave an unreferenced binary when the user transaction is rolled back. Such a binary is not referenced by a document and is expected to be handled by the regular binary garbage-collection process.
+Both storage keys are resolved through `BlobManager` during work execution. If either frozen blob can no longer be resolved, the persistent `BlobDiff` is created with an `error` status instead of storing a misleading diff.
 
 ### Confidentiality
 

@@ -51,6 +51,7 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.api.CoreSession;
@@ -87,6 +88,15 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     @Override
     public void start(ComponentContext context) {
         super.start(context);
+        BlobDiffConfigDescriptor config = getConfig();
+        int configuredImageAnalysisLevel = config.getImageAnalysisLevel();
+        int imageAnalysisLevel = config.normalizeImageAnalysisLevel();
+        if (configuredImageAnalysisLevel != imageAnalysisLevel) {
+            log.warn("Invalid imageAnalysisLevel {}: using supported value {} (range {}..{})",
+                    configuredImageAnalysisLevel, imageAnalysisLevel,
+                    BlobDiffConfigDescriptor.MIN_IMAGE_ANALYSIS_LEVEL,
+                    BlobDiffConfigDescriptor.MAX_IMAGE_ANALYSIS_LEVEL);
+        }
         List<ResolvedExtractor> resolved = new ArrayList<>();
         for (ExtractorDescriptor descriptor : this.<ExtractorDescriptor> getDescriptors(XP_EXTRACTORS)) {
             if (!descriptor.isEnabled()) {
@@ -167,7 +177,28 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (oldContent == null || newContent == null) {
             return null;
         }
-        return new TextDiffer(getConfig().getMaxDiffEntries()).diff(oldContent, newContent);
+        TextDiffer differ = new TextDiffer(getConfig().getMaxDiffEntries());
+        DiffResult textResult = differ.diff(oldContent, newContent);
+        if (getConfig().getImageAnalysisLevel() == 0) {
+            return textResult;
+        }
+        try {
+            ImageInventoryExtractor imageExtractor = new ImageInventoryExtractor();
+            DiffResult imageResult = differ.diff(imageExtractor.extract(oldBlob), imageExtractor.extract(newBlob));
+            return merge(textResult, imageResult);
+        } catch (Exception e) {
+            log.warn("Image inventory extraction failed for mime type {}", newBlob.getMimeType(), e);
+            return textResult;
+        }
+    }
+
+    protected DiffResult merge(DiffResult text, DiffResult images) {
+        String unified = text.unified();
+        if (!images.unified().isEmpty()) {
+            unified += (unified.isEmpty() ? "" : "\n") + "# Images\n" + images.unified();
+        }
+        return new DiffResult(text.added() + images.added(), text.removed() + images.removed(),
+                text.changed() + images.changed(), text.truncated() || images.truncated(), unified);
     }
 
     /* ------------------------------------------------------------- persistence */

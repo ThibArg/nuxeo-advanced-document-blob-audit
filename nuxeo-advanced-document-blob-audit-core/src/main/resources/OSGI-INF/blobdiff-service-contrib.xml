@@ -33,6 +33,8 @@
       -->
       <maxLines>10000</maxLines>
       <maxDiffEntries>5000</maxDiffEntries>
+      <!-- Optional; omitted is equivalent to 0. Level 1 support is implemented separately. -->
+      <imageAnalysisLevel>0</imageAnalysisLevel>
       <!-- Empty docTypes means "every type". Narrow this down in production. -->
       <docTypes />
       <xpaths>

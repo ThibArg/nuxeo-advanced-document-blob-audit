@@ -56,6 +56,17 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     @XNode("maxDiffEntries")
     protected int maxDiffEntries = 5000;
 
+    /**
+     * Image analysis level. Level 0 disables image processing; level 1 enables digest-based image
+     * inventory. Higher levels are reserved for future, more expensive analysis modes.
+     */
+    @XNode("imageAnalysisLevel")
+    protected int imageAnalysisLevel = 0;
+
+    public static final int MIN_IMAGE_ANALYSIS_LEVEL = 0;
+
+    public static final int MAX_IMAGE_ANALYSIS_LEVEL = 1;
+
     /** Empty means "every document type". */
     @XNodeList(value = "docTypes/docType", type = ArrayList.class, componentType = String.class)
     protected List<String> docTypes = new ArrayList<>();
@@ -83,6 +94,17 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public int getMaxDiffEntries() {
         return maxDiffEntries;
+    }
+
+    public int getImageAnalysisLevel() {
+        return imageAnalysisLevel;
+    }
+
+    /** Clamps the configured image analysis level to the range supported by this version. */
+    public int normalizeImageAnalysisLevel() {
+        imageAnalysisLevel = Math.max(MIN_IMAGE_ANALYSIS_LEVEL,
+                Math.min(MAX_IMAGE_ANALYSIS_LEVEL, imageAnalysisLevel));
+        return imageAnalysisLevel;
     }
 
     public List<String> getDocTypes() {
