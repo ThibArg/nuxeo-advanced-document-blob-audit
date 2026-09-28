@@ -5,13 +5,27 @@
 
   <extension target="org.nuxeo.audit.service.AuditComponent" point="routes">
     <documentation>
-      In LTS 2025 the AuditRouter silently drops entries whose eventId is not declared in a route.
+      Declaring the event in a route registers it as auditable: BlobModificationListener fires
+      blobContentModified and the platform pipeline (AuditRouter, audit/audit stream) writes the
+      entry. Without this route the event is simply not audited.
       Keep this in sync with BlobAuditConstants.EVENT_BLOB_MODIFIED.
     </documentation>
     <route name="advanced-document-blob-audit">
       <backend name="default" />
       <event name="blobContentModified" />
     </route>
+  </extension>
+
+  <extension target="org.nuxeo.audit.service.AuditComponent" point="extendedInfo">
+    <documentation>
+      Maps the event context properties set by BlobModificationListener#buildAuditEvent to the
+      extended infos of the log entry. Keys must match BlobAuditConstants.EXT_*.
+    </documentation>
+    <extendedInfo event="blobContentModified" key="xpath" expression="${message.properties.xpath}" />
+    <extendedInfo event="blobContentModified" key="oldFilename" expression="${message.properties.oldFilename}" />
+    <extendedInfo event="blobContentModified" key="newFilename" expression="${message.properties.newFilename}" />
+    <extendedInfo event="blobContentModified" key="diffCorrelationId"
+      expression="${message.properties.diffCorrelationId}" />
   </extension>
 
 </component>

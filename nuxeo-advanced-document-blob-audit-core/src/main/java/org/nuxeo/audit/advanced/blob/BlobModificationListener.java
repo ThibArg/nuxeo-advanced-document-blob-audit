@@ -24,13 +24,10 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Date;
 import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.nuxeo.audit.api.LogEntry;
-import org.nuxeo.audit.service.AuditBackend;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
@@ -39,6 +36,7 @@ import org.nuxeo.ecm.core.api.event.DocumentEventTypes;
 import org.nuxeo.ecm.core.api.model.Property;
 import org.nuxeo.ecm.core.event.Event;
 import org.nuxeo.ecm.core.event.EventListener;
+import org.nuxeo.ecm.core.event.EventService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.core.schema.types.SimpleTypeImpl;
 import org.nuxeo.ecm.core.schema.types.Type;
@@ -59,10 +57,16 @@ import org.nuxeo.runtime.api.Framework;
  * The listener itself stays cheap. It compares digests through {@link BlobDiffTrigger} and writes
  * one small audit entry; extraction and comparison happen later, in an asynchronous work.
  * <p>
- * <b>LTS 2025 audit API.</b> Entries are written through {@link AuditBackend}. There is no
- * {@code AuditLogger} in the {@code org.nuxeo.audit.api} package: {@code AuditAdmin},
- * {@code AuditLogger}, {@code AuditReader} and {@code Logs} were all replaced by
- * {@code AuditBackend}.
+ * <b>LTS 2025 audit API (2025.16+).</b> The listener does <b>not</b> write audit entries itself:
+ * {@code AuditBackend#addLogEntries} is deprecated since 2025.16. Instead it fires a
+ * {@code blobContentModified} Nuxeo event; that event is declared in a route of the
+ * {@code routes} extension point, so the platform audit pipeline (StreamAuditEventListener,
+ * AuditRouter, audit/audit stream, StreamAuditWriter) builds the {@code LogEntry} and writes it to
+ * every backend whose route matches. The extended infos are mapped from the event context
+ * properties through the {@code extendedInfo} extension point (see blobaudit-audit-contrib.xml).
+ * <p>
+ * Side benefit: the event is bundled with the user transaction, so a rolled-back save produces no
+ * audit entry.
  *
  * @since 1.0
  */
@@ -107,7 +111,7 @@ public class BlobModificationListener implements EventListener {
             return;
         }
 
-        List<LogEntry> entries = new ArrayList<>();
+        EventService eventService = Framework.getService(EventService.class);
         for (String xpath : collectDirtyBlobXPaths(doc, service)) {
             Blob newBlob = safeGetBlob(doc, xpath);
             Blob oldBlob = safeGetBlob(previous, xpath);
@@ -118,11 +122,7 @@ public class BlobModificationListener implements EventListener {
                 // Nothing worth diffing: unchanged bytes, rename only, unsupported type, too large.
                 continue;
             }
-            entries.add(buildEntry(doc, session, xpath, oldBlob, newBlob, event.getTime(), correlationId));
-        }
-
-        if (!entries.isEmpty()) {
-            Framework.getService(AuditBackend.class).addLogEntries(entries);
+            eventService.fireEvent(buildAuditEvent(doc, session, xpath, oldBlob, newBlob, correlationId));
         }
     }
 
@@ -214,27 +214,30 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * Builds the audit entry. It carries <b>no business content</b>: only the xpath, the filenames
-     * and the correlation id pointing at the {@code BlobDiff} document created asynchronously.
+     * Builds the {@code blobContentModified} event from which the audit pipeline derives the log
+     * entry. It carries <b>no business content</b>: only the xpath, the filenames and the correlation
+     * id pointing at the {@code BlobDiff} document created asynchronously.
+     * <p>
+     * Standard fields (docUUID, docPath, docType, docLifeCycle, principalName, repositoryId,
+     * eventDate) are filled by the platform from the {@link DocumentEventContext}; category and
+     * comment come from the {@code category} / {@code comment} context properties. The property
+     * keys below are the ones read by the {@code extendedInfo} contributions.
      */
-    protected LogEntry buildEntry(DocumentModel doc, CoreSession session, String xpath, Blob oldBlob, Blob newBlob,
-            long eventTime, String correlationId) {
-        String oldFilename = oldBlob != null ? oldBlob.getFilename() : null;
-        String newFilename = newBlob != null ? newBlob.getFilename() : null;
-        return LogEntry.builder(EVENT_BLOB_MODIFIED, new Date(eventTime))
-                       .category(AUDIT_CATEGORY)
-                       .docUUID(doc.getId())
-                       .docPath(doc.getPathAsString())
-                       .docType(doc.getType())
-                       .docLifeCycle(doc.getCurrentLifeCycleState())
-                       .principalName(session.getPrincipal().getName())
-                       .repositoryId(doc.getRepositoryName())
-                       .comment(xpath + " : binary content modified")
-                       .extended(EXT_XPATH, xpath)
-                       .extended(EXT_OLD_FILENAME, oldFilename)
-                       .extended(EXT_NEW_FILENAME, newFilename)
-                       .extended(EXT_CORRELATION_ID, correlationId)
-                       .build();
+    protected Event buildAuditEvent(DocumentModel doc, CoreSession session, String xpath, Blob oldBlob,
+            Blob newBlob, String correlationId) {
+        DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), doc);
+        ctx.setCategory(AUDIT_CATEGORY);
+        ctx.setComment(xpath + " : binary content modified");
+        ctx.setProperty(EXT_XPATH, xpath);
+        ctx.setProperty(EXT_OLD_FILENAME, filenameOf(oldBlob));
+        ctx.setProperty(EXT_NEW_FILENAME, filenameOf(newBlob));
+        ctx.setProperty(EXT_CORRELATION_ID, correlationId);
+        return ctx.newEvent(EVENT_BLOB_MODIFIED);
+    }
+
+    /** Empty string rather than null: keeps the EL mapping of the extended infos null-safe. */
+    protected String filenameOf(Blob blob) {
+        return blob != null && blob.getFilename() != null ? blob.getFilename() : "";
     }
 
     /** Strips the leading slash that {@code Property#getXPath()} returns for top level properties. */
