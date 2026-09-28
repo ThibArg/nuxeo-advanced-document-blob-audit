@@ -75,11 +75,15 @@ public class BlobAuditConstants {
     public static final String CONTAINER_TYPE = "Folder";
 
     /**
-     * Group granted read access on the diff container. Change this to a dedicated group (for
-     * instance {@code auditors}) if administrators are not the intended audience: the diffs contain
-     * business content extracted from the source documents.
+     * Default group granted access on the diff container, overridable through the
+     * {@code auditorsGroup} element of the {@code config} extension point. The diffs contain business
+     * content extracted from the source documents: choose the audience deliberately.
      */
-    public static final String AUDITORS_GROUP = "administrators";
+    public static final String DEFAULT_AUDITORS_GROUP = "administrators";
+
+    /** @deprecated use {@link BlobDiffConfigDescriptor#getAuditorsGroup()} */
+    @Deprecated
+    public static final String AUDITORS_GROUP = DEFAULT_AUDITORS_GROUP;
 
     /* Audit */
     public static final String EVENT_BLOB_MODIFIED = "blobContentModified";
@@ -106,6 +110,9 @@ public class BlobAuditConstants {
     public static final String STATUS_SKIPPED_TYPE = "skippedUnsupportedType";
 
     public static final String STATUS_ERROR = "error";
+
+    /** Summary of an error BlobDiff whose source was deleted before the diff could run. */
+    public static final String SUMMARY_SOURCE_MISSING = "Source document no longer exists";
 
     /* Work */
     public static final String WORK_CATEGORY = "blobDiff";

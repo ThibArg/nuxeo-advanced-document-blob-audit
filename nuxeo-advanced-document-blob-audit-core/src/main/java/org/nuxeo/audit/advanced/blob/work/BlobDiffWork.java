@@ -18,7 +18,9 @@ package org.nuxeo.audit.advanced.blob.work;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.SUMMARY_SOURCE_MISSING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.WORK_CATEGORY;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 
 import java.util.Date;
 
@@ -121,7 +123,21 @@ public class BlobDiffWork extends AbstractWork {
         setStatus("Diffing");
         openSystemSession();
 
-        DocumentModel source = session.getDocument(new IdRef(docId));
+        IdRef sourceRef = new IdRef(docId);
+        if (!session.exists(sourceRef)) {
+            // Deleted (or permanently purged) between the save and this work: the audit entry
+            // already exists, so leave a trace instead of failing silently.
+            log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
+            DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
+                                             .createDiffDocument(session, docId, repositoryName, null, xpath, null,
+                                                     null, principal, new Date(eventTime), null, STATUS_ERROR,
+                                                     correlationId);
+            diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
+            session.saveDocument(diffDoc);
+            setStatus("Done");
+            return;
+        }
+        DocumentModel source = session.getDocument(sourceRef);
         Blob oldBlob = resolveBlob(oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest, oldLength,
                 "previous");
         Blob newBlob = resolveBlob(newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength,

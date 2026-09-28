@@ -15,8 +15,6 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
-import java.util.Date;
-
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.repository.RepositoryInitializationHandler;
 import org.nuxeo.runtime.api.Framework;
@@ -32,8 +30,10 @@ public class BlobDiffRepositoryInit extends RepositoryInitializationHandler {
     @Override
     public void doInitializeRepository(CoreSession session) {
         BlobDiffService service = Framework.getService(BlobDiffService.class);
-        if (service != null && service.getConfig().isEnabled()) {
-            service.getOrCreateContainer(session, new Date());
+        // Always, even when the feature is disabled: the restricted container then exists, with its
+        // ACL, before the first diff is ever written, and a tampered ACL is repaired at each start.
+        if (service != null) {
+            service.ensureRootContainer(session);
         }
     }
 }

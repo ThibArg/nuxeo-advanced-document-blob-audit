@@ -185,10 +185,14 @@ public class TestBlobDiffService {
                 Arrays.stream(localAcl.getACEs())
                       .anyMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
                               && SecurityConstants.EVERYTHING.equals(ace.getPermission()) && !ace.isGranted()));
-        assertTrue("auditors must be granted read",
-                Arrays.stream(localAcl.getACEs())
-                      .anyMatch(ace -> BlobAuditConstants.AUDITORS_GROUP.equals(ace.getUsername())
-                              && ace.isGranted()));
+        String group = blobDiffService.getConfig().getAuditorsGroup();
+        for (String permission : new String[] { SecurityConstants.READ, SecurityConstants.REMOVE,
+                SecurityConstants.REMOVE_CHILDREN }) {
+            assertTrue("auditors must be granted " + permission,
+                    Arrays.stream(localAcl.getACEs())
+                          .anyMatch(ace -> group.equals(ace.getUsername()) && permission.equals(ace.getPermission())
+                                  && ace.isGranted()));
+        }
     }
 
     @Test

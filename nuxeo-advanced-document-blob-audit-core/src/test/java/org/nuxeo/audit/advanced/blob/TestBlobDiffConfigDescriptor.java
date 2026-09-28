@@ -43,4 +43,14 @@ public class TestBlobDiffConfigDescriptor {
         assertEquals(1, config.normalizeImageAnalysisLevel());
         assertEquals(1, config.getImageAnalysisLevel());
     }
+
+    @Test
+    public void testAuditorsGroupDefaultsToAdministrators() {
+        BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
+        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, config.getAuditorsGroup());
+        config.auditorsGroup = "  ";
+        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, config.getAuditorsGroup());
+        config.auditorsGroup = " auditors ";
+        assertEquals("auditors", config.getAuditorsGroup());
+    }
 }

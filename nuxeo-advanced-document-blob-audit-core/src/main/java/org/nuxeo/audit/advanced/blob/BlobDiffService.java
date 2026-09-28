@@ -46,6 +46,23 @@ public interface BlobDiffService {
     DocumentModel createDiffDocument(CoreSession session, DocumentModel source, String xpath, Blob oldBlob,
             Blob newBlob, String user, Date date, DiffResult result, String status, String correlationId);
 
+    /**
+     * Same as above for a source that may no longer exist (deleted before the asynchronous work
+     * ran): only its id, repository and last known title are needed.
+     */
+    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, String user, Date date, DiffResult result,
+            String status, String correlationId);
+
+    /**
+     * Returns (creating it if needed) the root {@code /change-diff} container and makes sure its
+     * ACL is the expected one. The session must be privileged.
+     */
+    DocumentModel ensureRootContainer(CoreSession session);
+
+    /** Resets the root container ACL if it differs from the expected one; {@code true} if repaired. */
+    boolean repairSecurity(CoreSession session, DocumentModel root);
+
     /** Returns (creating it if needed) the dated container for the given date. */
     DocumentModel getOrCreateContainer(CoreSession session, Date date);
 }

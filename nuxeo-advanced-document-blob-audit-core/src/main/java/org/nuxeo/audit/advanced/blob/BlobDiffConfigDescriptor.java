@@ -67,6 +67,15 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public static final int MAX_IMAGE_ANALYSIS_LEVEL = 1;
 
+    /**
+     * Group granted access to the {@code /change-diff} container: Read, Remove and RemoveChildren,
+     * so it can list, open and delete diffs (retention, admin UI). Members of the platform
+     * administrators groups bypass ACLs anyway; this setting matters when a dedicated group (for
+     * instance {@code auditors}) is the intended audience.
+     */
+    @XNode("auditorsGroup")
+    protected String auditorsGroup = BlobAuditConstants.DEFAULT_AUDITORS_GROUP;
+
     /** Empty means "every document type". */
     @XNodeList(value = "docTypes/docType", type = ArrayList.class, componentType = String.class)
     protected List<String> docTypes = new ArrayList<>();
@@ -109,6 +118,11 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public List<String> getDocTypes() {
         return docTypes;
+    }
+
+    public String getAuditorsGroup() {
+        return auditorsGroup == null || auditorsGroup.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP
+                : auditorsGroup.trim();
     }
 
     public List<String> getXPaths() {

@@ -103,11 +103,15 @@ The diff is stored as a blob, not a string: outside SQL/Mongo records and outsid
 
 ### Container and Security
 
-`/change-diff/YYYY/MM/DD/` — partitioned by date.
+`/change-diff/YYYY/MM/DD/`, partitioned by date (server time zone). Diff documents are named `<sourceId>-<eventTime>-<correlationId>`, so a single save touching several blob xpaths yields distinct documents.
 
-Created by a `RepositoryInitializationHandler`, with inheritance blocked and read access granted only to the `administrators` group (see `BlobAuditConstants.AUDITORS_GROUP` to use a dedicated auditors group).
+- **Created at startup, always.** `BlobDiffRepositoryInit` creates `/change-diff` at every repository initialisation, even when the feature is disabled, so the restricted ACL exists before the first diff is written.
+- **Self-healing ACL.** At each startup the local ACL of `/change-diff` is compared with the expected one and reset (with a WARN) if it differs: the auditors group gets `Read`, `Remove` and `RemoveChildren`, then inheritance is blocked. Dated sub-folders have no local ACL and inherit it.
+- **Auditors group** is configurable (`<auditorsGroup>`, default `administrators`). Members of the platform administrators groups bypass ACLs anyway; the setting matters for a dedicated group.
+- **Concurrency.** Dated folders are created in the caller's session under an in-JVM lock. A residual cross-node race can only produce a renamed dated sibling (e.g. `14.1727…`), which still lives under the restricted root and inherits its ACL.
+- **Deleted source.** If the source document no longer exists when `BlobDiffWork` runs, a `BlobDiff` with status `error` and summary `Source document no longer exists` is recorded, so the audit entry is never orphaned.
 
-Writes are performed using a **system session**: users modifying the file have no permissions on this container.
+Writes are performed with a **system session**: users modifying the file have no permission on this container.
 
 ### Diff History View
 
@@ -126,6 +130,7 @@ Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
     <maxLines>10000</maxLines>
     <maxDiffEntries>5000</maxDiffEntries>
     <imageAnalysisLevel>0</imageAnalysisLevel>
+    <auditorsGroup>administrators</auditorsGroup>
     <docTypes>
       <docType>Contract</docType>
     </docTypes>
@@ -259,6 +264,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
+| TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
 | TestBlobAuditIntegration | Yes | End-to-end validation |
 
 

@@ -15,7 +15,6 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.AUDITORS_GROUP;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_TITLE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_TYPE;
@@ -44,10 +43,12 @@ import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -203,60 +204,154 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     /* ------------------------------------------------------------- persistence */
 
+    /**
+     * In-JVM guard around container creation, so that parallel works on the same node do not both
+     * create the same dated folder in the common case.
+     * <p>
+     * Folders are created <b>in the caller's session and transaction</b>: creating them in a separate
+     * transaction made them invisible to the caller's session (VCS caches / isolation), and every
+     * following {@code getDocument} failed with {@code DocumentNotFoundException}.
+     * <p>
+     * A residual race (another node, or a transaction not yet committed) can only produce a
+     * renamed <i>dated</i> sibling (for instance {@code 14.1727...}). It still lives under the
+     * restricted root and inherits its ACL, so it is harmless for security; the root itself is
+     * created at repository initialisation, before any work runs.
+     */
+    protected static final ReentrantLock CONTAINER_LOCK = new ReentrantLock();
+
     @Override
     public DocumentModel getOrCreateContainer(CoreSession session, Date date) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(date);
-        DocumentModel parent = getOrCreateFolder(session, session.getRootDocument().getPathAsString(),
-                CONTAINER_NAME, CONTAINER_TITLE, true);
-        String year = String.valueOf(calendar.get(Calendar.YEAR));
-        parent = getOrCreateFolder(session, parent.getPathAsString(), year, year, false);
+        String year = new SimpleDateFormat("yyyy").format(date);
         String month = new SimpleDateFormat("MM").format(date);
-        parent = getOrCreateFolder(session, parent.getPathAsString(), month, month, false);
         String day = new SimpleDateFormat("dd").format(date);
-        return getOrCreateFolder(session, parent.getPathAsString(), day, day, false);
+        PathRef dayRef = new PathRef("/" + CONTAINER_NAME + "/" + year + "/" + month + "/" + day);
+        if (session.exists(dayRef)) {
+            return session.getDocument(dayRef);
+        }
+        CONTAINER_LOCK.lock();
+        try {
+            DocumentModel root = ensureRootContainer(session);
+            DocumentModel parent = getOrCreateFolder(session, root.getPathAsString(), year);
+            parent = getOrCreateFolder(session, parent.getPathAsString(), month);
+            DocumentModel folder = getOrCreateFolder(session, parent.getPathAsString(), day);
+            session.save();
+            return folder;
+        } finally {
+            CONTAINER_LOCK.unlock();
+        }
     }
 
-    protected DocumentModel getOrCreateFolder(CoreSession session, String parentPath, String name, String title,
-            boolean secured) {
+    @Override
+    public DocumentModel ensureRootContainer(CoreSession session) {
+        PathRef ref = new PathRef("/" + CONTAINER_NAME);
+        DocumentModel root;
+        if (session.exists(ref)) {
+            root = session.getDocument(ref);
+        } else {
+            root = session.createDocumentModel("/", CONTAINER_NAME, CONTAINER_TYPE);
+            root.setPropertyValue("dc:title", CONTAINER_TITLE);
+            root.addFacet("HiddenInNavigation");
+            root = session.createDocument(root);
+            if (!CONTAINER_NAME.equals(root.getName())) {
+                // Lost a race against another node: the core renamed our sibling. Never leave an
+                // unrestricted duplicate around, and use the canonical one.
+                log.warn("Duplicate diff container {} created concurrently, removing it", root.getPathAsString());
+                session.removeDocument(root.getRef());
+                return ensureRootContainer(session);
+            }
+        }
+        repairSecurity(session, root);
+        return root;
+    }
+
+    /**
+     * Makes sure the root container carries exactly the expected local ACL: auditors group granted
+     * Read, Remove and RemoveChildren, inheritance blocked. Repairs it (and logs a WARN) when it
+     * was created by an older version, changed by hand, or the auditors group was reconfigured.
+     *
+     * @return {@code true} if the ACL had to be repaired
+     */
+    @Override
+    public boolean repairSecurity(CoreSession session, DocumentModel root) {
+        ACP current = session.getACP(root.getRef());
+        ACL local = current == null ? null : current.getACL(ACL.LOCAL_ACL);
+        List<ACE> expected = expectedAces();
+        List<ACE> actual = local == null ? List.of() : Arrays.asList(local.getACEs());
+        boolean otherAcls = current != null && Arrays.stream(current.getACLs())
+                                                       .anyMatch(acl -> !ACL.LOCAL_ACL.equals(acl.getName())
+                                                               && !ACL.INHERITED_ACL.equals(acl.getName())
+                                                               && acl.getACEs().length > 0);
+        if (sameAces(expected, actual) && !otherAcls) {
+            return false;
+        }
+        if (local != null || otherAcls) {
+            log.warn("Repairing ACL of diff container {}: was {}", root.getPathAsString(), actual);
+        }
+        ACP acp = new ACPImpl();
+        ACL acl = new ACLImpl(ACL.LOCAL_ACL);
+        expected.forEach(acl::add);
+        acp.addACL(acl);
+        session.setACP(root.getRef(), acp, true);
+        return true;
+    }
+
+    protected List<ACE> expectedAces() {
+        String group = getConfig().getAuditorsGroup();
+        return List.of(new ACE(group, SecurityConstants.READ, true),
+                new ACE(group, SecurityConstants.REMOVE, true),
+                new ACE(group, SecurityConstants.REMOVE_CHILDREN, true), ACE.BLOCK);
+    }
+
+    protected boolean sameAces(List<ACE> expected, List<ACE> actual) {
+        if (expected.size() != actual.size()) {
+            return false;
+        }
+        for (int i = 0; i < expected.size(); i++) {
+            ACE e = expected.get(i);
+            ACE a = actual.get(i);
+            if (!e.getUsername().equals(a.getUsername()) || !e.getPermission().equals(a.getPermission())
+                    || e.isGranted() != a.isGranted()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Dated sub-folders inherit the root ACL: no local ACL of their own. */
+    protected DocumentModel getOrCreateFolder(CoreSession session, String parentPath, String name) {
         PathRef ref = new PathRef(parentPath + (parentPath.endsWith("/") ? "" : "/") + name);
         if (session.exists(ref)) {
             return session.getDocument(ref);
         }
         DocumentModel folder = session.createDocumentModel(parentPath, name, CONTAINER_TYPE);
-        folder.setPropertyValue("dc:title", title);
+        folder.setPropertyValue("dc:title", name);
         folder.addFacet("HiddenInNavigation");
         folder = session.createDocument(folder);
-        if (secured) {
-            applyRestrictedAcl(session, folder);
+        if (!name.equals(folder.getName())) {
+            // Renamed by the core because a sibling appeared concurrently. Harmless: it inherits
+            // the restricted ACL of the root container.
+            log.debug("Dated diff folder created as {} (concurrent creation)", folder.getPathAsString());
         }
         return folder;
-    }
-
-    /**
-     * Breaks inheritance and grants Read to the auditors group only.
-     * <p>
-     * This is the whole point of using a dedicated document rather than a facet on the source: the
-     * diffs contain business content and must not inherit the source document permissions.
-     */
-    protected void applyRestrictedAcl(CoreSession session, DocumentModel folder) {
-        ACP acp = new ACPImpl();
-        ACL acl = new ACLImpl(ACL.LOCAL_ACL);
-        acl.add(new ACE(AUDITORS_GROUP, SecurityConstants.READ, true));
-        acl.add(ACE.BLOCK);
-        acp.addACL(acl);
-        session.setACP(folder.getRef(), acp, true);
     }
 
     @Override
     public DocumentModel createDiffDocument(CoreSession session, DocumentModel source, String xpath, Blob oldBlob,
             Blob newBlob, String user, Date date, DiffResult result, String status, String correlationId) {
+        return createDiffDocument(session, source.getId(), source.getRepositoryName(), source.getTitle(), xpath,
+                oldBlob, newBlob, user, date, result, status, correlationId);
+    }
+
+    @Override
+    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, String user, Date date, DiffResult result,
+            String status, String correlationId) {
         DocumentModel container = getOrCreateContainer(session, date);
-        String name = source.getId() + "-" + date.getTime();
+        String name = diffDocumentName(sourceId, date, correlationId);
         DocumentModel diffDoc = session.createDocumentModel(container.getPathAsString(), name, DIFF_DOCTYPE);
-        diffDoc.setPropertyValue("dc:title", source.getTitle() + " - " + xpath);
-        diffDoc.setPropertyValue(XP_SOURCE_ID, source.getId());
-        diffDoc.setPropertyValue(XP_SOURCE_REPO, source.getRepositoryName());
+        diffDoc.setPropertyValue("dc:title", (sourceTitle == null ? sourceId : sourceTitle) + " - " + xpath);
+        diffDoc.setPropertyValue(XP_SOURCE_ID, sourceId);
+        diffDoc.setPropertyValue(XP_SOURCE_REPO, sourceRepository);
         diffDoc.setPropertyValue(XP_XPATH, xpath);
         diffDoc.setPropertyValue(XP_CORRELATION_ID, correlationId);
         diffDoc.setPropertyValue(XP_USER, user);
@@ -283,5 +378,13 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             }
         }
         return session.createDocument(diffDoc);
+    }
+
+    /**
+     * {@code <sourceId>-<eventTime>-<correlationId>}: one save touching two blob xpaths produces two
+     * diffs with the same source and time, so the correlation id is what keeps names unique.
+     */
+    protected String diffDocumentName(String sourceId, Date date, String correlationId) {
+        return sourceId + "-" + date.getTime() + (correlationId == null ? "" : "-" + correlationId);
     }
 }
