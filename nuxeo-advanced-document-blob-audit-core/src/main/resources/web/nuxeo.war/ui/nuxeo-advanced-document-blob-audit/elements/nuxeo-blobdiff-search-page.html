@@ -103,6 +103,13 @@
             <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.xpath')]]" sort-by="bdiff:xpath" flex="8">
               <template>[[item.properties.bdiff:xpath]]</template>
             </nuxeo-data-table-column>
+            <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.versions')]]" flex="10">
+              <template>
+                <span title$="[[_versionIds(item.properties.bdiff:previousVersionId, item.properties.bdiff:newVersionId)]]">
+                  [[_versionPair(item.properties.bdiff:previousVersionLabel, item.properties.bdiff:newVersionLabel)]]
+                </span>
+              </template>
+            </nuxeo-data-table-column>
             <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.file')]]" flex="12">
               <template><span title$="[[item.properties.bdiff:mimeType]]">[[item.properties.bdiff:newFilename]]</span></template>
             </nuxeo-data-table-column>
@@ -210,6 +217,14 @@
 
       _filterOnSource: function (e) {
         this.sourceId = e.model.item.properties['bdiff:sourceId'];
+      },
+
+      _versionPair: function (previousLabel, newLabel) {
+        return (previousLabel || '?') + ' → ' + (newLabel || '?');
+      },
+
+      _versionIds: function (previousId, newId) {
+        return [previousId, newId].filter(Boolean).join(' → ');
       },
 
       _canRetry: function (item) {

@@ -31,7 +31,9 @@
         <span>[[document.properties.bdiff:xpath]]</span>
 
         <label>[[i18n('label.blobaudit.diff.versions')]]</label>
-        <span>[[document.properties.bdiff:previousVersionLabel]] → [[document.properties.bdiff:newVersionLabel]]</span>
+        <span title$="[[_versionIds(document.properties.bdiff:previousVersionId, document.properties.bdiff:newVersionId)]]">
+          [[_versionPair(document.properties.bdiff:previousVersionLabel, document.properties.bdiff:newVersionLabel)]]
+        </span>
 
         <label>[[i18n('label.blobaudit.diff.user')]]</label>
         <nuxeo-user-tag user="[[document.properties.bdiff:user]]"></nuxeo-user-tag>
@@ -88,6 +90,12 @@
         if (doc && doc.uid) {
           this.$.doc.get();
         }
+      },
+      _versionPair: function (previousLabel, newLabel) {
+        return (previousLabel || '?') + ' → ' + (newLabel || '?');
+      },
+      _versionIds: function (previousId, newId) {
+        return [previousId, newId].filter(Boolean).join(' → ');
       },
       _canRetry: function (doc) {
         var p = doc && doc.properties;

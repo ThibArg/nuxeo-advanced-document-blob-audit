@@ -128,8 +128,8 @@ Writes are performed with a **system session**: users modifying the file have no
 
 Available to members of `administrators` and of the auditors group only.
 
-- **Main drawer entry "Content changes audit"**: full-width listing of every `BlobDiff` with filters (date range, source document via `nuxeo-document-suggestion`, user, truncated only) and facets (status, format, field, user). Actions: open, go to the source, filter on the source, download the diff, retry (errors only), **permanent deletion** of the selection, and **purge** before a date (optionally for one status).
-- **"Content changes" tab** on documents holding files (`file` or `files` schema).
+- **Main drawer entry "Content changes audit"**: full-width listing of every `BlobDiff`, including the exact version transition, with filters (date range, source document via `nuxeo-document-suggestion`, user, truncated only) and facets (status, format, field, user). Actions: open, go to the source, filter on the source, download the diff, retry (errors only), **permanent deletion** of the selection, and **purge** before a date (optionally for one status).
+- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save.
 - **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
 
 Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.

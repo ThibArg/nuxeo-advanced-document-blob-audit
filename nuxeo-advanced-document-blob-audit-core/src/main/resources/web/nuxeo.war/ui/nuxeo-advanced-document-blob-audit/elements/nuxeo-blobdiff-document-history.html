@@ -18,6 +18,13 @@
         <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.date')]]" sort-by="bdiff:date" flex="15">
           <template><a href$="[[urlFor(item)]]">[[formatDateTime(item.properties.bdiff:date)]]</a></template>
         </nuxeo-data-table-column>
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.versions')]]" flex="12">
+          <template>
+            <span title$="[[_versionIds(item.properties.bdiff:previousVersionId, item.properties.bdiff:newVersionId)]]">
+              [[_versionPair(item.properties.bdiff:previousVersionLabel, item.properties.bdiff:newVersionLabel)]]
+            </span>
+          </template>
+        </nuxeo-data-table-column>
         <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.user')]]" flex="12">
           <template><nuxeo-user-tag user="[[item.properties.bdiff:user]]"></nuxeo-user-tag></template>
         </nuxeo-data-table-column>
