@@ -52,6 +52,18 @@
       <scope>provided</scope>
     </dependency>
 
+    <!-- Operations (delete, purge, retry) and the blobDiffSource JSON enricher (since 1.2) -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.automation</groupId>
+      <artifactId>nuxeo-automation-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-io</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- Page providers used to list diffs and to purge them -->
     <dependency>
       <groupId>org.nuxeo.ecm.platform</groupId>

@@ -346,6 +346,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
             String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, String user, Date date, DiffResult result,
             String status, String correlationId) {
+        return createDiffDocument(session, sourceId, sourceRepository, sourceTitle, xpath, oldBlob, newBlob,
+                FrozenBlobs.of(oldBlob, newBlob), user, date, result, status, correlationId);
+    }
+
+    @Override
+    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
+            DiffResult result, String status, String correlationId) {
         DocumentModel container = getOrCreateContainer(session, date);
         String name = diffDocumentName(sourceId, date, correlationId);
         DocumentModel diffDoc = session.createDocumentModel(container.getPathAsString(), name, DIFF_DOCTYPE);
@@ -364,6 +372,17 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         diffDoc.setPropertyValue(XP_OLD_DIGEST, oldBlob != null ? oldBlob.getDigest() : null);
         diffDoc.setPropertyValue(XP_NEW_DIGEST, newBlob != null ? newBlob.getDigest() : null);
         diffDoc.setPropertyValue(XP_STATUS, status);
+        FrozenBlobs keys = frozen == null ? FrozenBlobs.NONE : frozen;
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_PROVIDER, keys.oldProviderId());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, keys.oldKey());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_MIMETYPE, keys.oldMimeType());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_LENGTH, keys.oldLength() < 0 ? null : keys.oldLength());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_PROVIDER, keys.newProviderId());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY, keys.newKey());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_LENGTH, keys.newLength() < 0 ? null : keys.newLength());
+        if (newBlob == null && keys.newMimeType() != null) {
+            diffDoc.setPropertyValue(XP_MIMETYPE, keys.newMimeType());
+        }
         if (result != null) {
             diffDoc.setPropertyValue(XP_SUMMARY, result.summary());
             diffDoc.setPropertyValue(XP_ADDED, Long.valueOf(result.added()));

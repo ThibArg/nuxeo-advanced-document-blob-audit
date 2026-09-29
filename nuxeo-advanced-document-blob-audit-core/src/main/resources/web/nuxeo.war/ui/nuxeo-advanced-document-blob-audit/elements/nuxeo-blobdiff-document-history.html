@@ -1,0 +1,58 @@
+<!-- "Content changes" tab of a source document (DOCUMENT_VIEWS_PAGES, name="blobdiffs") -->
+<dom-module id="nuxeo-blobdiff-document-history">
+  <template>
+    <style include="nuxeo-blobdiff-styles nuxeo-styles">
+      :host { display: block; }
+      nuxeo-data-table { height: calc(100vh - 260px); }
+      .header { display: flex; align-items: center; justify-content: space-between; }
+    </style>
+    <nuxeo-page-provider id="provider" provider="BLOB_DIFFS_ADMIN" page-size="40"
+                         schemas="dublincore,blobdiff" params="[[_params(document.uid)]]">
+    </nuxeo-page-provider>
+    <nuxeo-card>
+      <div class="header">
+        <h3>[[i18n('label.blobaudit.tab.diffs')]]</h3>
+        <paper-button noink on-tap="_openAll">[[i18n('label.blobaudit.tab.openAll')]]</paper-button>
+      </div>
+      <nuxeo-data-table id="table" nx-provider="provider" empty-label="[[i18n('label.blobaudit.empty')]]">
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.date')]]" sort-by="bdiff:date" flex="15">
+          <template><a href$="[[urlFor(item)]]">[[formatDateTime(item.properties.bdiff:date)]]</a></template>
+        </nuxeo-data-table-column>
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.user')]]" flex="12">
+          <template><nuxeo-user-tag user="[[item.properties.bdiff:user]]"></nuxeo-user-tag></template>
+        </nuxeo-data-table-column>
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.xpath')]]" flex="10">
+          <template>[[item.properties.bdiff:xpath]]</template>
+        </nuxeo-data-table-column>
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.summary')]]" flex="30">
+          <template>[[item.properties.bdiff:summary]]</template>
+        </nuxeo-data-table-column>
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.status')]]" flex="15">
+          <template><nuxeo-blobdiff-status document="[[item]]"></nuxeo-blobdiff-status></template>
+        </nuxeo-data-table-column>
+      </nuxeo-data-table>
+    </nuxeo-card>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-document-history',
+      behaviors: [Nuxeo.I18nBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior],
+      properties: {
+        document: { type: Object, observer: '_refresh' },
+        user: Object,
+        visible: { type: Boolean, value: false, observer: '_refresh' }
+      },
+      _params: function (uid) { return uid ? { 'bdsearch:sourceId': uid } : {}; },
+      _refresh: function () {
+        if (this.visible && this.document) {
+          this.debounce('blobdiff-history', function () { this.$.table.fetch(); }.bind(this), 100);
+        }
+      },
+      _openAll: function () {
+        Nuxeo.BlobAudit.openPage();
+        var page = document.querySelector('nuxeo-blobdiff-search-page');
+        if (page) { page.sourceId = this.document.uid; }
+      }
+    });
+  </script>
+</dom-module>

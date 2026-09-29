@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.operations">
+
+  <extension target="org.nuxeo.ecm.core.operation.OperationServiceComponent" point="operations">
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffDeleteOp" />
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeOp" />
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffRetryOp" />
+  </extension>
+
+</component>

@@ -98,6 +98,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary |
 | bdiff:status | ok, skippedTooLarge, skippedUnsupportedType, error |
 | bdiff:diff | **Blob containing the full diff** |
+| bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
 The diff is stored as a blob, not a string: outside SQL/Mongo records and outside full-text indexing.
 
@@ -107,17 +108,61 @@ The diff is stored as a blob, not a string: outside SQL/Mongo records and outsid
 
 - **Created at startup, always.** `BlobDiffRepositoryInit` creates `/change-diff` at every repository initialisation, even when the feature is disabled, so the restricted ACL exists before the first diff is written.
 - **Self-healing ACL.** At each startup the local ACL of `/change-diff` is compared with the expected one and reset (with a WARN) if it differs: the auditors group gets `Read`, `Remove` and `RemoveChildren`, then inheritance is blocked. Dated sub-folders have no local ACL and inherit it.
-- **Auditors group** is configurable (`<auditorsGroup>`, default `administrators`). Members of the platform administrators groups bypass ACLs anyway; the setting matters for a dedicated group.
+- **Auditors group** is configurable, default `administrators`. Recommended: the configuration property `org.nuxeo.web.ui.blobaudit.auditorsGroup`, which is also exposed to Web UI (`Nuxeo.UI.config.blobaudit.auditorsGroup`) so the server and the UI share one setting. `<auditorsGroup>` in the `config` extension point still wins when set. Members of the `administrators` group always have access.
 - **Concurrency.** Dated folders are created in the caller's session under an in-JVM lock. A residual cross-node race can only produce a renamed dated sibling (e.g. `14.1727…`), which still lives under the restricted root and inherits its ACL.
 - **Deleted source.** If the source document no longer exists when `BlobDiffWork` runs, a `BlobDiff` with status `error` and summary `Source document no longer exists` is recorded, so the audit entry is never orphaned.
 
 Writes are performed with a **system session**: users modifying the file have no permission on this container.
 
-### Diff History View
+### Page Providers
 
-Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
+| Name | Backend | Use |
+|---|---|---|
+| `BLOB_DIFFS_ADMIN` | **Elasticsearch** | Web UI page and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
+| `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL) | Diffs of one document, without Elasticsearch |
+| `BLOB_DIFFS_OLDER_THAN` | Core (NXQL) | Retention scripts |
 
-`BLOB_DIFFS_OLDER_THAN` is used for cleanup and retention.
+`BLOB_DIFFS_ADMIN` lives in its own component requiring `org.nuxeo.elasticsearch.ElasticSearchComponent`: without Elasticsearch it stays pending instead of failing.
+
+## Web UI
+
+Available to members of `administrators` and of the auditors group only.
+
+- **Main drawer entry "Content changes audit"**: full-width listing of every `BlobDiff` with filters (date range, source document via `nuxeo-document-suggestion`, user, truncated only) and facets (status, format, field, user). Actions: open, go to the source, filter on the source, download the diff, retry (errors only), **permanent deletion** of the selection, and **purge** before a date (optionally for one status).
+- **"Content changes" tab** on documents holding files (`file` or `files` schema).
+- **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
+
+Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.
+
+Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the server checks of the operations.
+
+### Server Side
+
+| Item | Purpose |
+|---|---|
+| `BlobDiff.Delete` | Permanently deletes the input BlobDiff documents (other types refused) |
+| `BlobDiff.Purge(before, status?)` | Permanently deletes diffs dated before a day, by batches of 100 with a commit between batches, then removes emptied dated folders. Returns `{"deleted": n, "folders": m}` |
+| `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The new diff keeps user, date and correlation id, and replaces the failed one once created |
+| `blobDiffSource` enricher | `{uid, exists, trashed, readable, title, path, type}` of the source; title/path/type only when the current user can read it |
+
+All three operations are refused (`DocumentSecurityException`) to anyone who is not an administrator, a member of `administrators` or of the auditors group.
+
+### Deployment
+
+`OSGI-INF/deployment-fragment.xml` unzips `web/nuxeo.war/**` and appends `ui/i18n/messages.json` and `messages-fr.json` (also to `messages-fr-FR.json`) to the Web UI translations. The bundle `ui/nuxeo-advanced-document-blob-audit/nuxeo-advanced-document-blob-audit.html` is registered through `WebResources` (`OSGI-INF/blobaudit-webui-contrib.xml`).
+
+```
+web/nuxeo.war/ui/
+├── document/blobdiff/
+│   ├── nuxeo-blobdiff-view-layout.html
+│   └── nuxeo-blobdiff-metadata-layout.html
+├── i18n/
+│   ├── messages.json
+│   └── messages-fr.json
+└── nuxeo-advanced-document-blob-audit/
+    ├── nuxeo-advanced-document-blob-audit.html   (slots: DRAWER_ITEMS/PAGES, PAGES, DOCUMENT_VIEWS_*)
+    └── elements/                                 (search page, drawer, tab, viewer, dialogs, badges)
+```
 
 ## Configuration
 
@@ -130,7 +175,6 @@ Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
     <maxLines>10000</maxLines>
     <maxDiffEntries>5000</maxDiffEntries>
     <imageAnalysisLevel>0</imageAnalysisLevel>
-    <auditorsGroup>administrators</auditorsGroup>
     <docTypes>
       <docType>Contract</docType>
     </docTypes>
@@ -138,6 +182,14 @@ Page provider `BLOB_DIFFS_FOR_DOCUMENT`.
       <xpath>file:content</xpath>
     </xpaths>
   </config>
+</extension>
+```
+
+Auditors group (server and Web UI):
+
+```xml
+<extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+  <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">auditors</property>
 </extension>
 ```
 
@@ -237,7 +289,10 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 
 ### Security and Operations
 - **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
-- **No retention job is shipped.** `BLOB_DIFFS_OLDER_THAN` is provided, but cleanup must be scheduled by the integrator.
+- **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule the operation yourself for automatic retention.
+- **Elasticsearch required** for the Web UI listing and tab (`BLOB_DIFFS_ADMIN`).
+- **Retry** only works for diffs created from 1.2 on (binary keys stored), and as long as the binaries are still in the blob store (the binaries garbage collector may have removed an unreferenced old version).
+- **Web UI access** is based on the auditors group name exposed in `Nuxeo.UI.config`: overriding `<auditorsGroup>` without the configuration property desynchronises the UI (the server stays correct).
 - `blobContentModified` must be declared both in the audit route and in the `eventTypes` vocabulary, or entries are lost / hidden.
 
 ## Tests
@@ -265,6 +320,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
+| TestBlobDiffManagement | Yes | Binary keys, Delete / Purge / Retry operations and their access control, blobDiffSource enricher |
 | TestBlobAuditIntegration | Yes | End-to-end validation |
 
 

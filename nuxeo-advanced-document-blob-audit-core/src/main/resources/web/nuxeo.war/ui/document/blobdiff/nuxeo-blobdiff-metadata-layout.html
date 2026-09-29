@@ -1,0 +1,20 @@
+<!--
+  Metadata layout of BlobDiff. Required even though it shows nothing: Web UI loads it on the
+  document page and a missing file results in a 404. Everything is in the view layout.
+-->
+<dom-module id="nuxeo-blobdiff-metadata-layout">
+  <template>
+    <style>
+      :host { display: block; }
+    </style>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-metadata-layout',
+      behaviors: [Nuxeo.LayoutBehavior],
+      properties: {
+        document: Object
+      }
+    });
+  </script>
+</dom-module>

@@ -1,0 +1,43 @@
+<!--
+  Link to the source of a BlobDiff, driven by the blobDiffSource enricher:
+  readable -> link (+ "in trash" badge), not readable -> title hidden, deleted -> id only.
+-->
+<dom-module id="nuxeo-blobdiff-source-link">
+  <template>
+    <style include="nuxeo-blobdiff-styles">
+      :host { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+      a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+    <template is="dom-if" if="[[source.readable]]">
+      <a href$="[[_url(source)]]" on-click="_stop" title$="[[source.path]]">[[source.title]]</a>
+      <template is="dom-if" if="[[source.trashed]]">
+        <span class="blobdiff-badge skipped">[[i18n('label.blobaudit.source.trashed')]]</span>
+      </template>
+    </template>
+    <template is="dom-if" if="[[_notReadable(source)]]">
+      <span class="blobdiff-muted" title$="[[sourceId]]">[[i18n('label.blobaudit.source.notReadable')]]</span>
+    </template>
+    <template is="dom-if" if="[[_deleted(source)]]">
+      <span class="blobdiff-badge error">[[i18n('label.blobaudit.source.deleted')]]</span>
+      <span class="blobdiff-muted">[[_id(source, sourceId)]]</span>
+    </template>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-source-link',
+      behaviors: [Nuxeo.I18nBehavior, Nuxeo.RoutingBehavior],
+      properties: {
+        /** contextParameters.blobDiffSource */
+        source: Object,
+        sourceId: String
+      },
+      _url: function (source) {
+        return source && source.path ? this.urlFor('browse', source.path) : '';
+      },
+      _notReadable: function (source) { return !!source && source.exists && !source.readable; },
+      _deleted: function (source) { return !!source && !source.exists; },
+      _id: function (source, sourceId) { return (source && source.uid) || sourceId; },
+      _stop: function (e) { e.stopPropagation(); }
+    });
+  </script>
+</dom-module>

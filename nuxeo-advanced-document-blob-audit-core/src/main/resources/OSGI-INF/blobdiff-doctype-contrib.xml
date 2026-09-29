@@ -3,6 +3,7 @@
 
   <extension target="org.nuxeo.ecm.core.schema.TypeService" point="schema">
     <schema name="blobdiff" prefix="bdiff" src="schemas/blobdiff.xsd" />
+    <schema name="blobdiffsearch" prefix="bdsearch" src="schemas/blobdiffsearch.xsd" />
   </extension>
 
   <extension target="org.nuxeo.ecm.core.schema.TypeService" point="doctype">
@@ -13,6 +14,11 @@
       <!-- Never surfaced in navigation or collections -->
       <facet name="HiddenInNavigation" />
       <facet name="NotCollectionMember" />
+    </doctype>
+    <!-- Search document of BLOB_DIFFS_ADMIN, never persisted -->
+    <doctype name="BlobDiffSearch" extends="Document">
+      <schema name="blobdiffsearch" />
+      <facet name="HiddenInNavigation" />
     </doctype>
   </extension>
 

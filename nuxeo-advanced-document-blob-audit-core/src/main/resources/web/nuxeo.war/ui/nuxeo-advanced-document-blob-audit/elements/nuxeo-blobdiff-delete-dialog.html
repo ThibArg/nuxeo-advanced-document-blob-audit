@@ -1,0 +1,58 @@
+<!--
+  Permanent deletion of BlobDiff documents, with warning and explicit acknowledgment.
+  Usage: this.$.deleteDialog.open(docs).then(deleted => ...)
+-->
+<dom-module id="nuxeo-blobdiff-delete-dialog">
+  <template>
+    <style include="nuxeo-blobdiff-styles nuxeo-styles">
+      .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+    </style>
+    <nuxeo-operation id="op" op="BlobDiff.Delete"></nuxeo-operation>
+    <nuxeo-dialog id="dialog" with-backdrop no-auto-focus>
+      <h2>[[i18n('label.blobaudit.delete.title')]]</h2>
+      <div class="blobdiff-warning">
+        <iron-icon icon="icons:warning"></iron-icon>
+        <div>[[i18n('label.blobaudit.delete.warning', _docs.length)]]</div>
+      </div>
+      <paper-checkbox checked="{{_ack}}">[[i18n('label.blobaudit.delete.ack')]]</paper-checkbox>
+      <div class="buttons">
+        <paper-button dialog-dismiss class="secondary">[[i18n('command.cancel')]]</paper-button>
+        <paper-button class="primary" disabled$="[[!_canDelete(_ack, _busy)]]" on-tap="_delete">
+          [[i18n('label.blobaudit.delete.confirm')]]
+        </paper-button>
+      </div>
+    </nuxeo-dialog>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-delete-dialog',
+      behaviors: [Nuxeo.I18nBehavior],
+      properties: {
+        _docs: { type: Array, value: function () { return []; } },
+        _ack: { type: Boolean, value: false },
+        _busy: { type: Boolean, value: false }
+      },
+      open: function (docs) {
+        this._docs = (docs || []).filter(Boolean);
+        this._ack = false;
+        this.$.dialog.open();
+        return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
+      },
+      _canDelete: function (ack, busy) { return ack && !busy; },
+      _delete: function () {
+        this._busy = true;
+        this.$.op.input = 'docs:' + this._docs.map(function (d) { return d.uid; }).join(',');
+        this.$.op.execute()
+          .then(function () {
+            this.fire('notify', { message: this.i18n('label.blobaudit.delete.done', this._docs.length) });
+            this.$.dialog.close();
+            this._resolve && this._resolve(true);
+          }.bind(this))
+          .catch(function (err) {
+            this.fire('notify', { message: this.i18n('label.blobaudit.delete.failed') + ' ' + (err && err.message || '') });
+          }.bind(this))
+          .then(function () { this._busy = false; }.bind(this));
+      }
+    });
+  </script>
+</dom-module>

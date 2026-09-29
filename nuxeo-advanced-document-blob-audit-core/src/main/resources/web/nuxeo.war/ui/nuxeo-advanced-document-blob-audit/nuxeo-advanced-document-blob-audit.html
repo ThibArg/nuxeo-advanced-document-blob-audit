@@ -1,0 +1,62 @@
+<!--
+  Web UI bundle of nuxeo-advanced-document-blob-audit.
+
+  Registered through org.nuxeo.ecm.platform.WebResources (OSGI-INF/blobaudit-webui-contrib.xml).
+  Contributes:
+    - a main drawer entry + page listing every BlobDiff (auditors and "administrators" only)
+    - a "Content changes" tab on documents holding files (same audience)
+
+  Visibility in the UI is cosmetic: the real protection is the ACL of /change-diff and the
+  server-side checks of the BlobDiff.* operations.
+-->
+<link rel="import" href="elements/nuxeo-blobdiff-common.html">
+<link rel="import" href="elements/nuxeo-blobdiff-source-link.html">
+<link rel="import" href="elements/nuxeo-blobdiff-status.html">
+<link rel="import" href="elements/nuxeo-blobdiff-viewer.html">
+<link rel="import" href="elements/nuxeo-blobdiff-delete-dialog.html">
+<link rel="import" href="elements/nuxeo-blobdiff-purge-dialog.html">
+<link rel="import" href="elements/nuxeo-blobdiff-search-page.html">
+<link rel="import" href="elements/nuxeo-blobdiff-drawer.html">
+<link rel="import" href="elements/nuxeo-blobdiff-document-history.html">
+
+<!-- Main drawer: icon -->
+<nuxeo-slot-content name="blobdiffsDrawerItem" slot="DRAWER_ITEMS" order="95">
+  <template>
+    <nuxeo-filter user="[[user]]" expression="Nuxeo.BlobAudit.isAuditor(user)">
+      <template>
+        <nuxeo-menu-icon name="blobdiffs" icon="icons:compare-arrows" label="label.blobaudit.drawer"></nuxeo-menu-icon>
+      </template>
+    </nuxeo-filter>
+  </template>
+</nuxeo-slot-content>
+
+<!-- Main drawer: panel shown when the icon is selected -->
+<nuxeo-slot-content name="blobdiffsDrawerPage" slot="DRAWER_PAGES">
+  <template>
+    <nuxeo-blobdiff-drawer name="blobdiffs" user="[[user]]"></nuxeo-blobdiff-drawer>
+  </template>
+</nuxeo-slot-content>
+
+<!-- Main content area: full-width listing -->
+<nuxeo-slot-content name="blobdiffsPage" slot="PAGES">
+  <template>
+    <nuxeo-blobdiff-search-page name="blobdiffs" user="[[user]]"></nuxeo-blobdiff-search-page>
+  </template>
+</nuxeo-slot-content>
+
+<!-- Document tab, on documents holding files -->
+<nuxeo-slot-content name="blobdiffsDocumentTabItem" slot="DOCUMENT_VIEWS_ITEMS" order="90">
+  <template>
+    <nuxeo-filter document="[[document]]" user="[[user]]" expression="Nuxeo.BlobAudit.showDocumentTab(document, user)">
+      <template>
+        <nuxeo-page-item name="blobdiffs" label="label.blobaudit.tab.diffs"></nuxeo-page-item>
+      </template>
+    </nuxeo-filter>
+  </template>
+</nuxeo-slot-content>
+
+<nuxeo-slot-content name="blobdiffsDocumentTabPage" slot="DOCUMENT_VIEWS_PAGES">
+  <template>
+    <nuxeo-blobdiff-document-history name="blobdiffs" document="[[document]]" user="[[user]]"></nuxeo-blobdiff-document-history>
+  </template>
+</nuxeo-slot-content>

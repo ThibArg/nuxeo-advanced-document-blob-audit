@@ -1,0 +1,32 @@
+<!-- Status badge + counters of a BlobDiff -->
+<dom-module id="nuxeo-blobdiff-status">
+  <template>
+    <style include="nuxeo-blobdiff-styles">
+      :host { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    </style>
+    <span class$="blobdiff-badge [[_class(document.properties.bdiff:status)]]">[[_label(document.properties.bdiff:status)]]</span>
+    <template is="dom-if" if="[[document.properties.bdiff:truncated]]">
+      <span class="blobdiff-badge info">[[i18n('label.blobaudit.truncated')]]</span>
+    </template>
+    <template is="dom-if" if="[[!hideCounters]]">
+      <span class="blobdiff-counters">
+        <span class="change">~[[_n(document.properties.bdiff:changed)]]</span>
+        <span class="add">+[[_n(document.properties.bdiff:added)]]</span>
+        <span class="remove">-[[_n(document.properties.bdiff:removed)]]</span>
+      </span>
+    </template>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-status',
+      behaviors: [Nuxeo.I18nBehavior],
+      properties: {
+        document: Object,
+        hideCounters: { type: Boolean, value: false }
+      },
+      _class: function (status) { return Nuxeo.BlobAudit.statusClass(status); },
+      _label: function (status) { return status ? this.i18n('label.blobaudit.status.' + status) : ''; },
+      _n: function (value) { return value || 0; }
+    });
+  </script>
+</dom-module>

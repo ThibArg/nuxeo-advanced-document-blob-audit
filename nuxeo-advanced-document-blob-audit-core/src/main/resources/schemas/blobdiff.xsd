@@ -32,6 +32,18 @@
   <xs:element name="truncated" type="xs:boolean" />
   <xs:element name="status" type="xs:string" />
 
+  <!--
+    Storage identity of the two compared binaries (since 1.2). Lets a diff in error be replayed
+    (BlobDiff.Retry) even when the binaries could not be read at the time.
+  -->
+  <xs:element name="oldBlobProvider" type="xs:string" />
+  <xs:element name="oldBlobKey" type="xs:string" />
+  <xs:element name="oldMimeType" type="xs:string" />
+  <xs:element name="oldLength" type="xs:long" />
+  <xs:element name="newBlobProvider" type="xs:string" />
+  <xs:element name="newBlobKey" type="xs:string" />
+  <xs:element name="newLength" type="xs:long" />
+
   <!-- The diff itself: a blob, so it stays out of the SQL/Mongo record and out of full-text -->
   <xs:element name="diff" type="nxs:content" />
 

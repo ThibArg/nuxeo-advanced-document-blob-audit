@@ -28,6 +28,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffService;
 import org.nuxeo.audit.advanced.blob.DiffResult;
+import org.nuxeo.audit.advanced.blob.FrozenBlobs;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
@@ -84,6 +85,12 @@ public class BlobDiffWork extends AbstractWork {
 
     protected final String correlationId;
 
+    /**
+     * Id of a previous {@code BlobDiff} this work replaces ({@code BlobDiff.Retry}). It is removed
+     * only once the new document exists, so a retry that fails again still leaves a trace.
+     */
+    protected String replaceDiffId;
+
     public BlobDiffWork(String repositoryName, String docId, String xpath, String oldBlobProviderId,
             String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest, long oldLength,
             String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
@@ -108,6 +115,29 @@ public class BlobDiffWork extends AbstractWork {
         this.correlationId = correlationId;
     }
 
+    /** @since 1.2 */
+    public BlobDiffWork withReplaceDiffId(String diffId) {
+        this.replaceDiffId = diffId;
+        return this;
+    }
+
+    protected FrozenBlobs frozen() {
+        return new FrozenBlobs(oldBlobProviderId, oldBlobKey, oldMimeType, oldLength, newBlobProviderId, newBlobKey,
+                newMimeType, newLength);
+    }
+
+    /** Removes the diff this work replaces, if any. */
+    protected void removeReplaced() {
+        if (replaceDiffId == null) {
+            return;
+        }
+        IdRef ref = new IdRef(replaceDiffId);
+        if (session.exists(ref)) {
+            session.removeDocument(ref);
+            log.debug("Replaced BlobDiff {} removed", replaceDiffId);
+        }
+    }
+
     @Override
     public String getCategory() {
         return WORK_CATEGORY;
@@ -130,10 +160,11 @@ public class BlobDiffWork extends AbstractWork {
             log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
             DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
                                              .createDiffDocument(session, docId, repositoryName, null, xpath, null,
-                                                     null, principal, new Date(eventTime), null, STATUS_ERROR,
-                                                     correlationId);
+                                                     null, frozen(), principal, new Date(eventTime), null,
+                                                     STATUS_ERROR, correlationId);
             diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
             session.saveDocument(diffDoc);
+            removeReplaced();
             setStatus("Done");
             return;
         }
@@ -162,8 +193,10 @@ public class BlobDiffWork extends AbstractWork {
             }
         }
 
-        DocumentModel diffDoc = service.createDiffDocument(session, source, xpath, oldBlob, newBlob, principal,
-                new Date(eventTime), result, status, correlationId);
+        DocumentModel diffDoc = service.createDiffDocument(session, source.getId(), source.getRepositoryName(),
+                source.getTitle(), xpath, oldBlob, newBlob, frozen(), principal, new Date(eventTime), result, status,
+                correlationId);
+        removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");
     }
@@ -185,7 +218,7 @@ public class BlobDiffWork extends AbstractWork {
             info.filename = filename;
             info.mimeType = mimeType;
             info.digest = digest;
-            info.length = Long.valueOf(length);
+            info.length = length < 0 ? null : Long.valueOf(length);
             return provider.readBlob(info);
         } catch (Exception e) { // NOSONAR - a missing frozen binary must not fail the work
             log.warn("Cannot resolve {} blob {} from provider {}", side, key, providerId, e);

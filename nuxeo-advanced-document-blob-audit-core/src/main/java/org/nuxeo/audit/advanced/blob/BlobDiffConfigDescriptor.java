@@ -21,7 +21,9 @@ import java.util.List;
 import org.nuxeo.common.xmap.annotation.XNode;
 import org.nuxeo.common.xmap.annotation.XNodeList;
 import org.nuxeo.common.xmap.annotation.XObject;
+import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.model.Descriptor;
+import org.nuxeo.runtime.services.config.ConfigurationService;
 
 /**
  * Global configuration. Everything is opt-in and bounded on purpose: diffing binaries is expensive
@@ -74,7 +76,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * instance {@code auditors}) is the intended audience.
      */
     @XNode("auditorsGroup")
-    protected String auditorsGroup = BlobAuditConstants.DEFAULT_AUDITORS_GROUP;
+    protected String auditorsGroup;
 
     /** Empty means "every document type". */
     @XNodeList(value = "docTypes/docType", type = ArrayList.class, componentType = String.class)
@@ -120,9 +122,24 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return docTypes;
     }
 
+    /**
+     * Resolution order: {@code <auditorsGroup>} of this descriptor, then the configuration property
+     * {@value BlobAuditConstants#AUDITORS_GROUP_PROPERTY} (also exposed to Web UI as
+     * {@code Nuxeo.UI.config.blobaudit.auditorsGroup}, which is why it is the recommended place),
+     * then {@code administrators}.
+     */
     public String getAuditorsGroup() {
-        return auditorsGroup == null || auditorsGroup.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP
-                : auditorsGroup.trim();
+        if (auditorsGroup != null && !auditorsGroup.isBlank()) {
+            return auditorsGroup.trim();
+        }
+        String property = null;
+        if (Framework.isInitialized()) {
+            ConfigurationService configuration = Framework.getService(ConfigurationService.class);
+            if (configuration != null) {
+                property = configuration.getString(BlobAuditConstants.AUDITORS_GROUP_PROPERTY).orElse(null);
+            }
+        }
+        return property == null || property.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP : property.trim();
     }
 
     public List<String> getXPaths() {

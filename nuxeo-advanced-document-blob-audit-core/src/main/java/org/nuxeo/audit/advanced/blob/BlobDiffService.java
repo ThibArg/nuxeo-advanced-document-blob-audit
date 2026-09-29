@@ -55,6 +55,16 @@ public interface BlobDiffService {
             String status, String correlationId);
 
     /**
+     * Full variant: also persists the storage identity of both binaries, which is what makes a diff
+     * in {@code error} replayable.
+     *
+     * @since 1.2
+     */
+    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
+            DiffResult result, String status, String correlationId);
+
+    /**
      * Returns (creating it if needed) the root {@code /change-diff} container and makes sure its
      * ACL is the expected one. The session must be privileged.
      */

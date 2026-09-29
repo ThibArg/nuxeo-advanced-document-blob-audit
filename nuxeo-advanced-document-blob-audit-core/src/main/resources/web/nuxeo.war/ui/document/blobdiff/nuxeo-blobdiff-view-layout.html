@@ -1,0 +1,112 @@
+<!--
+  View layout of BlobDiff documents: who/when/what, link to the source, the rendered diff, and the
+  download / retry / permanent delete actions.
+-->
+<dom-module id="nuxeo-blobdiff-view-layout">
+  <template>
+    <style include="nuxeo-blobdiff-styles nuxeo-styles">
+      :host { display: block; }
+      .grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 16px;
+        align-items: center;
+      }
+      .grid label { font-weight: 500; opacity: 0.8; }
+      .digest { font-family: monospace; font-size: 0.8em; word-break: break-all; }
+      .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    </style>
+
+    <!-- Web UI does not request our enricher on the current document: fetch it once more with it -->
+    <nuxeo-document id="doc" doc-id="[[document.uid]]" enrichers="blobDiffSource" response="{{_full}}"></nuxeo-document>
+    <nuxeo-operation id="retryOp" op="BlobDiff.Retry"></nuxeo-operation>
+
+    <nuxeo-card heading="[[i18n('label.blobaudit.view.heading')]]">
+      <div class="grid">
+        <label>[[i18n('label.blobaudit.diff.source')]]</label>
+        <nuxeo-blobdiff-source-link source="[[_full.contextParameters.blobDiffSource]]"
+                                    source-id="[[document.properties.bdiff:sourceId]]"></nuxeo-blobdiff-source-link>
+
+        <label>[[i18n('label.blobaudit.diff.xpath')]]</label>
+        <span>[[document.properties.bdiff:xpath]]</span>
+
+        <label>[[i18n('label.blobaudit.diff.user')]]</label>
+        <nuxeo-user-tag user="[[document.properties.bdiff:user]]"></nuxeo-user-tag>
+
+        <label>[[i18n('label.blobaudit.diff.date')]]</label>
+        <span>[[formatDateTime(document.properties.bdiff:date)]]</span>
+
+        <label>[[i18n('label.blobaudit.diff.status')]]</label>
+        <nuxeo-blobdiff-status document="[[document]]"></nuxeo-blobdiff-status>
+
+        <label>[[i18n('label.blobaudit.diff.summary')]]</label>
+        <span>[[document.properties.bdiff:summary]]</span>
+
+        <label>[[i18n('label.blobaudit.view.files')]]</label>
+        <span>[[document.properties.bdiff:oldFilename]] &rarr; [[document.properties.bdiff:newFilename]]
+          <span class="blobdiff-muted">([[document.properties.bdiff:mimeType]])</span></span>
+
+        <label>[[i18n('label.blobaudit.view.digests')]]</label>
+        <span class="digest">[[document.properties.bdiff:oldDigest]]<br>[[document.properties.bdiff:newDigest]]</span>
+
+        <label>[[i18n('label.blobaudit.view.correlation')]]</label>
+        <span class="digest">[[document.properties.bdiff:correlationId]]</span>
+      </div>
+
+      <div class="actions">
+        <template is="dom-if" if="[[document.properties.bdiff:diff.data]]">
+          <a href$="[[document.properties.bdiff:diff.data]]" download>
+            <paper-button noink><iron-icon icon="icons:file-download"></iron-icon>&nbsp;[[i18n('label.blobaudit.diff.download')]]</paper-button>
+          </a>
+        </template>
+        <template is="dom-if" if="[[_canRetry(document)]]">
+          <paper-button noink on-tap="_retry"><iron-icon icon="icons:refresh"></iron-icon>&nbsp;[[i18n('label.blobaudit.action.retry')]]</paper-button>
+        </template>
+        <paper-button noink on-tap="_backToList"><iron-icon icon="icons:list"></iron-icon>&nbsp;[[i18n('label.blobaudit.view.backToList')]]</paper-button>
+        <paper-button noink class="primary" on-tap="_delete"><iron-icon icon="icons:delete-forever"></iron-icon>&nbsp;[[i18n('label.blobaudit.delete.title')]]</paper-button>
+      </div>
+    </nuxeo-card>
+
+    <nuxeo-card heading="[[i18n('label.blobaudit.view.diff')]]">
+      <nuxeo-blobdiff-viewer url="[[document.properties.bdiff:diff.data]]"></nuxeo-blobdiff-viewer>
+    </nuxeo-card>
+
+    <nuxeo-blobdiff-delete-dialog id="deleteDialog"></nuxeo-blobdiff-delete-dialog>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-view-layout',
+      behaviors: [Nuxeo.LayoutBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior],
+      properties: {
+        document: { type: Object, observer: '_documentChanged' },
+        _full: Object
+      },
+      _documentChanged: function (doc) {
+        if (doc && doc.uid) {
+          this.$.doc.get();
+        }
+      },
+      _canRetry: function (doc) {
+        var p = doc && doc.properties;
+        return !!p && p['bdiff:status'] === 'error' && !!p['bdiff:oldBlobKey'] && !!p['bdiff:newBlobKey'];
+      },
+      _retry: function () {
+        this.$.retryOp.input = this.document.uid;
+        this.$.retryOp.execute()
+          .then(function () {
+            this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
+            Nuxeo.BlobAudit.openPage();
+          }.bind(this))
+          .catch(function (err) {
+            this.fire('notify', { message: this.i18n('label.blobaudit.retry.failed') + ' ' + (err && err.message || '') });
+          }.bind(this));
+      },
+      _delete: function () {
+        this.$.deleteDialog.open([this.document]).then(function (deleted) {
+          if (deleted) { Nuxeo.BlobAudit.openPage(); }
+        });
+      },
+      _backToList: function () { Nuxeo.BlobAudit.openPage(); }
+    });
+  </script>
+</dom-module>

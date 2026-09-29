@@ -1,0 +1,68 @@
+<!-- Retention purge (BlobDiff.Purge) with warning and explicit acknowledgment -->
+<dom-module id="nuxeo-blobdiff-purge-dialog">
+  <template>
+    <style include="nuxeo-blobdiff-styles nuxeo-styles">
+      .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+      nuxeo-date-picker, nuxeo-select { display: block; margin-bottom: 8px; }
+    </style>
+    <nuxeo-operation id="op" op="BlobDiff.Purge"></nuxeo-operation>
+    <nuxeo-dialog id="dialog" with-backdrop no-auto-focus>
+      <h2>[[i18n('label.blobaudit.purge.title')]]</h2>
+      <nuxeo-date-picker label="[[i18n('label.blobaudit.purge.before')]]" value="{{_before}}" required></nuxeo-date-picker>
+      <nuxeo-select label="[[i18n('label.blobaudit.purge.status')]]" selected="{{_status}}" attr-for-selected="key">
+        <paper-item key="">[[i18n('label.blobaudit.purge.anyStatus')]]</paper-item>
+        <paper-item key="ok">[[i18n('label.blobaudit.status.ok')]]</paper-item>
+        <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
+        <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
+        <paper-item key="skippedTooLarge">[[i18n('label.blobaudit.status.skippedTooLarge')]]</paper-item>
+      </nuxeo-select>
+      <div class="blobdiff-warning">
+        <iron-icon icon="icons:warning"></iron-icon>
+        <div>[[i18n('label.blobaudit.purge.warning')]]</div>
+      </div>
+      <paper-checkbox checked="{{_ack}}">[[i18n('label.blobaudit.delete.ack')]]</paper-checkbox>
+      <div class="buttons">
+        <paper-button dialog-dismiss class="secondary">[[i18n('command.cancel')]]</paper-button>
+        <paper-button class="primary" disabled$="[[!_canPurge(_ack, _before, _busy)]]" on-tap="_purge">
+          [[i18n('label.blobaudit.purge.confirm')]]
+        </paper-button>
+      </div>
+    </nuxeo-dialog>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-purge-dialog',
+      behaviors: [Nuxeo.I18nBehavior],
+      properties: {
+        _before: String,
+        _status: { type: String, value: '' },
+        _ack: { type: Boolean, value: false },
+        _busy: { type: Boolean, value: false }
+      },
+      open: function () {
+        this._ack = false;
+        this._status = '';
+        this.$.dialog.open();
+        return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
+      },
+      _canPurge: function (ack, before, busy) { return ack && !!before && !busy; },
+      _purge: function () {
+        this._busy = true;
+        var params = { before: this._before };
+        if (this._status) { params.status = this._status; }
+        this.$.op.params = params;
+        this.$.op.execute()
+          .then(function (result) {
+            var deleted = result && result.deleted !== undefined ? result.deleted : '?';
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.done', deleted) });
+            this.$.dialog.close();
+            this._resolve && this._resolve(true);
+          }.bind(this))
+          .catch(function (err) {
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
+          }.bind(this))
+          .then(function () { this._busy = false; }.bind(this));
+      }
+    });
+  </script>
+</dom-module>

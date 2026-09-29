@@ -1,0 +1,91 @@
+<!--
+  Renders the unified diff stored in bdiff:diff: "+" added (green), "-" removed (red), "~" modified
+  (orange), "# Images" as a section header. Rendered progressively, PAGE_SIZE lines at a time.
+-->
+<dom-module id="nuxeo-blobdiff-viewer">
+  <template>
+    <style include="nuxeo-blobdiff-styles">
+      :host { display: block; }
+      .diff {
+        font-family: Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 0.85em;
+        line-height: 1.5;
+        border: 1px solid var(--nuxeo-border, #ddd);
+        border-radius: 4px;
+        overflow-x: auto;
+      }
+      .line { padding: 0 8px; white-space: pre-wrap; word-break: break-word; }
+      .line.add { background: rgba(46, 125, 50, 0.12); color: #1b5e20; }
+      .line.remove { background: rgba(198, 40, 40, 0.10); color: #b71c1c; }
+      .line.change { background: rgba(239, 108, 0, 0.12); color: #e65100; }
+      .line.section { background: var(--nuxeo-box, #f2f2f2); font-weight: bold; padding: 4px 8px; margin-top: 8px; }
+      .footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+    </style>
+
+    <template is="dom-if" if="[[loading]]">
+      <paper-spinner active></paper-spinner>
+    </template>
+    <template is="dom-if" if="[[error]]">
+      <div class="blobdiff-muted">[[i18n('label.blobaudit.viewer.error')]]</div>
+    </template>
+    <template is="dom-if" if="[[_empty(url, loading)]]">
+      <div class="blobdiff-muted">[[i18n('label.blobaudit.viewer.empty')]]</div>
+    </template>
+
+    <div class="diff" hidden$="[[!_visible.length]]">
+      <template is="dom-repeat" items="[[_visible]]" as="line">
+        <div class$="line [[_lineClass(line)]]">[[line]]</div>
+      </template>
+    </div>
+    <div class="footer" hidden$="[[!_lines.length]]">
+      <span class="blobdiff-muted">[[_count(_visible.length, _lines.length)]]</span>
+      <paper-button noink hidden$="[[!_hasMore(_visible.length, _lines.length)]]" on-tap="_more">
+        [[i18n('label.blobaudit.viewer.more')]]
+      </paper-button>
+    </div>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiff-viewer',
+      behaviors: [Nuxeo.I18nBehavior],
+      properties: {
+        /** Download URL of bdiff:diff */
+        url: { type: String, observer: '_load' },
+        pageSize: { type: Number, value: 1000 },
+        loading: { type: Boolean, value: false },
+        error: { type: Boolean, value: false },
+        _lines: { type: Array, value: function () { return []; } },
+        _visible: { type: Array, value: function () { return []; } }
+      },
+      _load: function (url) {
+        this.set('_lines', []);
+        this.set('_visible', []);
+        this.error = false;
+        if (!url) {
+          return;
+        }
+        this.loading = true;
+        fetch(url, { credentials: 'include' })
+          .then(function (response) {
+            if (!response.ok) { throw new Error(response.status); }
+            return response.text();
+          })
+          .then(function (text) {
+            var lines = text.split(/\r?\n/);
+            if (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
+            this.set('_lines', lines);
+            this.set('_visible', lines.slice(0, this.pageSize));
+          }.bind(this))
+          .catch(function () { this.error = true; }.bind(this))
+          .then(function () { this.loading = false; }.bind(this));
+      },
+      _more: function () {
+        this.set('_visible', this._lines.slice(0, this._visible.length + this.pageSize));
+      },
+      _hasMore: function (shown, total) { return shown < total; },
+      _count: function (shown, total) { return this.i18n('label.blobaudit.viewer.count', shown, total); },
+      _empty: function (url, loading) { return !url && !loading; },
+      _lineClass: function (line) { return Nuxeo.BlobAudit.lineClass(line); }
+    });
+  </script>
+</dom-module>

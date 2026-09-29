@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.properties">
+
+  <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+    <documentation>
+      Group granted access to the BlobDiff documents, in addition to "administrators". Being
+      prefixed with org.nuxeo.web.ui, it is also exposed to Web UI as
+      Nuxeo.UI.config.blobaudit.auditorsGroup, which drives the visibility of the drawer entry and
+      of the document tab. Override this property rather than config/auditorsGroup, so that the
+      server and the UI stay in sync.
+    </documentation>
+    <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">administrators</property>
+  </extension>
+
+</component>

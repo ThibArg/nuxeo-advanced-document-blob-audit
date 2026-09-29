@@ -67,6 +67,21 @@ public class BlobAuditConstants {
 
     public static final String XP_DIFF_BLOB = "bdiff:diff";
 
+    /* Storage identity of the compared binaries, needed to replay a diff (since 1.2) */
+    public static final String XP_OLD_BLOB_PROVIDER = "bdiff:oldBlobProvider";
+
+    public static final String XP_OLD_BLOB_KEY = "bdiff:oldBlobKey";
+
+    public static final String XP_OLD_MIMETYPE = "bdiff:oldMimeType";
+
+    public static final String XP_OLD_LENGTH = "bdiff:oldLength";
+
+    public static final String XP_NEW_BLOB_PROVIDER = "bdiff:newBlobProvider";
+
+    public static final String XP_NEW_BLOB_KEY = "bdiff:newBlobKey";
+
+    public static final String XP_NEW_LENGTH = "bdiff:newLength";
+
     /* Container */
     public static final String CONTAINER_NAME = "change-diff";
 
@@ -80,6 +95,13 @@ public class BlobAuditConstants {
      * content extracted from the source documents: choose the audience deliberately.
      */
     public static final String DEFAULT_AUDITORS_GROUP = "administrators";
+
+    /**
+     * Configuration property holding the auditors group. Its {@code org.nuxeo.web.ui.} prefix makes
+     * Web UI expose it as {@code Nuxeo.UI.config.blobaudit.auditorsGroup}, so the server and the UI
+     * share a single setting.
+     */
+    public static final String AUDITORS_GROUP_PROPERTY = "org.nuxeo.web.ui.blobaudit.auditorsGroup";
 
     /** @deprecated use {@link BlobDiffConfigDescriptor#getAuditorsGroup()} */
     @Deprecated

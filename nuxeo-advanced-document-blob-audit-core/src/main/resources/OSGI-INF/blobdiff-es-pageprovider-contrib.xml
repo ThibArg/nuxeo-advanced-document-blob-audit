@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<!--
+  Elasticsearch page provider behind the Web UI "Content changes audit" page and the source document
+  tab. Kept in its own component requiring Elasticsearch: without it (unit tests), the component
+  stays pending instead of failing on a missing class.
+-->
+<component name="org.nuxeo.audit.advanced.blob.pageproviders.es">
+
+  <require>org.nuxeo.elasticsearch.ElasticSearchComponent</require>
+
+  <extension target="org.nuxeo.ecm.platform.query.api.PageProviderService" point="providers">
+
+    <genericPageProvider name="BLOB_DIFFS_ADMIN"
+                         class="org.nuxeo.elasticsearch.provider.ElasticSearchNxqlPageProvider">
+      <trackUsage>false</trackUsage>
+      <property name="coreSession">#{documentManager}</property>
+      <whereClause docType="BlobDiffSearch">
+        <fixedPart>
+          ecm:primaryType = 'BlobDiff' AND ecm:isVersion = 0 AND ecm:isTrashed = 0
+        </fixedPart>
+        <predicate parameter="bdiff:sourceId" operator="=">
+          <field schema="blobdiffsearch" name="sourceId" />
+        </predicate>
+        <predicate parameter="bdiff:user" operator="=">
+          <field schema="blobdiffsearch" name="user" />
+        </predicate>
+        <predicate parameter="bdiff:date" operator="BETWEEN">
+          <field schema="blobdiffsearch" name="date_min" />
+          <field schema="blobdiffsearch" name="date_max" />
+        </predicate>
+        <predicate parameter="bdiff:truncated" operator="=">
+          <field schema="blobdiffsearch" name="truncated" />
+        </predicate>
+      </whereClause>
+      <aggregates>
+        <aggregate id="bdiff_status_agg" type="terms" parameter="bdiff:status">
+          <field schema="blobdiffsearch" name="status_agg" />
+          <properties>
+            <property name="size">10</property>
+          </properties>
+        </aggregate>
+        <aggregate id="bdiff_mimetype_agg" type="terms" parameter="bdiff:mimeType">
+          <field schema="blobdiffsearch" name="mimetype_agg" />
+          <properties>
+            <property name="size">20</property>
+          </properties>
+        </aggregate>
+        <aggregate id="bdiff_xpath_agg" type="terms" parameter="bdiff:xpath">
+          <field schema="blobdiffsearch" name="xpath_agg" />
+          <properties>
+            <property name="size">20</property>
+          </properties>
+        </aggregate>
+        <aggregate id="bdiff_user_agg" type="terms" parameter="bdiff:user">
+          <field schema="blobdiffsearch" name="user_agg" />
+          <properties>
+            <property name="size">20</property>
+          </properties>
+        </aggregate>
+      </aggregates>
+      <sort column="bdiff:date" ascending="false" />
+      <pageSize>40</pageSize>
+      <maxPageSize>200</maxPageSize>
+    </genericPageProvider>
+
+  </extension>
+
+</component>
