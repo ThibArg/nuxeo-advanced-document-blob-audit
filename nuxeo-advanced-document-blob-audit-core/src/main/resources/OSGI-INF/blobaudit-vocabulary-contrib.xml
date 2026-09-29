@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <component name="org.nuxeo.audit.advanced.blob.vocabulary">
 
-  <require>org.nuxeo.ecm.platform.audit.web.access.directories</require>
+  <require>org.nuxeo.ecm.directories</require>
 
   <extension target="org.nuxeo.ecm.directory.GenericDirectory" point="directories">
     <documentation>

@@ -2,14 +2,14 @@
 <!-- Registers the Web UI bundle of the plugin. Pending (harmless) where Web UI is not deployed. -->
 <component name="org.nuxeo.audit.advanced.blob.webui">
 
-  <require>org.nuxeo.web.ui.resources</require>
-
+  <!-- Register the Web UI entry-point HTML as a web resource -->
   <extension target="org.nuxeo.ecm.platform.WebResources" point="resources">
-    <resource name="nuxeo-advanced-document-blob-audit.html" type="import" shrinkable="false">
+    <resource name="nuxeo-advanced-document-blob-audit.html" type="import">
       <uri>/ui/nuxeo-advanced-document-blob-audit/nuxeo-advanced-document-blob-audit.html</uri>
     </resource>
   </extension>
 
+  <!-- Append our resource to the web-ui bundle so it gets loaded -->
   <extension target="org.nuxeo.ecm.platform.WebResources" point="bundles">
     <bundle name="web-ui">
       <resources append="true">

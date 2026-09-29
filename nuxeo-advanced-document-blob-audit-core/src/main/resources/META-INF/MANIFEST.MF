@@ -9,12 +9,11 @@ Bundle-ClassPath: .
 Nuxeo-Component: OSGI-INF/blobdiff-service-contrib.xml,
  OSGI-INF/blobdiff-doctype-contrib.xml,
  OSGI-INF/blobdiff-init-contrib.xml,
- OSGI-INF/blobdiff-pageprovider-contrib.xml,
+ OSGI-INF/blobdiff-pageproviders-contrib.xml,
  OSGI-INF/blobaudit-listener-contrib.xml,
  OSGI-INF/blobaudit-audit-contrib.xml,
  OSGI-INF/blobaudit-vocabulary-contrib.xml,
  OSGI-INF/blobaudit-properties-contrib.xml,
  OSGI-INF/blobdiff-operations-contrib.xml,
  OSGI-INF/blobdiff-marshallers-contrib.xml,
- OSGI-INF/blobdiff-es-pageprovider-contrib.xml,
  OSGI-INF/blobaudit-webui-contrib.xml
