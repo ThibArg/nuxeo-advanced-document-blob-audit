@@ -29,6 +29,7 @@ import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffService;
 import org.nuxeo.audit.advanced.blob.DiffResult;
 import org.nuxeo.audit.advanced.blob.FrozenBlobs;
+import org.nuxeo.audit.advanced.blob.VersionContext;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
@@ -52,6 +53,8 @@ public class BlobDiffWork extends AbstractWork {
     private static final long serialVersionUID = 1L;
 
     private static final Logger log = LogManager.getLogger(BlobDiffWork.class);
+
+    protected final String sourceTitle;
 
     protected final String xpath;
 
@@ -85,6 +88,8 @@ public class BlobDiffWork extends AbstractWork {
 
     protected final String correlationId;
 
+    protected final VersionContext versions;
+
     /**
      * Id of a previous {@code BlobDiff} this work replaces ({@code BlobDiff.Retry}). It is removed
      * only once the new document exists, so a retry that fails again still leaves a trace.
@@ -93,10 +98,21 @@ public class BlobDiffWork extends AbstractWork {
 
     public BlobDiffWork(String repositoryName, String docId, String xpath, String oldBlobProviderId,
             String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest, long oldLength,
-            String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
-            String newDigest, long newLength, String principal, long eventTime, String correlationId) {
+            String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType, String newDigest,
+            long newLength, String principal, long eventTime, String correlationId) {
+        this(repositoryName, docId, null, xpath, oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest,
+                oldLength, newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength, principal,
+                eventTime, correlationId, VersionContext.NONE);
+    }
+
+    public BlobDiffWork(String repositoryName, String docId, String sourceTitle, String xpath,
+            String oldBlobProviderId, String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest,
+            long oldLength, String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
+            String newDigest, long newLength, String principal, long eventTime, String correlationId,
+            VersionContext versions) {
         super(repositoryName + ':' + docId + ':' + xpath + ':' + correlationId + ":blobDiff");
         setDocument(repositoryName, docId);
+        this.sourceTitle = sourceTitle;
         this.xpath = xpath;
         this.oldBlobProviderId = oldBlobProviderId;
         this.oldBlobKey = oldBlobKey;
@@ -113,6 +129,7 @@ public class BlobDiffWork extends AbstractWork {
         this.principal = principal;
         this.eventTime = eventTime;
         this.correlationId = correlationId;
+        this.versions = versions == null ? VersionContext.NONE : versions;
     }
 
     /** @since 1.2 */
@@ -159,8 +176,8 @@ public class BlobDiffWork extends AbstractWork {
             // already exists, so leave a trace instead of failing silently.
             log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
             DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
-                                             .createDiffDocument(session, docId, repositoryName, null, xpath, null,
-                                                     null, frozen(), principal, new Date(eventTime), null,
+                                             .createDiffDocument(session, docId, repositoryName, sourceTitle, xpath, null,
+                                                     null, frozen(), versions, principal, new Date(eventTime), null,
                                                      STATUS_ERROR, correlationId);
             diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
             session.saveDocument(diffDoc);
@@ -194,8 +211,8 @@ public class BlobDiffWork extends AbstractWork {
         }
 
         DocumentModel diffDoc = service.createDiffDocument(session, source.getId(), source.getRepositoryName(),
-                source.getTitle(), xpath, oldBlob, newBlob, frozen(), principal, new Date(eventTime), result, status,
-                correlationId);
+                source.getTitle(), xpath, oldBlob, newBlob, frozen(), versions, principal, new Date(eventTime), result,
+                status, correlationId);
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");

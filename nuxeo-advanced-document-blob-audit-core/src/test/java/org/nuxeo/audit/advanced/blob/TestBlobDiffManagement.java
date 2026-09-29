@@ -44,6 +44,7 @@ import org.nuxeo.ecm.core.api.CloseableCoreSession;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
+import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
@@ -143,10 +144,13 @@ public class TestBlobDiffManagement {
     @Test
     public void testBinaryKeysArePersistedByTheWork() throws Exception {
         DocumentModel doc = file("keys", textBlob("v1", "text/plain", "notes.txt"));
+        session.checkIn(doc.getRef(), VersioningOption.MAJOR, "v1");
+        session.save();
         txFeature.nextTransaction();
         doc = session.getDocument(doc.getRef());
         doc.setPropertyValue("file:content", (Serializable) textBlob("v2", "text/plain", "notes.txt"));
         session.saveDocument(doc);
+        session.checkIn(doc.getRef(), VersioningOption.MINOR, "v2");
         session.save();
         txFeature.nextTransaction();
 

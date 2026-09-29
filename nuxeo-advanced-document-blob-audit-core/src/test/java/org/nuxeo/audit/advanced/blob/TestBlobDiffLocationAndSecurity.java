@@ -51,6 +51,7 @@ import org.nuxeo.ecm.core.api.DocumentModelList;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.PathRef;
+import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.impl.UserPrincipal;
 import org.nuxeo.ecm.core.api.security.ACE;
 import org.nuxeo.ecm.core.api.security.ACL;
@@ -136,12 +137,15 @@ public class TestBlobDiffLocationAndSecurity {
         try (CloseableCoreSession jdoe = coreFeature.openCoreSession("jdoe")) {
             DocumentModel doc = createFile(jdoe, name, textBlob("v1", "text/plain", "notes.txt"));
             id = doc.getId();
+            jdoe.checkIn(doc.getRef(), VersioningOption.MAJOR, "v1");
+            jdoe.save();
         }
         txFeature.nextTransaction();
         try (CloseableCoreSession jdoe = coreFeature.openCoreSession("jdoe")) {
             DocumentModel doc = jdoe.getDocument(new org.nuxeo.ecm.core.api.IdRef(id));
             doc.setPropertyValue("file:content", (Serializable) textBlob("v2", "text/plain", "notes.txt"));
             jdoe.saveDocument(doc);
+            jdoe.checkIn(doc.getRef(), VersioningOption.MINOR, "v2");
             jdoe.save();
         }
         // commits and waits for BlobDiffWork

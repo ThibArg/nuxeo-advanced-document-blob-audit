@@ -60,5 +60,6 @@
   "label.blobaudit.viewer.error": "The diff could not be loaded.",
   "label.blobaudit.viewer.empty": "No diff content (no change detected, or status other than OK).",
   "label.blobaudit.viewer.more": "Show more",
-  "label.blobaudit.viewer.count": "{0} / {1} lines"
+  "label.blobaudit.viewer.count": "{0} / {1} lines",
+  "label.blobaudit.diff.versions": "Versions"
 }

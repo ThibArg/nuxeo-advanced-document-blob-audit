@@ -354,6 +354,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
             String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
             DiffResult result, String status, String correlationId) {
+        return createDiffDocument(session, sourceId, sourceRepository, sourceTitle, xpath, oldBlob, newBlob, frozen,
+                VersionContext.NONE, user, date, result, status, correlationId);
+    }
+
+    @Override
+    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen,
+            VersionContext versions, String user, Date date, DiffResult result, String status, String correlationId) {
         DocumentModel container = getOrCreateContainer(session, date);
         String name = diffDocumentName(sourceId, date, correlationId);
         DocumentModel diffDoc = session.createDocumentModel(container.getPathAsString(), name, DIFF_DOCTYPE);
@@ -361,6 +369,12 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         diffDoc.setPropertyValue(XP_SOURCE_ID, sourceId);
         diffDoc.setPropertyValue(XP_SOURCE_REPO, sourceRepository);
         diffDoc.setPropertyValue(XP_XPATH, xpath);
+        VersionContext versionContext = versions == null ? VersionContext.NONE : versions;
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_PREVIOUS_VERSION_ID, versionContext.previousVersionId());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_PREVIOUS_VERSION_LABEL, versionContext.previousVersionLabel());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_VERSION_ID, versionContext.newVersionId());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_VERSION_LABEL, versionContext.newVersionLabel());
+        diffDoc.setPropertyValue(BlobAuditConstants.XP_VERSION_SERIES_ID, versionContext.versionSeriesId());
         diffDoc.setPropertyValue(XP_CORRELATION_ID, correlationId);
         diffDoc.setPropertyValue(XP_USER, user);
         Calendar calendar = Calendar.getInstance();
@@ -400,7 +414,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * {@code <sourceId>-<eventTime>-<correlationId>}: one save touching two blob xpaths produces two
+     * {@code <sourceId>-<eventTime>-<correlationId>}: one version touching two blob xpaths produces two
      * diffs with the same source and time, so the correlation id is what keeps names unique.
      */
     protected String diffDocumentName(String sourceId, Date date, String correlationId) {

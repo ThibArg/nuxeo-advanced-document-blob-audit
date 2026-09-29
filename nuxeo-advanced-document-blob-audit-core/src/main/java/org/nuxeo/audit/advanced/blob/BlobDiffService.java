@@ -64,6 +64,11 @@ public interface BlobDiffService {
             String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
             DiffResult result, String status, String correlationId);
 
+    /** Full version-aware variant used by version-triggered works. */
+    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
+            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen,
+            VersionContext versions, String user, Date date, DiffResult result, String status, String correlationId);
+
     /**
      * Returns (creating it if needed) the root {@code /change-diff} container and makes sure its
      * ACL is the expected one. The session must be privileged.

@@ -104,7 +104,7 @@ The diff is stored as a blob, not a string: outside SQL/Mongo records and outsid
 
 ### Container and Security
 
-`/change-diff/YYYY/MM/DD/`, partitioned by date (server time zone). Diff documents are named `<sourceId>-<eventTime>-<correlationId>`, so a single save touching several blob xpaths yields distinct documents.
+`/change-diff/YYYY/MM/DD/`, partitioned by date (server time zone). Diff documents are named `<sourceId>-<eventTime>-<correlationId>`, so a single version containing changes on several blob xpaths yields distinct documents.
 
 - **Created at startup, always.** `BlobDiffRepositoryInit` creates `/change-diff` at every repository initialisation, even when the feature is disabled, so the restricted ACL exists before the first diff is written.
 - **Self-healing ACL.** At each startup the local ACL of `/change-diff` is compared with the expected one and reset (with a WARN) if it differs: the auditors group gets `Read`, `Remove` and `RemoveChildren`, then inheritance is blocked. Dated sub-folders have no local ACL and inherit it.
@@ -224,7 +224,7 @@ nuxeo-advanced-document-blob-audit-package/target/
 
 `BlobDiffWork` does not transport `Blob` instances directly. When the work is scheduled, both sides of the comparison are frozen using their blob provider identifiers, storage keys, filenames, MIME types, digests, and lengths.
 
-The new blob is explicitly written to its `BlobProvider` before the work is queued. The work therefore never reloads the current blob property from the source document. This guarantees that a queued comparison always uses the exact pair that triggered the event, even if the source document is modified again before the asynchronous work starts.
+Both blobs already belong to persisted Nuxeo versions and are `ManagedBlob` instances. Their existing provider IDs and storage keys are captured directly; the listener does not write either blob again. The work never reloads the current blob property from the live document. This guarantees that a queued comparison always uses the exact version pair that triggered the event, even if the live document is modified again before the asynchronous work starts.
 
 Both storage keys are resolved through `BlobManager` during work execution. If either frozen blob can no longer be resolved, the persistent `BlobDiff` is created with an `error` status instead of storing a misleading diff.
 

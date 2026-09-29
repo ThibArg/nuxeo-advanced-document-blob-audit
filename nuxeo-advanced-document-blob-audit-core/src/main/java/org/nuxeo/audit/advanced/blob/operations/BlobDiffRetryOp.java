@@ -15,31 +15,12 @@
  */
 package org.nuxeo.audit.advanced.blob.operations;
 
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_MIMETYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_KEY;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_PROVIDER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_LENGTH;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_KEY;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_PROVIDER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_FILENAME;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_LENGTH;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_MIMETYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_REPO;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_STATUS;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_USER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.*;
 
 import java.util.Calendar;
 
 import org.nuxeo.audit.advanced.blob.BlobDiffAccess;
+import org.nuxeo.audit.advanced.blob.VersionContext;
 import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
@@ -86,11 +67,18 @@ public class BlobDiffRetryOp {
         Calendar date = (Calendar) diff.getPropertyValue(XP_DATE);
         String newMime = str(diff, XP_MIMETYPE);
         String oldMime = str(diff, XP_OLD_MIMETYPE);
-        BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), str(diff, XP_XPATH), oldProvider,
-                oldKey, str(diff, XP_OLD_FILENAME), oldMime == null ? newMime : oldMime, str(diff, XP_OLD_DIGEST),
-                length(diff, XP_OLD_LENGTH), newProvider, newKey, str(diff, XP_NEW_FILENAME), newMime,
-                str(diff, XP_NEW_DIGEST), length(diff, XP_NEW_LENGTH), str(diff, XP_USER),
-                date == null ? System.currentTimeMillis() : date.getTimeInMillis(), str(diff, XP_CORRELATION_ID));
+        VersionContext versions = new VersionContext(
+                str(diff, XP_PREVIOUS_VERSION_ID),
+                str(diff, XP_PREVIOUS_VERSION_LABEL),
+                str(diff, XP_NEW_VERSION_ID),
+                str(diff, XP_NEW_VERSION_LABEL),
+                str(diff, XP_VERSION_SERIES_ID));
+        BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), diff.getTitle(), str(diff, XP_XPATH),
+                oldProvider, oldKey, str(diff, XP_OLD_FILENAME), oldMime == null ? newMime : oldMime,
+                str(diff, XP_OLD_DIGEST), length(diff, XP_OLD_LENGTH), newProvider, newKey,
+                str(diff, XP_NEW_FILENAME), newMime, str(diff, XP_NEW_DIGEST), length(diff, XP_NEW_LENGTH),
+                str(diff, XP_USER), date == null ? System.currentTimeMillis() : date.getTimeInMillis(),
+                str(diff, XP_CORRELATION_ID), versions);
         work.withReplaceDiffId(diff.getId());
         Framework.getService(WorkManager.class).schedule(work, true);
         return diff;

@@ -36,6 +36,11 @@ public class BlobAuditConstants {
     public static final String XP_SOURCE_REPO = "bdiff:sourceRepository";
 
     public static final String XP_XPATH = "bdiff:xpath";
+public static final String XP_PREVIOUS_VERSION_ID = "bdiff:previousVersionId";
+public static final String XP_PREVIOUS_VERSION_LABEL = "bdiff:previousVersionLabel";
+public static final String XP_NEW_VERSION_ID = "bdiff:newVersionId";
+public static final String XP_NEW_VERSION_LABEL = "bdiff:newVersionLabel";
+public static final String XP_VERSION_SERIES_ID = "bdiff:versionSeriesId";
 
     public static final String XP_CORRELATION_ID = "bdiff:correlationId";
 

@@ -10,6 +10,13 @@
   <xs:element name="sourceRepository" type="xs:string" />
   <xs:element name="xpath" type="xs:string" />
 
+  <!-- The exact successive versions compared -->
+  <xs:element name="previousVersionId" type="xs:string" />
+  <xs:element name="previousVersionLabel" type="xs:string" />
+  <xs:element name="newVersionId" type="xs:string" />
+  <xs:element name="newVersionLabel" type="xs:string" />
+  <xs:element name="versionSeriesId" type="xs:string" />
+
   <!-- Ties this document back to its audit entry, which is written synchronously -->
   <xs:element name="correlationId" type="xs:string" />
 

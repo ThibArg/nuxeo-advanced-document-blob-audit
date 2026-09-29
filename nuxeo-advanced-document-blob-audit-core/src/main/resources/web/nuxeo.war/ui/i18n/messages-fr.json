@@ -60,5 +60,6 @@
   "label.blobaudit.viewer.error": "Impossible de charger le diff.",
   "label.blobaudit.viewer.empty": "Pas de contenu de diff (aucune modification détectée, ou statut autre que OK).",
   "label.blobaudit.viewer.more": "Afficher plus",
-  "label.blobaudit.viewer.count": "{0} / {1} lignes"
+  "label.blobaudit.viewer.count": "{0} / {1} lignes",
+  "label.blobaudit.diff.versions": "Versions"
 }
