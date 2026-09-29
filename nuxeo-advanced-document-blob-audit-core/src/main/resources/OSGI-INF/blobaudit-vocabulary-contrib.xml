@@ -7,11 +7,14 @@
     <documentation>
       Shipping the i18n files is not enough: for blobContentModified to show up in the Web UI
       "Performed Actions" filter, it must exist as a row of the eventTypes vocabulary.
-      dataLoadingPolicy=reject_duplicate keeps the platform rows untouched and only adds ours.
+      dataLoadingPolicy=skip_duplicate keeps the platform rows untouched and only adds ours.
     </documentation>
-    <directory name="eventTypes">
+    <directory name="eventTypes" extends="template-vocabulary">
       <dataFile>directories/eventtypes-blobaudit.csv</dataFile>
-      <dataLoadingPolicy>reject_duplicate</dataLoadingPolicy>
+      <dataLoadingPolicy>skip_duplicate</dataLoadingPolicy>
+      <types>
+        <type>system</type>
+      </types>
     </directory>
   </extension>
 
