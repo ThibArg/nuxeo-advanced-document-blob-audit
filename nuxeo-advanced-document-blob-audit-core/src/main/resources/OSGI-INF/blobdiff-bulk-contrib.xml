@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.bulk">
+
+  <require>org.nuxeo.ecm.core.bulk</require>
+  <require>org.nuxeo.runtime.stream.service</require>
+
+  <!--
+    Retention purge of BlobDiff documents.
+
+    httpEnabled is deliberately left to its default (false): the action must stay unreachable
+    through Bulk.RunAction and through the /search/bulk/{action} REST endpoint. The supported entry
+    point is the BlobDiff.Purge operation, which enforces the auditors check and builds the query.
+    See BlobDiffPurgeAction for the full rationale - do not turn this on.
+
+    exclusive: one purge at a time per repository. A second submission raises a
+    ConcurrentUpdateException, which BlobDiff.Purge turns into a readable message. The underlying
+    lock carries a TTL, so a command lost mid-flight does not freeze the feature.
+  -->
+  <extension target="org.nuxeo.ecm.core.bulk" point="actions">
+    <action name="blobDiffPurge" defaultScroller="repository" inputStream="bulk/blobDiffPurge"
+            bucketSize="100" batchSize="50" exclusive="true" />
+  </extension>
+
+  <extension target="org.nuxeo.runtime.stream.service" point="streamProcessor">
+    <streamProcessor name="blobDiffPurge"
+                     class="org.nuxeo.audit.advanced.blob.bulk.BlobDiffPurgeAction"
+                     defaultConcurrency="1" defaultPartitions="1">
+      <policy name="default" maxRetries="3" delay="1s" maxDelay="10s" continueOnFailure="true" />
+    </streamProcessor>
+  </extension>
+
+</component>

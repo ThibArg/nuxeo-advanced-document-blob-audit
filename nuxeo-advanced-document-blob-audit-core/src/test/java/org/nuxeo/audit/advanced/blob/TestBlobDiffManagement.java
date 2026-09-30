@@ -45,7 +45,6 @@ import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.VersioningOption;
-import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.io.registry.MarshallerHelper;
@@ -230,46 +229,11 @@ public class TestBlobDiffManagement {
         TransactionHelper.startTransaction();
     }
 
-    /* ------------------------------------------------------------------ purge */
-
-    @Test
-    public void testPurgeDeletesOlderDiffsOnlyAndCleansEmptyFolders() throws Exception {
-        DocumentModel source = file("purged", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel old1 = diff(source, daysAgo(40), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
-        DocumentModel old2 = diff(source, daysAgo(40), BlobAuditConstants.STATUS_ERROR, FrozenBlobs.NONE);
-        DocumentModel recent = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
-        String oldFolder = session.getParentDocument(old1.getRef()).getPathAsString();
-        txFeature.nextTransaction();
-
-        Calendar before = Calendar.getInstance();
-        before.add(Calendar.DAY_OF_MONTH, -30);
-        Object result = run(session, BlobDiffPurgeOp.ID, null, java.util.Map.of("before", before));
-        txFeature.nextTransaction();
-
-        JsonNode json = new ObjectMapper().readTree(((Blob) result).getString());
-        assertEquals(2, json.get("deleted").asInt());
-        assertTrue(json.get("folders").asInt() >= 1);
-        assertFalse(session.exists(old1.getRef()));
-        assertFalse(session.exists(old2.getRef()));
-        assertTrue(session.exists(recent.getRef()));
-        assertFalse("the emptied dated folder must be removed", session.exists(new PathRef(oldFolder)));
-        assertTrue(session.exists(new PathRef("/" + BlobAuditConstants.CONTAINER_NAME)));
-    }
-
-    @Test
-    public void testPurgeCanBeRestrictedToAStatus() throws Exception {
-        DocumentModel source = file("purged-status", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel ok = diff(source, daysAgo(40), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
-        DocumentModel error = diff(source, daysAgo(40), BlobAuditConstants.STATUS_ERROR, FrozenBlobs.NONE);
-        txFeature.nextTransaction();
-
-        run(session, BlobDiffPurgeOp.ID, null,
-                java.util.Map.of("before", Calendar.getInstance(), "status", BlobAuditConstants.STATUS_ERROR));
-        txFeature.nextTransaction();
-
-        assertTrue(session.exists(ok.getRef()));
-        assertFalse(session.exists(error.getRef()));
-    }
+    /*
+     * The purge itself moved to TestBlobDiffPurgeAction: it is asynchronous since 2025.3 and needs
+     * the Bulk Action Framework. Only the access check stays here, because it is enforced before
+     * anything is submitted.
+     */
 
     /* ------------------------------------------------------------------ retry */
 

@@ -1,34 +1,74 @@
-<!-- Retention purge (BlobDiff.Purge) with warning and explicit acknowledgment -->
+<!--
+  Retention purge (BlobDiff.Purge) with warning and explicit acknowledgment.
+
+  Asynchronous since 2025.3: BlobDiff.Purge submits a bulk command and returns its id, this
+  element polls BlobDiff.PurgeStatus until the command completes, then removes the dated folders
+  left empty with BlobDiff.CleanEmptyFolders. A running purge can be stopped with
+  BlobDiff.PurgeAbort, or simply left to finish in the background.
+-->
 <dom-module id="nuxeo-blobdiff-purge-dialog">
   <template>
     <style include="nuxeo-blobdiff-styles nuxeo-styles">
       .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
       nuxeo-date-picker, nuxeo-select { display: block; margin-bottom: 8px; }
+      .progress { margin-top: 16px; }
+      .progress-label { font-size: .9em; opacity: .8; margin-bottom: 4px; }
+      /*
+        Plain CSS bar rather than paper-progress: the elements of this plugin import nothing and
+        rely on what Web UI already registered. paper-progress only happens to be defined because
+        nuxeo-document-import imports it - too implicit a dependency for a progress bar.
+      */
+      .progress-track { height: 4px; border-radius: 2px; background: var(--nuxeo-border, #e6e9ef); overflow: hidden; }
+      .progress-bar { height: 100%; background: var(--nuxeo-primary-color, #0066ff); transition: width .3s; }
+      .progress-track.indeterminate .progress-bar { width: 40%; animation: blobdiff-purge-slide 1.2s infinite ease-in-out; }
+      @keyframes blobdiff-purge-slide {
+        0% { margin-left: -40%; }
+        100% { margin-left: 100%; }
+      }
     </style>
     <nuxeo-operation id="op" op="BlobDiff.Purge"></nuxeo-operation>
+    <nuxeo-operation id="statusOp" op="BlobDiff.PurgeStatus"></nuxeo-operation>
+    <nuxeo-operation id="abortOp" op="BlobDiff.PurgeAbort"></nuxeo-operation>
+    <nuxeo-operation id="cleanOp" op="BlobDiff.CleanEmptyFolders"></nuxeo-operation>
     <nuxeo-dialog id="dialog" with-backdrop no-auto-focus>
       <h2>[[i18n('label.blobaudit.purge.title')]]</h2>
-      <nuxeo-date-picker label="[[i18n('label.blobaudit.purge.before')]]" value="{{_before}}" required></nuxeo-date-picker>
-      <nuxeo-select label="[[i18n('label.blobaudit.purge.status')]]" selected="{{_status}}" attr-for-selected="key">
-        <paper-item key="">[[i18n('label.blobaudit.purge.anyStatus')]]</paper-item>
-        <paper-item key="ok">[[i18n('label.blobaudit.status.ok')]]</paper-item>
-        <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
-        <!-- skippedTooLarge is not offered: an over-sized blob is audited without ever creating a
-             BlobDiff, so no document can carry that status. skippedUnsupportedType stays, it is
-             still set by BlobDiffWork when extraction fails at diff time. -->
-        <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
-      </nuxeo-select>
-      <div class="blobdiff-warning">
-        <iron-icon icon="icons:warning"></iron-icon>
-        <div>[[i18n('label.blobaudit.purge.warning')]]</div>
-      </div>
-      <paper-checkbox checked="{{_ack}}">[[i18n('label.blobaudit.delete.ack')]]</paper-checkbox>
-      <div class="buttons">
-        <paper-button dialog-dismiss class="secondary">[[i18n('command.cancel')]]</paper-button>
-        <paper-button class="primary" disabled$="[[!_canPurge(_ack, _before, _busy)]]" on-tap="_purge">
-          [[i18n('label.blobaudit.purge.confirm')]]
-        </paper-button>
-      </div>
+
+      <template is="dom-if" if="[[!_running]]">
+        <nuxeo-date-picker label="[[i18n('label.blobaudit.purge.before')]]" value="{{_before}}" required></nuxeo-date-picker>
+        <nuxeo-select label="[[i18n('label.blobaudit.purge.status')]]" selected="{{_status}}" attr-for-selected="key">
+          <paper-item key="">[[i18n('label.blobaudit.purge.anyStatus')]]</paper-item>
+          <paper-item key="ok">[[i18n('label.blobaudit.status.ok')]]</paper-item>
+          <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
+          <!-- skippedTooLarge is not offered: an over-sized blob is audited without ever creating a
+               BlobDiff, so no document can carry that status. skippedUnsupportedType stays, it is
+               still set by BlobDiffWork when extraction fails at diff time. -->
+          <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
+        </nuxeo-select>
+        <div class="blobdiff-warning">
+          <iron-icon icon="icons:warning"></iron-icon>
+          <div>[[i18n('label.blobaudit.purge.warning')]]</div>
+        </div>
+        <paper-checkbox checked="{{_ack}}">[[i18n('label.blobaudit.delete.ack')]]</paper-checkbox>
+        <div class="buttons">
+          <paper-button dialog-dismiss class="secondary">[[i18n('command.cancel')]]</paper-button>
+          <paper-button class="primary" disabled$="[[!_canPurge(_ack, _before, _busy)]]" on-tap="_purge">
+            [[i18n('label.blobaudit.purge.confirm')]]
+          </paper-button>
+        </div>
+      </template>
+
+      <template is="dom-if" if="[[_running]]">
+        <div class="progress">
+          <div class="progress-label">[[_progressLabel(_processed, _total)]]</div>
+          <div class$="[[_trackClass(_total)]]">
+            <div class="progress-bar" style$="[[_barStyle(_processed, _total)]]"></div>
+          </div>
+        </div>
+        <div class="buttons">
+          <paper-button class="secondary" on-tap="_background">[[i18n('label.blobaudit.purge.background')]]</paper-button>
+          <paper-button class="primary" on-tap="_abort">[[i18n('label.blobaudit.purge.abort')]]</paper-button>
+        </div>
+      </template>
     </nuxeo-dialog>
   </template>
   <script>
@@ -39,15 +79,44 @@
         _before: String,
         _status: { type: String, value: '' },
         _ack: { type: Boolean, value: false },
-        _busy: { type: Boolean, value: false }
+        _busy: { type: Boolean, value: false },
+        _running: { type: Boolean, value: false },
+        _commandId: String,
+        _processed: { type: Number, value: 0 },
+        _total: { type: Number, value: 0 }
       },
+
+      // Interval between two BlobDiff.PurgeStatus calls, in milliseconds.
+      _POLL_INTERVAL: 2000,
+
+      detached: function () {
+        this._stopPolling();
+      },
+
       open: function () {
         this._ack = false;
         this._status = '';
+        this._running = false;
+        this._commandId = null;
+        this._processed = 0;
+        this._total = 0;
         this.$.dialog.open();
         return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
       },
+
       _canPurge: function (ack, before, busy) { return ack && !!before && !busy; },
+      _trackClass: function (total) { return total ? 'progress-track' : 'progress-track indeterminate'; },
+      _barStyle: function (processed, total) {
+        return total ? 'width:' + Math.min(100, Math.round((processed / total) * 100)) + '%' : '';
+      },
+      _progressLabel: function (processed, total) {
+        return total
+          ? this.i18n('label.blobaudit.purge.progress', processed, total)
+          : this.i18n('label.blobaudit.purge.scheduled');
+      },
+
+      /* ==================== submission ==================== */
+
       _purge: function () {
         this._busy = true;
         var params = { before: this._before };
@@ -55,15 +124,89 @@
         this.$.op.params = params;
         this.$.op.execute()
           .then(function (result) {
-            var deleted = result && result.deleted !== undefined ? result.deleted : '?';
-            this.fire('notify', { message: this.i18n('label.blobaudit.purge.done', deleted) });
-            this.$.dialog.close();
-            this._resolve && this._resolve(true);
+            this._commandId = result && result.commandId;
+            this._running = true;
+            this._poll();
           }.bind(this))
           .catch(function (err) {
             this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
           }.bind(this))
           .then(function () { this._busy = false; }.bind(this));
+      },
+
+      /* ==================== progress ==================== */
+
+      _poll: function () {
+        if (!this._commandId || !this._running) { return; }
+        this.$.statusOp.params = { commandId: this._commandId };
+        this.$.statusOp.execute()
+          .then(function (status) {
+            if (!this._running) { return; }
+            this._processed = (status && status.processed) || 0;
+            this._total = (status && status.total) || 0;
+            if (status && status.state === 'COMPLETED') {
+              this._finish(status);
+            } else if (status && status.state === 'ABORTED') {
+              this._stopPolling();
+              this.fire('notify', { message: this.i18n('label.blobaudit.purge.aborted', status.deleted || 0) });
+              this._close(true);
+            } else {
+              this._pollTimer = this.async(this._poll, this._POLL_INTERVAL);
+            }
+          }.bind(this))
+          .catch(function (err) {
+            this._stopPolling();
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
+            this._close(true);
+          }.bind(this));
+      },
+
+      _stopPolling: function () {
+        this._running = false;
+        if (this._pollTimer) {
+          this.cancelAsync(this._pollTimer);
+          this._pollTimer = null;
+        }
+      },
+
+      /** Empty dated folders can only be removed once the bulk command has emptied them. */
+      _finish: function (status) {
+        this._stopPolling();
+        var deleted = status && status.deleted !== undefined ? status.deleted : '?';
+        this.$.cleanOp.params = {};
+        this.$.cleanOp.execute()
+          .catch(function () { /* the folders are harmless, and the next purge will clean them */ })
+          .then(function () {
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.done', deleted) });
+            this._close(true);
+          }.bind(this));
+      },
+
+      /* ==================== abort / background ==================== */
+
+      _abort: function () {
+        this.$.abortOp.params = { commandId: this._commandId };
+        this.$.abortOp.execute()
+          .then(function (status) {
+            this._stopPolling();
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.aborted', (status && status.deleted) || 0) });
+            this._close(true);
+          }.bind(this))
+          .catch(function (err) {
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
+          }.bind(this));
+      },
+
+      /** Leaves the purge running server side and closes the dialog. */
+      _background: function () {
+        this._stopPolling();
+        this.fire('notify', { message: this.i18n('label.blobaudit.purge.backgrounded') });
+        this._close(true);
+      },
+
+      _close: function (purged) {
+        this.$.dialog.close();
+        this._resolve && this._resolve(purged);
       }
     });
   </script>

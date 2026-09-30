@@ -4,6 +4,9 @@
   <extension target="org.nuxeo.ecm.core.operation.OperationServiceComponent" point="operations">
     <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffDeleteOp" />
     <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeOp" />
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeStatusOp" />
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeAbortOp" />
+    <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffCleanEmptyFoldersOp" />
     <operation class="org.nuxeo.audit.advanced.blob.operations.BlobDiffRetryOp" />
   </extension>
 

@@ -32,9 +32,9 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
 
 - `nuxeo-advanced-document-blob-audit-core/` — all Java, all contributions, and the Web UI.
   - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`),
-    `BlobModificationListener`, `BlobDiffTrigger`, `TextDiffer`; subpackages `extractor/`,
+    `BlobModificationListener`, `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`,
     `image/`, `io/`, `operations/`, `work/`.
-  - `src/main/resources/OSGI-INF/` — 12 components + `deployment-fragment.xml`.
+  - `src/main/resources/OSGI-INF/` — 13 components + `deployment-fragment.xml`.
   - `src/main/resources/web/nuxeo.war/` — Polymer elements under
     `ui/nuxeo-advanced-document-blob-audit/elements/`, layouts under `ui/document/blobdiff/`,
     client i18n in `ui/i18n/messages*.json`, server i18n in `server-side-i18n/messages*.properties`.
@@ -80,6 +80,24 @@ entry once the digests are known to differ. Coverage: `TestBlobDiffSkipReporting
 so no `BlobDiff` is created); `skippedUnsupportedType` still is, set by `BlobDiffWork` when
 `service.diff()` returns `null` at work time. The purge dialog offers only the latter.
 
+**The `blobDiffPurge` bulk action must stay off the HTTP surface.** `httpEnabled` is left to its
+default `false`, which is what keeps it out of `Bulk.RunAction` and of the
+`/search/bulk/{action}` REST endpoint for anyone but an administrator. The only supported entry
+point is `BlobDiff.Purge`, which enforces `BlobDiffAccess.checkAuditor` and builds the NXQL itself.
+
+The two alternatives were both considered and rejected: `httpEnabled="true"` publishes a
+delete-by-NXQL API to every authenticated user, and routing the UI through `Bulk.RunAction` with
+`httpEnabled="false"` reserves the purge to administrators, taking the feature away from the
+auditors it exists for. The computation also refuses to remove anything that is not a `BlobDiff`,
+so even an administrator submitting the action by hand with an arbitrary query cannot turn it into
+a generic delete. Coverage: `TestBlobDiffPurgeAction`.
+
+**`BlobDiff.Purge` uses `submit()`, not `submitTransactional()`.** The latter defers the real
+submission — and with it the exclusivity check and the parameter validation — to
+`beforeCompletion`, so a second concurrent purge surfaces as a commit failure instead of a readable
+error, and the returned id is not queryable until commit. The operation writes nothing to the
+repository, so there is nothing to undo if it does not commit. Do not "fix" this back.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -103,7 +121,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 184 tests (21 test classes)
+mvn -o install                                     # full build, 193 tests (22 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -125,23 +143,26 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 `blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on, and
 `blobaudit-test-noimagepdf-config.xml` to disable a single image extractor.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
+`TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
+`BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`.
 
 Do not run the build when a commit only touches `README.md`, `AGENTS.md` or `.gitignore`.
 
 ## Deployment target
 
-This plugin is heading for a **real instance**, not a demo. Consequence: backlog item 11 (purge on
-the Bulk Action Framework) is needed rather than optional, and anything that only matters at small
-volume can no longer be waved away.
+This plugin is heading for a **real instance**, not a demo. Consequence: anything that only matters
+at small volume can no longer be waved away. This is what made backlog item 11 (purge on the Bulk
+Action Framework) mandatory rather than optional.
 
 ---
 
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 10, 13 and 15 are done** (regression coverage:
+improvements were identified. **Items 1 to 11, 13 and 15 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
-`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`):
+`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
+`TestBlobDiffPurgeAction`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -166,24 +187,26 @@ improvements were identified. **Items 1 to 10, 13 and 15 are done** (regression 
 13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
     `BlobDiffTrigger.Outcome`, `skipReason` extended info).
 15. Non-`ManagedBlob` pairs get the third skip reason, `skippedNotManaged`.
+11. Purge moved to the Bulk Action Framework (`bulk/BlobDiffPurgeAction`, action `blobDiffPurge`,
+    `exclusive`). `BlobDiff.Purge` submits and returns a command id; `BlobDiff.PurgeStatus`,
+    `BlobDiff.PurgeAbort` and `BlobDiff.CleanEmptyFolders` complete the sequence, and the purge
+    dialog polls its way through it. The unbounded `while (true) { …; nextTransaction(); }` inside
+    a transaction-bound Automation operation is gone.
+
+    The backlog also flagged `removeEmptyFolders` for loading all children without pagination.
+    **That part of the diagnosis was overstated**: the fan-out is bounded by the calendar — a
+    handful of years, twelve months, thirty-one days — so the longest list ever loaded is about
+    thirty entries whatever the number of diffs. It moved to `getChildrenIterator` anyway, and to
+    its own operation, because it can only run once the asynchronous purge has emptied the folders.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **F** | 11 | high | Needed, see "Deployment target" |
 | — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
 
-
-### 11. Move the purge to the Bulk Action Framework
-
-`BlobDiffPurgeOp` calls `nextTransaction()` **inside an Automation operation** while the
-`@Context CoreSession` is transaction-bound, in an unbounded loop — HTTP timeout guaranteed at
-volume. Use a `BulkCommand` over the NXQL (scalable, resumable, status tracking); the UI would call
-`Bulk.RunAction`. Also: `removeEmptyFolders` loads all children via `session.getChildren` without
-pagination.
 
 ### 12. Myers diff instead of Hirschberg — DROPPED
 

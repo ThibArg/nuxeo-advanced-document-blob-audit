@@ -72,6 +72,22 @@
     </dependency>
 
     <!--
+      Bulk Action Framework, backing the retention purge (BlobDiffPurgeAction). Both artifacts
+      already arrive transitively through nuxeo-automation-features, but nuxeo.skip.enforcer is
+      true in the parent pom, so nothing would catch the day that transitive path disappears.
+    -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-bulk</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.nuxeo.runtime</groupId>
+      <artifactId>nuxeo-runtime-stream</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!--
       Spreadsheet extraction. Compile scope on purpose: POI is not part of a standard Nuxeo
       distribution, so the bundle must ship it. This is precisely the dependency that did not belong
       in the original scalar-field audit plugin.
@@ -108,6 +124,13 @@
     <dependency>
       <groupId>org.nuxeo.ecm.core</groupId>
       <artifactId>nuxeo-core-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- CoreBulkFeature, used by TestBlobDiffPurgeAction -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-bulk</artifactId>
+      <type>test-jar</type>
       <scope>test</scope>
     </dependency>
     <dependency>

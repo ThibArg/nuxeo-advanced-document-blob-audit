@@ -234,11 +234,33 @@ Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the s
 | Item | Purpose |
 |---|---|
 | `BlobDiff.Delete` | Permanently deletes the input BlobDiff documents (other types refused) |
-| `BlobDiff.Purge(before, status?)` | Permanently deletes diffs dated before a day, by batches of 100 with a commit between batches, then removes emptied dated folders. Returns `{"deleted": n, "folders": m}` |
+| `BlobDiff.Purge(before, status?)` | **Asynchronous.** Schedules the permanent deletion of diffs dated before a day on the Bulk Action Framework. Returns `{"commandId": "...", "state": "SCHEDULED"}` |
+| `BlobDiff.PurgeStatus(commandId)` | Progress of a purge: `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}` |
+| `BlobDiff.PurgeAbort(commandId)` | Stops a running purge. Already deleted diffs are not restored |
+| `BlobDiff.CleanEmptyFolders` | Removes the dated folders left empty under `/change-diff`. Returns `{"folders": n}` |
 | `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The new diff keeps user, date and correlation id, and replaces the failed one once created |
 | `blobDiffSource` enricher | `{uid, exists, trashed, readable, title, path, type}` of the source; title/path/type only when the current user can read it |
 
-All three operations are refused (`DocumentSecurityException`) to anyone who is not an administrator, a member of `administrators` or of the auditors group.
+Every operation is refused (`DocumentSecurityException`) to anyone who is not an administrator, a member of `administrators` or of the auditors group.
+
+### The Purge Is Asynchronous
+
+`BlobDiff.Purge` used to delete by batches of 100 in an unbounded loop, committing between batches, **inside the HTTP transaction** — an HTTP timeout was guaranteed at volume. It now submits a `blobDiffPurge` bulk command and returns immediately.
+
+The full sequence, which the Web UI performs for you:
+
+1. `BlobDiff.Purge(before, status?)` → `commandId`;
+2. poll `BlobDiff.PurgeStatus(commandId)` until `state` is `COMPLETED` (or `ABORTED`);
+3. `BlobDiff.CleanEmptyFolders` — the dated folders can only be removed once the command has emptied them.
+
+Notes:
+
+- **Breaking change.** The previous synchronous payload was `{"deleted": n, "folders": m}`. A script that purges on a schedule must be adapted to the three-step sequence above.
+- `deleted` is the exact number of removed documents, published by the action; `processed` counts the ids handed to the computation, which differs as soon as the query matched something the purge refuses to touch.
+- **One purge at a time per repository.** The action is `exclusive`: a second submission is refused with *"A BlobDiff purge is already running on this repository"*. The underlying lock has a TTL, so a command lost mid-flight does not freeze the feature.
+- The command is submitted **under the calling user**, so the deletion stays subject to the ACL of `/change-diff`.
+- **The `blobDiffPurge` action is deliberately not `httpEnabled`.** It is unreachable through `Bulk.RunAction` and through the `/search/bulk/{action}` REST endpoint for anyone but an administrator. `BlobDiff.Purge` is the only supported entry point: it enforces the auditors check and builds the query itself. Turning `httpEnabled` on would publish a delete-by-NXQL API to every authenticated user.
+- The action only ever removes documents of type `BlobDiff`, whatever the query it is given.
 
 ### Deployment
 
@@ -430,7 +452,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 
 ### Security and Operations
 - **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
-- **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule the operation yourself for automatic retention.
+- **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule it yourself for automatic retention, following the three-step asynchronous sequence described above.
 - **Elasticsearch required** for the Web UI listing and tab (`BLOB_DIFFS_ADMIN`).
 - **Retry** only works for diffs created from 1.2 on (binary keys stored), and as long as the binaries are still in the blob store (the binaries garbage collector may have removed an unreferenced old version).
 - **Web UI access** is based on the auditors group name exposed in `Nuxeo.UI.config`: overriding `<auditorsGroup>` without the configuration property desynchronises the UI (the server stays correct).
@@ -461,7 +483,8 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
-| TestBlobDiffManagement | Yes | Binary keys, Delete / Purge / Retry operations and their access control, blobDiffSource enricher |
+| TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, blobDiffSource enricher |
+| TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |
 | TestBlobDiffHardening | Yes | Full-text exclusion, dedicated work queue, deterministic work id, work idempotence, bounded version lookup |
 | TestBlobDiffListenerDisabling | Yes | Per-operation context data flag, thread-scoped `runDisabled`, no leak between operations |
 | TestBlobAuditIntegration | Yes | End-to-end validation |
