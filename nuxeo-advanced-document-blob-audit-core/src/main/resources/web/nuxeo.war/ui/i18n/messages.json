@@ -22,6 +22,7 @@
   "label.blobaudit.status.error": "Error",
   "label.blobaudit.status.skippedTooLarge": "Too large",
   "label.blobaudit.status.skippedUnsupportedType": "Unsupported format",
+  "label.blobaudit.status.skippedNotManaged": "Blob not managed",
   "label.blobaudit.source.trashed": "In trash",
   "label.blobaudit.source.deleted": "Source deleted",
   "label.blobaudit.source.notReadable": "Source not accessible to you",

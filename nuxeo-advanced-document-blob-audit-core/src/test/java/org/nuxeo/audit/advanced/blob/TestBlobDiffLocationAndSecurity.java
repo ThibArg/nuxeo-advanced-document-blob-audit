@@ -24,12 +24,14 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -195,6 +197,46 @@ public class TestBlobDiffLocationAndSecurity {
                 + "%'");
         assertEquals(1, containers.size());
         assertEquals(BlobAuditConstants.CONTAINER_NAME, containers.get(0).getName());
+    }
+
+    /**
+     * The dated container must be computed in UTC, not in the JVM default time zone.
+     * <p>
+     * The instant below is 2026-03-15T23:30Z, which is already 2026-03-16 in Paris. With the
+     * previous {@code SimpleDateFormat} in the default zone, two nodes of the same cluster in two
+     * zones would file the diffs of a single instant under two different days, and a purge
+     * "before yyyy-MM-dd" would not mean the same thing depending on which node answered.
+     */
+    @Test
+    public void testDatedContainerIsComputedInUtc() {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Paris"));
+            Date instant = Date.from(Instant.parse("2026-03-15T23:30:00Z"));
+
+            DocumentModel container = blobDiffService.getOrCreateContainer(session, instant);
+
+            assertEquals("/" + BlobAuditConstants.CONTAINER_NAME + "/2026/03/15", container.getPathAsString());
+        } finally {
+            TimeZone.setDefault(previous);
+        }
+    }
+
+    /** The same instant must always resolve to the same folder, whatever the node's time zone. */
+    @Test
+    public void testDatedContainerIsStableAcrossTimeZones() {
+        TimeZone previous = TimeZone.getDefault();
+        Date instant = Date.from(Instant.parse("2026-07-01T02:15:00Z"));
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Auckland"));
+            String fromAuckland = blobDiffService.getOrCreateContainer(session, instant).getPathAsString();
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
+            String fromLosAngeles = blobDiffService.getOrCreateContainer(session, instant).getPathAsString();
+
+            assertEquals(fromAuckland, fromLosAngeles);
+        } finally {
+            TimeZone.setDefault(previous);
+        }
     }
 
     /** Two blob xpaths saved at once: same source, same time, must still be two documents. */

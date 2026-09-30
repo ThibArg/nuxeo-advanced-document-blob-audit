@@ -4,6 +4,8 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED;
+
 import java.util.UUID;
 
 import org.apache.logging.log4j.LogManager;
@@ -95,9 +97,12 @@ public final class BlobDiffTrigger {
             return Outcome.skipped(eligibility.getSkipReason());
         }
         if (!(oldBlob instanceof ManagedBlob oldManaged) || !(newBlob instanceof ManagedBlob newManaged)) {
-            log.warn("Version blobs at {} on {} are not both managed, cannot diff asynchronously", xpath,
+            // The work re-reads both binaries from their provider after commit, which requires a
+            // provider id and a key. Without them the diff is impossible - but the binary did
+            // change, so this is reported like any other non-diffable change rather than dropped.
+            log.warn("Version blobs at {} on {} are not both managed, auditing the change without a diff", xpath,
                     liveDoc.getId());
-            return Outcome.none();
+            return Outcome.skipped(STATUS_SKIPPED_NOT_MANAGED);
         }
 
         String correlationId = UUID.randomUUID().toString();

@@ -15,7 +15,32 @@
  */
 package org.nuxeo.audit.advanced.blob.operations;
 
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.*;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_MIMETYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_KEY;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_PROVIDER;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_LENGTH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_LABEL;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_KEY;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_PROVIDER;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_DIGEST;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_LENGTH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_MIMETYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_PREVIOUS_VERSION_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_PREVIOUS_VERSION_LABEL;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_REPO;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_STATUS;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_USER;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_VERSION_SERIES_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
 
 import java.util.Calendar;
 

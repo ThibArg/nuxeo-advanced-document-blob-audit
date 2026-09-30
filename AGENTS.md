@@ -96,7 +96,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 148 tests (18 test classes)
+mvn -o install                                     # full build, 157 tests (18 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -129,7 +129,7 @@ volume can no longer be waved away.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 6 and 13 are done** (regression coverage:
+improvements were identified. **Items 1 to 7, 13 and 15 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
@@ -140,16 +140,18 @@ improvements were identified. **Items 1 to 6 and 13 are done** (regression cover
 5. Idempotent work: an existing `BlobDiff` with the same correlation id short-circuits the run.
 6. Common prefix/suffix trimming + interned line ids in `TextDiffer`. One modified paragraph at
    20 000 lines: 1.45 s → 2.4 ms, and flat as the document grows.
+7. Cleanups: dead page provider removed, UTC dated containers, bounded root-container retry,
+   charset/BOM handling in `PlainTextExtractor`, wildcard import, duplicated `<vendor>`.
 13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
     `BlobDiffTrigger.Outcome`, `skipReason` extended info).
+15. Non-`ManagedBlob` pairs get the third skip reason, `skippedNotManaged`.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **C** | 7 + 15 | low | Purely mechanical; 15 is a small hole in the same area. Do first. |
-| **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key |
+| **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key. Do first. |
 | **E** | 10 | medium | Extraction I/O and the extractor extension model |
 | **F** | 11 | high | Needed, see "Deployment target" |
 | — | 14 | — | Needs a product decision |
@@ -158,37 +160,6 @@ improvements were identified. **Items 1 to 6 and 13 are done** (regression cover
 Before starting session D: item 9 **removes the need** for the `ORDER BY uid:major_version`
 heuristic, so the `[!WARNING]` block in `README.md` and the "Version ordering" invariant above must
 be rewritten, not merely adjusted.
-
-### 7. Cleanups (purely mechanical)
-
-- `blobdiff-pageproviders-contrib.xml` has **no** `<require>org.nuxeo.elasticsearch.ElasticSearchComponent</require>`,
-  so on an instance without a search engine the component fails instead of staying pending. Add the
-  `<require>` or confirm `SearchServicePageProvider` degrades gracefully. (`blobdiff-es-pageprovider-contrib.xml`
-  was already deleted as dead code.)
-- `BLOB_DIFFS_OLDER_THAN` page provider is referenced nowhere. Dead.
-- `BlobAuditConstants` ~lines 39-43: five constants stuck to the left margin.
-- `BlobDiffRetryOp` uses a wildcard static import of `BlobAuditConstants`.
-- `BlobDiffComponent#getOrCreateContainer` builds three `SimpleDateFormat` per call in the **default
-  time zone**: two nodes in different zones write into different dated folders. Use a static
-  `DateTimeFormatter` in UTC.
-- `BlobDiffComponent#ensureRootContainer` recurses after `removeDocument` with no bound.
-- `BlobDiffComponent#diff` calls `getConfig()` four times. Capture once.
-- `PlainTextExtractor` passes the blob encoding straight to `InputStreamReader` (throws on a bogus
-  name) and does no BOM handling.
-- `package.xml` declares `<vendor>Hyland</vendor>` twice.
-- `blobdiff.xsd` uses `xs:date` for `bdiff:date`. Harmless (Nuxeo maps both onto `DateType`) but
-  `xs:dateTime` is more honest. Cosmetic.
-
-### 15. Non-`ManagedBlob` pairs are still silent
-
-The same functional hole item 13 closed, in its last corner. When the two version blobs are not both
-`ManagedBlob`, `BlobDiffTrigger#scheduleIfNeeded` logs a WARN and returns `Outcome.none()`: the
-binary changed, and nothing is audited. It was deliberately left out of item 13 because the product
-decision only covered `TOO_LARGE` and `UNSUPPORTED_TYPE`.
-
-Needs a third skip reason (`skippedNotManaged`?) plus its i18n keys, or a decision that this case is
-an instance misconfiguration worth failing loudly instead. In practice it only happens with an
-unusual blob provider setup.
 
 ### 8. Rework `collectBlobXPaths`
 
@@ -251,6 +222,16 @@ string. Decision needed: leave as is / compose in UI and accept mixed display / 
 ---
 
 ## Other observations (not scheduled)
+
+- **Do not add `<require>ElasticSearchComponent</require>` to `blobdiff-pageproviders-contrib.xml`.**
+  The item 7 review claimed it was missing; it is not needed and would be harmful.
+  `SearchServicePageProvider` lives in `nuxeo-platform-query-api`, not in the Elasticsearch bundle,
+  so the component always registers. A `<require>` would keep the whole component —
+  `BLOB_DIFFS_FOR_DOCUMENT` included — pending on any instance without a search engine, and in the
+  tests. What does need a search engine is the *execution*: `SearchService` is resolved at query
+  time and the provider throws if none is configured. The XML says so.
+- **`LogEntry.getExtendedInfos()` throws `UnsupportedOperationException` in LTS 2025.** Use
+  `getExtendedValue(key)`. Relevant to any test asserting on audit extended info.
 
 - **Repository growth.** One `BlobDiff` per version per xpath in `/change-diff/yyyy/MM/dd`; a single
   day folder can reach hundreds of thousands of children. Consider an hourly level or hash bucketing.

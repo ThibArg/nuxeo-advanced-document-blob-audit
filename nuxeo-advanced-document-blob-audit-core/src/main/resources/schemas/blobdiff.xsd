@@ -22,7 +22,7 @@
 
   <!-- Who / when -->
   <xs:element name="user" type="xs:string" />
-  <xs:element name="date" type="xs:date" />
+  <xs:element name="date" type="xs:dateTime" />
 
   <!-- Blob identity: digests double as a short-circuit, a rename changes neither -->
   <xs:element name="mimeType" type="xs:string" />

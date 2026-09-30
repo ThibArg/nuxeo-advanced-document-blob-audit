@@ -16,6 +16,7 @@
 package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_ID;
@@ -34,6 +35,7 @@ import jakarta.inject.Inject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.api.LogEntry;
+import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.VersioningOption;
@@ -187,6 +189,50 @@ public class TestBlobDiffSkipReporting {
         BlobDiffService service = org.nuxeo.runtime.api.Framework.getService(BlobDiffService.class);
         assertEquals(DiffEligibility.NOT_APPLICABLE,
                 service.getEligibility("File", "files:files/0/file", textBlob("x", UNSUPPORTED_MIME, "f.bin")));
+    }
+
+    /**
+     * Item 15: the work re-reads both binaries from their blob provider after commit, so a pair
+     * that is not entirely made of {@code ManagedBlob} cannot be diffed. That used to be a silent
+     * WARN; the change is now audited like any other non-diffable one.
+     */
+    @Test
+    public void testNonManagedBlobPairIsAuditedWithoutADiff() throws Exception {
+        DocumentModel doc = createVersionedFile("not-managed", "v1", "text/plain");
+        VersionContext versions = new VersionContext("prev", "1.0", "new", "1.1", "series");
+
+        // plain in-memory blobs, deliberately not ManagedBlob
+        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(doc, "file:content",
+                textBlob("v1", "text/plain", "notes.txt"), textBlob("v2", "text/plain", "notes.txt"), versions,
+                "Administrator", System.currentTimeMillis());
+
+        assertEquals(BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED, outcome.skipReason());
+        assertNull(outcome.correlationId());
+        assertTrue(outcome.isAuditable());
+    }
+
+    /**
+     * ... but only when the binary actually changed: the digest check still comes first.
+     * <p>
+     * Note that a non-managed blob usually carries <b>no digest at all</b>, and {@code sameContent}
+     * deliberately answers "different" when it cannot tell. So in practice this branch audits every
+     * new version of such a pair. For an audit tool a false positive beats a silence, and the WARN
+     * that comes with it points at the real problem, an unusual blob provider setup.
+     */
+    @Test
+    public void testNonManagedBlobPairWithIdenticalContentStaysSilent() throws Exception {
+        DocumentModel doc = createVersionedFile("not-managed-stable", "v1", "text/plain");
+        VersionContext versions = new VersionContext("prev", "1.0", "new", "1.1", "series");
+        Blob old = textBlob("same", "text/plain", "notes.txt");
+        Blob recent = textBlob("same", "text/plain", "notes.txt");
+        old.setDigest("d41d8cd98f00b204e9800998ecf8427e");
+        recent.setDigest("d41d8cd98f00b204e9800998ecf8427e");
+
+        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(doc, "file:content", old, recent, versions,
+                "Administrator", System.currentTimeMillis());
+
+        assertNull(outcome.skipReason());
+        assertFalse("a binary with an unchanged digest must stay silent", outcome.isAuditable());
     }
 
     /* ------------------------------------------------- nominal path intact */

@@ -22,6 +22,7 @@
   "label.blobaudit.status.error": "Erreur",
   "label.blobaudit.status.skippedTooLarge": "Trop volumineux",
   "label.blobaudit.status.skippedUnsupportedType": "Format non supporté",
+  "label.blobaudit.status.skippedNotManaged": "Binaire non géré",
   "label.blobaudit.source.trashed": "Dans la corbeille",
   "label.blobaudit.source.deleted": "Source supprimée",
   "label.blobaudit.source.notReadable": "Source non accessible",

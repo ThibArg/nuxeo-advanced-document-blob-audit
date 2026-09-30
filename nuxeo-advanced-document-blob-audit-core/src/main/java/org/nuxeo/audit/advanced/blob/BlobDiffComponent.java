@@ -41,7 +41,8 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
 
 import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -57,6 +58,7 @@ import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.api.security.ACE;
 import org.nuxeo.ecm.core.api.security.ACL;
@@ -181,9 +183,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (oldContent == null || newContent == null) {
             return null;
         }
-        TextDiffer differ = new TextDiffer(getConfig().getMaxDiffEntries());
+        BlobDiffConfigDescriptor config = getConfig();
+        TextDiffer differ = new TextDiffer(config.getMaxDiffEntries());
         DiffResult textResult = differ.diff(oldContent, newContent);
-        if (getConfig().getImageAnalysisLevel() == 0) {
+        if (config.getImageAnalysisLevel() == 0) {
             return textResult;
         }
         try {
@@ -222,11 +225,23 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      */
     protected static final ReentrantLock CONTAINER_LOCK = new ReentrantLock();
 
+    /**
+     * Dated path of a container, always in UTC.
+     * <p>
+     * The previous implementation built three {@code SimpleDateFormat} per call in the JVM default
+     * time zone. Two nodes of the same cluster in different zones would then write the diffs of a
+     * single instant into two different dated folders, and a purge "before yyyy-MM-dd" would not
+     * mean the same thing depending on which node answered.
+     */
+    protected static final DateTimeFormatter CONTAINER_PATH_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd")
+                                                                                      .withZone(ZoneOffset.UTC);
+
     @Override
     public DocumentModel getOrCreateContainer(CoreSession session, Date date) {
-        String year = new SimpleDateFormat("yyyy").format(date);
-        String month = new SimpleDateFormat("MM").format(date);
-        String day = new SimpleDateFormat("dd").format(date);
+        String[] parts = CONTAINER_PATH_FORMAT.format(date.toInstant()).split("/");
+        String year = parts[0];
+        String month = parts[1];
+        String day = parts[2];
         PathRef dayRef = new PathRef("/" + CONTAINER_NAME + "/" + year + "/" + month + "/" + day);
         if (session.exists(dayRef)) {
             return session.getDocument(dayRef);
@@ -244,24 +259,41 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
     }
 
+    /**
+     * Number of times {@link #ensureRootContainer} retries after losing a creation race.
+     * <p>
+     * The retry used to be an unbounded recursion: a repository that renames every creation - a
+     * misconfigured name generator, a permanent conflict - would recurse until the stack blew, on
+     * a code path that runs inside the diff work.
+     */
+    protected static final int ROOT_CREATION_ATTEMPTS = 3;
+
     @Override
     public DocumentModel ensureRootContainer(CoreSession session) {
         PathRef ref = new PathRef("/" + CONTAINER_NAME);
-        DocumentModel root;
-        if (session.exists(ref)) {
-            root = session.getDocument(ref);
-        } else {
-            root = session.createDocumentModel("/", CONTAINER_NAME, CONTAINER_TYPE);
-            root.setPropertyValue("dc:title", CONTAINER_TITLE);
-            root.addFacet("HiddenInNavigation");
-            root = session.createDocument(root);
-            if (!CONTAINER_NAME.equals(root.getName())) {
-                // Lost a race against another node: the core renamed our sibling. Never leave an
-                // unrestricted duplicate around, and use the canonical one.
-                log.warn("Duplicate diff container {} created concurrently, removing it", root.getPathAsString());
-                session.removeDocument(root.getRef());
-                return ensureRootContainer(session);
+        DocumentModel root = null;
+        for (int attempt = 1; attempt <= ROOT_CREATION_ATTEMPTS && root == null; attempt++) {
+            if (session.exists(ref)) {
+                root = session.getDocument(ref);
+                break;
             }
+            DocumentModel created = session.createDocumentModel("/", CONTAINER_NAME, CONTAINER_TYPE);
+            created.setPropertyValue("dc:title", CONTAINER_TITLE);
+            created.addFacet("HiddenInNavigation");
+            created = session.createDocument(created);
+            if (CONTAINER_NAME.equals(created.getName())) {
+                root = created;
+            } else {
+                // Lost a race against another node: the core renamed our sibling. Never leave an
+                // unrestricted duplicate around, and retry to pick up the canonical one.
+                log.warn("Duplicate diff container {} created concurrently, removing it (attempt {}/{})",
+                        created.getPathAsString(), attempt, ROOT_CREATION_ATTEMPTS);
+                session.removeDocument(created.getRef());
+            }
+        }
+        if (root == null) {
+            throw new NuxeoException("Cannot create the diff container /" + CONTAINER_NAME + " after "
+                    + ROOT_CREATION_ATTEMPTS + " attempts");
         }
         repairSecurity(session, root);
         return root;

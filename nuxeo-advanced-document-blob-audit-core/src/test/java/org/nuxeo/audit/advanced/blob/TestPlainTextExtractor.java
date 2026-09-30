@@ -24,7 +24,10 @@ import java.util.Map;
 
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor;
+import java.nio.charset.StandardCharsets;
+
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 
 /**
  * Unit tests for the text family: {@code .txt}, {@code .json}, {@code .xml}, {@code .csv} and
@@ -45,6 +48,73 @@ public class TestPlainTextExtractor {
         Blob oldBlob = textBlob(before, mimeType, "before.txt");
         Blob newBlob = textBlob(after, mimeType, "after.txt");
         return differ.diff(extractor.extract(oldBlob, MAX_LINES), extractor.extract(newBlob, MAX_LINES));
+    }
+
+    /* ------------------------------------------------- encoding and BOM */
+
+    /**
+     * A blob can carry any string as its encoding, including one no JVM knows. Passing it straight
+     * to InputStreamReader threw UnsupportedEncodingException - an IOException, so the whole diff
+     * ended up in error - or IllegalCharsetNameException, which is unchecked and escaped the
+     * extractor entirely. A bad declaration must degrade to a readable diff.
+     */
+    @Test
+    public void testUnknownEncodingFallsBackToUtf8() throws Exception {
+        Blob blob = new ByteArrayBlob("alpha\nbeta".getBytes(StandardCharsets.UTF_8));
+        blob.setMimeType("text/plain");
+        blob.setFilename("f.txt");
+        blob.setEncoding("definitely-not-a-charset");
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        assertEquals(2, content.size());
+    }
+
+    /** An encoding name that is syntactically illegal, not merely unknown. */
+    @Test
+    public void testIllegalEncodingNameFallsBackToUtf8() throws Exception {
+        Blob blob = new ByteArrayBlob("alpha".getBytes(StandardCharsets.UTF_8));
+        blob.setMimeType("text/plain");
+        blob.setFilename("f.txt");
+        blob.setEncoding("utf 8 !");
+
+        assertEquals(1, extractor.extract(blob, MAX_LINES).size());
+    }
+
+    @Test
+    public void testBlankEncodingFallsBackToUtf8() throws Exception {
+        Blob blob = new ByteArrayBlob("h\u00e9llo".getBytes(StandardCharsets.UTF_8));
+        blob.setMimeType("text/plain");
+        blob.setFilename("f.txt");
+        blob.setEncoding("   ");
+
+        assertEquals(1, extractor.extract(blob, MAX_LINES).size());
+    }
+
+    /**
+     * The same text saved with and without a UTF-8 BOM must not look like a modified first line.
+     * readLine keeps the decoded U+FEFF at the head of the first line, so an editor silently adding
+     * the BOM would otherwise produce a phantom change on every version.
+     */
+    @Test
+    public void testByteOrderMarkDoesNotCreateAPhantomChange() throws Exception {
+        Blob withBom = textBlob("\uFEFFalpha\nbeta", "text/plain", "bom.txt");
+        Blob without = textBlob("alpha\nbeta", "text/plain", "plain.txt");
+
+        DiffResult result = differ.diff(extractor.extract(withBom, MAX_LINES),
+                extractor.extract(without, MAX_LINES));
+
+        assertTrue("a BOM is not a content change", result.isEmpty());
+    }
+
+    /** The BOM is stripped from the first line only, never from a legitimate U+FEFF further down. */
+    @Test
+    public void testByteOrderMarkIsStrippedOnTheFirstLineOnly() throws Exception {
+        DiffableContent content = extractor.extract(
+                textBlob("\uFEFFalpha\n\uFEFFbeta", "text/plain", "f.txt"), MAX_LINES);
+
+        assertEquals("alpha", content.lines().get(0).render());
+        assertEquals("\uFEFFbeta", content.lines().get(1).render());
     }
 
     @Test

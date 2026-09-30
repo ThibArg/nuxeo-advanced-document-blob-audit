@@ -32,7 +32,10 @@ In that case the plugin writes the `blobContentModified` entry **only**, and cre
 |------|---------------|----------------------------|----------|
 | Blob over `maxBlobSize` | `file:content : binary changed (too large)` | `skippedTooLarge` | none |
 | No extractor for the mime type | `file:content : binary changed (unsupported format)` | `skippedUnsupportedType` | none |
+| Blobs not both managed by a provider | `file:content : binary changed (blob not managed by a provider)` | `skippedNotManaged` | none |
 | Diffable change | `file:content : binary content modified between versions` | absent | created |
+
+The third case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
 
 `skipReason` and `diffCorrelationId` are mutually exclusive: a skipped entry carries no correlation id, because no BlobDiff will ever exist to point at.
 

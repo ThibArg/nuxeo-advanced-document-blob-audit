@@ -11,6 +11,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 
@@ -337,6 +338,9 @@ public class BlobModificationListener implements EventListener {
         }
         if (STATUS_SKIPPED_TYPE.equals(outcome.skipReason())) {
             return "binary changed (unsupported format)";
+        }
+        if (STATUS_SKIPPED_NOT_MANAGED.equals(outcome.skipReason())) {
+            return "binary changed (blob not managed by a provider)";
         }
         return "binary content modified between versions";
     }

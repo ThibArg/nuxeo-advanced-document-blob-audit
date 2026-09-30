@@ -19,11 +19,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
@@ -39,6 +42,8 @@ import org.nuxeo.ecm.core.api.Blob;
  */
 public class PlainTextExtractor implements BlobTextExtractor {
 
+    private static final Logger log = LogManager.getLogger(PlainTextExtractor.class);
+
     protected boolean trimLines = true;
 
     protected boolean skipBlankLines = false;
@@ -53,15 +58,18 @@ public class PlainTextExtractor implements BlobTextExtractor {
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         List<ContentLine> lines = new ArrayList<>();
         boolean truncated = false;
-        String encoding = blob.getEncoding();
         try (InputStream in = blob.getStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in,
-                        encoding == null ? StandardCharsets.UTF_8.name() : encoding))) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in, charsetOf(blob)))) {
             String line;
+            boolean first = true;
             while ((line = reader.readLine()) != null) {
                 if (lines.size() >= maxLines) {
                     truncated = true;
                     break;
+                }
+                if (first) {
+                    line = stripByteOrderMark(line);
+                    first = false;
                 }
                 String value = trimLines ? line.trim() : line;
                 if (skipBlankLines && value.isEmpty()) {
@@ -71,5 +79,42 @@ public class PlainTextExtractor implements BlobTextExtractor {
             }
         }
         return DiffableContent.positional(lines, truncated);
+    }
+
+    /**
+     * Charset declared on the blob, falling back to UTF-8.
+     * <p>
+     * {@code blob.getEncoding()} is whatever was stored with the binary: it can be empty, or a name
+     * no JVM knows. Passing it straight to {@code InputStreamReader} threw
+     * {@code UnsupportedEncodingException} (an {@code IOException}, so the extraction failed and
+     * the whole diff was reported in error) or {@code IllegalCharsetNameException} (unchecked, so
+     * it escaped the extractor entirely). A bad encoding declaration must degrade to a readable
+     * diff, not lose the audit.
+     */
+    protected Charset charsetOf(Blob blob) {
+        String encoding = blob.getEncoding();
+        if (encoding == null || encoding.isBlank()) {
+            return StandardCharsets.UTF_8;
+        }
+        try {
+            return Charset.forName(encoding.trim());
+        } catch (IllegalArgumentException e) {
+            // covers both IllegalCharsetNameException and UnsupportedCharsetException
+            log.warn("Blob {} declares an unusable encoding '{}', falling back to UTF-8", blob.getFilename(),
+                    encoding);
+            return StandardCharsets.UTF_8;
+        }
+    }
+
+    /**
+     * Removes a leading BOM from the first line.
+     * <p>
+     * A UTF-8 BOM decodes to U+FEFF, which {@code readLine} keeps at the head of the first line.
+     * Two files with the same text, one saved with a BOM and one without, would otherwise report
+     * their first line as modified on every single version - and an editor adding or removing the
+     * BOM silently would produce a phantom change in the audit.
+     */
+    protected String stripByteOrderMark(String line) {
+        return !line.isEmpty() && line.charAt(0) == '\uFEFF' ? line.substring(1) : line;
     }
 }

@@ -14,20 +14,20 @@
       <maxPageSize>100</maxPageSize>
     </coreQueryPageProvider>
 
-    <!-- Retention purge: everything older than the given date -->
-    <coreQueryPageProvider name="BLOB_DIFFS_OLDER_THAN">
-      <pattern>
-        SELECT * FROM BlobDiff WHERE bdiff:date &lt; ? ORDER BY bdiff:date
-      </pattern>
-      <parameter>0</parameter>
-      <pageSize>100</pageSize>
-    </coreQueryPageProvider>
-    
     <!--
-	  Elastic/Opensearch page provider behind the Web UI "Content changes audit" page and the source
-	  document tab. Kept in its own component requiring Elasticsearch: without it (unit tests), the
-	  component stays pending instead of failing on a missing class.
-	-->
+      Search-engine backed page provider behind the Web UI "Content changes audit" page and the
+      source document tab.
+
+      SearchServicePageProvider lives in nuxeo-platform-query-api, not in the Elasticsearch bundle,
+      so this component always registers: there is no missing class to guard against and a
+      <require> on ElasticSearchComponent would be both useless and harmful - it would keep the
+      whole component, BLOB_DIFFS_FOR_DOCUMENT included, pending on any instance without a search
+      engine, and in the unit tests.
+
+      What does need a search engine is the *execution*: the provider resolves SearchService at
+      query time and throws if none is configured. That is acceptable here, a real instance always
+      has one, but it is a query-time failure, not a registration-time one.
+    -->
     <genericPageProvider name="BLOB_DIFFS_ADMIN"
                          class="org.nuxeo.ecm.platform.query.nxql.SearchServicePageProvider">
       <trackUsage>false</trackUsage>

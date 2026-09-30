@@ -36,11 +36,15 @@ public class BlobAuditConstants {
     public static final String XP_SOURCE_REPO = "bdiff:sourceRepository";
 
     public static final String XP_XPATH = "bdiff:xpath";
-public static final String XP_PREVIOUS_VERSION_ID = "bdiff:previousVersionId";
-public static final String XP_PREVIOUS_VERSION_LABEL = "bdiff:previousVersionLabel";
-public static final String XP_NEW_VERSION_ID = "bdiff:newVersionId";
-public static final String XP_NEW_VERSION_LABEL = "bdiff:newVersionLabel";
-public static final String XP_VERSION_SERIES_ID = "bdiff:versionSeriesId";
+    public static final String XP_PREVIOUS_VERSION_ID = "bdiff:previousVersionId";
+
+    public static final String XP_PREVIOUS_VERSION_LABEL = "bdiff:previousVersionLabel";
+
+    public static final String XP_NEW_VERSION_ID = "bdiff:newVersionId";
+
+    public static final String XP_NEW_VERSION_LABEL = "bdiff:newVersionLabel";
+
+    public static final String XP_VERSION_SERIES_ID = "bdiff:versionSeriesId";
 
     public static final String XP_CORRELATION_ID = "bdiff:correlationId";
 
@@ -144,6 +148,15 @@ public static final String XP_VERSION_SERIES_ID = "bdiff:versionSeriesId";
     public static final String STATUS_SKIPPED_SIZE = "skippedTooLarge";
 
     public static final String STATUS_SKIPPED_TYPE = "skippedUnsupportedType";
+
+    /**
+     * The two version blobs are not both {@code ManagedBlob}, so the pair cannot be frozen and
+     * re-read by the asynchronous work. Reported like the other skips; never a {@code bdiff:status},
+     * since no {@code BlobDiff} is created. In practice this means an unusual blob provider setup.
+     *
+     * @since 2025.2
+     */
+    public static final String STATUS_SKIPPED_NOT_MANAGED = "skippedNotManaged";
 
     public static final String STATUS_ERROR = "error";
 

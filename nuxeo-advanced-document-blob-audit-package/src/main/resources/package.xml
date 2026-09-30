@@ -16,7 +16,6 @@
     Standalone: does not depend on nuxeo-advanced-document-audit.
   </description>
   <vendor>Hyland</vendor>
-  <vendor>Hyland</vendor>
 
   <installer restart="true" />
   <uninstaller restart="true" />
