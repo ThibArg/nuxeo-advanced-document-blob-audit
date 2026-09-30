@@ -15,11 +15,13 @@
  */
 package org.nuxeo.audit.advanced.blob.work;
 
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.SUMMARY_SOURCE_MISSING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.WORK_CATEGORY;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 
 import java.util.Date;
@@ -36,6 +38,7 @@ import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.blob.BlobInfo;
 import org.nuxeo.ecm.core.blob.BlobManager;
 import org.nuxeo.ecm.core.blob.BlobProvider;
+import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.work.AbstractWork;
 import org.nuxeo.runtime.api.Framework;
 
@@ -110,7 +113,7 @@ public class BlobDiffWork extends AbstractWork {
             long oldLength, String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
             String newDigest, long newLength, String principal, long eventTime, String correlationId,
             VersionContext versions) {
-        super(repositoryName + ':' + docId + ':' + xpath + ':' + correlationId + ":blobDiff");
+        super(workId(repositoryName, docId, xpath, oldDigest, newDigest, correlationId, versions));
         setDocument(repositoryName, docId);
         this.sourceTitle = sourceTitle;
         this.xpath = xpath;
@@ -138,9 +141,75 @@ public class BlobDiffWork extends AbstractWork {
         return this;
     }
 
+    /**
+     * Builds the work id from the <b>business identity</b> of the comparison, never from a random
+     * correlation id.
+     * <p>
+     * The id is what {@link org.nuxeo.ecm.core.work.api.WorkManager.Scheduling#IF_NOT_RUNNING_OR_SCHEDULED}
+     * deduplicates on. Deriving it from a per-event UUID made every work unique, so the scheduling
+     * flag never deduplicated anything and a burst of check-ins piled up redundant works.
+     * <p>
+     * Identity is the version pair when known (the nominal case), otherwise the digest pair, which
+     * is just as stable: the same two binaries always produce the same diff. The correlation id is
+     * only a last-resort fallback when neither is available.
+     *
+     * @since 2025.2
+     */
+    protected static String workId(String repositoryName, String docId, String xpath, String oldDigest,
+            String newDigest, String correlationId, VersionContext versions) {
+        String identity;
+        if (versions != null && versions.previousVersionId() != null && versions.newVersionId() != null) {
+            identity = versions.previousVersionId() + ">" + versions.newVersionId();
+        } else if (oldDigest != null && newDigest != null) {
+            identity = oldDigest + ">" + newDigest;
+        } else {
+            identity = String.valueOf(correlationId);
+        }
+        return repositoryName + ':' + docId + ':' + xpath + ':' + identity + ":blobDiff";
+    }
+
+    /**
+     * Transient failures are the common case here: an S3 read timing out, a converter temporarily
+     * unavailable, a concurrent update on the dated container. Retrying is safe because
+     * {@link #existingDiffId()} makes the work idempotent.
+     *
+     * @since 2025.2
+     */
+    @Override
+    public int getRetryCount() {
+        return 2;
+    }
+
     protected FrozenBlobs frozen() {
         return new FrozenBlobs(oldBlobProviderId, oldBlobKey, oldMimeType, oldLength, newBlobProviderId, newBlobKey,
                 newMimeType, newLength);
+    }
+
+    /**
+     * Id of an already recorded {@code BlobDiff} for this exact correlation id, or {@code null}.
+     * <p>
+     * The WorkManager is <b>at-least-once</b>: a node crash, a redeployment or a retry can run the
+     * same work twice. Without this guard the second run simply created a second document - the
+     * computed name being already taken, the core silently renamed it - and the audit trail ended up
+     * with duplicated, indistinguishable entries.
+     * <p>
+     * The diff being replaced by {@code BlobDiff.Retry} is excluded on purpose: it carries the same
+     * correlation id by design, and is precisely what this run must supersede.
+     *
+     * @since 2025.2
+     */
+    protected String existingDiffId() {
+        if (correlationId == null) {
+            return null;
+        }
+        String nxql = "SELECT * FROM " + DIFF_DOCTYPE + " WHERE " + XP_CORRELATION_ID + " = "
+                + NXQL.escapeString(correlationId);
+        for (DocumentModel diff : session.query(nxql, null, 2, 0, false)) {
+            if (!diff.getId().equals(replaceDiffId)) {
+                return diff.getId();
+            }
+        }
+        return null;
     }
 
     /** Removes the diff this work replaces, if any. */
@@ -169,6 +238,16 @@ public class BlobDiffWork extends AbstractWork {
     public void work() {
         setStatus("Diffing");
         openSystemSession();
+
+        String alreadyRecorded = existingDiffId();
+        if (alreadyRecorded != null) {
+            // Already done by a previous run of this very work: nothing to add, and above all
+            // nothing to duplicate.
+            log.debug("BlobDiff {} already exists for correlation id {}, skipping", alreadyRecorded, correlationId);
+            removeReplaced();
+            setStatus("Done");
+            return;
+        }
 
         IdRef sourceRef = new IdRef(docId);
         if (!session.exists(sourceRef)) {

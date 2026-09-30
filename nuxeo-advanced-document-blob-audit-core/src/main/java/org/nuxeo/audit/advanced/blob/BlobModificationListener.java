@@ -16,10 +16,13 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentModelList;
@@ -38,6 +41,15 @@ import org.nuxeo.runtime.api.Framework;
 /**
  * Creates one content audit per pair of successive, normally ordered Nuxeo versions.
  * Ordinary saves, live documents and proxies are deliberately ignored.
+ * <p>
+ * <b>Assumption on version ordering.</b> The previous version is looked up with
+ * {@code ORDER BY uid:major_version DESC, uid:minor_version DESC}, which assumes the usual, expected
+ * Nuxeo behaviour: versions are created one after the other and each new version is greater than the
+ * previous one. When that is not true - typically after a bulk rewrite of version numbers straight
+ * in the database - the listener detects that the newest ordered version is not the one just
+ * created, logs a WARN and skips the diff rather than comparing an ambiguous pair.
+ * <p>
+ * <b>Disabling.</b> See {@link #DISABLE_BLOB_DIFF_LISTENER} and {@link #runDisabled(Runnable)}.
  */
 public class BlobModificationListener implements EventListener {
 
@@ -45,10 +57,90 @@ public class BlobModificationListener implements EventListener {
 
     protected static final int MAX_SOURCE_HOPS = 5;
 
+    /**
+     * Context data / event property disabling this listener for a single operation, following the
+     * platform convention ({@code DublinCoreListener#DISABLE_DUBLINCORE_LISTENER},
+     * {@code CoreSession#DISABLE_AUDIT_LOGGER}, {@code VersioningService#DISABLE_AUTO_CHECKOUT}).
+     * <p>
+     * Set it on the <b>live document</b> before the save that creates the version:
+     *
+     * <pre>
+     * doc.putContextData(BlobModificationListener.DISABLE_BLOB_DIFF_LISTENER, Boolean.TRUE);
+     * doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
+     * session.saveDocument(doc);
+     * </pre>
+     *
+     * {@code CoreSession#saveDocument} copies the document context data into the event options, and
+     * {@code notifyCheckedInVersion} forwards them to the {@code documentCreated} event fired on the
+     * new version, which is what this listener reads.
+     * <p>
+     * <b>Limitation.</b> {@code CoreSession#checkIn(DocumentRef, VersioningOption, String)} builds a
+     * <i>fresh, empty</i> option map, so context data set on the document is <b>not</b> propagated on
+     * that path. Use {@link #runDisabled(Runnable)} when you check in explicitly.
+     *
+     * @since 2025.2
+     */
+    public static final String DISABLE_BLOB_DIFF_LISTENER = "disableBlobDiffListener";
+
+    /**
+     * Thread-scoped kill switch, covering the cases where no event property can be passed - an
+     * explicit {@code session.checkIn(...)}, a migration script, a bulk importer.
+     */
+    protected static final ThreadLocal<Boolean> DISABLED = new ThreadLocal<>();
+
+    /**
+     * Runs the given code with this listener disabled on the current thread, whatever the API used
+     * to create versions.
+     * <p>
+     * The previous state is restored in a {@code finally} block, so nesting is safe and an exception
+     * can never leave the listener disabled for the rest of the thread - which, on a pooled request
+     * thread, would silently stop auditing the whole instance.
+     *
+     * @since 2025.2
+     */
+    public static void runDisabled(Runnable runnable) {
+        runDisabled(() -> {
+            runnable.run();
+            return null;
+        });
+    }
+
+    /**
+     * Value-returning variant of {@link #runDisabled(Runnable)}.
+     *
+     * @since 2025.2
+     */
+    public static <T> T runDisabled(Supplier<T> supplier) {
+        Boolean previous = DISABLED.get();
+        DISABLED.set(Boolean.TRUE);
+        try {
+            return supplier.get();
+        } finally {
+            if (previous == null) {
+                DISABLED.remove();
+            } else {
+                DISABLED.set(previous);
+            }
+        }
+    }
+
+    /**
+     * {@code true} when the thread-scoped switch is currently on.
+     *
+     * @since 2025.2
+     */
+    public static boolean isDisabledForThread() {
+        return Boolean.TRUE.equals(DISABLED.get());
+    }
+
     @Override
     public void handleEvent(Event event) {
         if (!DocumentEventTypes.DOCUMENT_CREATED.equals(event.getName())
                 || !(event.getContext() instanceof DocumentEventContext context)) {
+            return;
+        }
+        if (isDisabledForThread() || Boolean.TRUE.equals(context.getProperty(DISABLE_BLOB_DIFF_LISTENER))) {
+            // Explicitly muted by the caller: no audit entry, no work, no BlobDiff.
             return;
         }
         DocumentModel receivedVersion = context.getSourceDocument();
@@ -119,11 +211,29 @@ public class BlobModificationListener implements EventListener {
         return !doc.isVersion() && !doc.isProxy();
     }
 
+    /**
+     * The two most recent versions of the series, newest first.
+     * <p>
+     * Two deliberate choices here.
+     * <p>
+     * <b>Bounded.</b> Only two rows are fetched. The previous implementation selected every version
+     * of the series at each check-in, so a document with 500 versions loaded 500 document models
+     * inside the user transaction - a cost growing quadratically over the life of the document.
+     * <p>
+     * <b>Privileged.</b> The query runs unfiltered. With the user session, a version the caller
+     * cannot read is silently dropped from the result and the second row is <em>not</em> the real
+     * previous version: the diff would then compare a wrong pair without any way to notice. Nothing
+     * leaks, since only ids, labels and blobs of the two versions are used, and the resulting
+     * BlobDiff lives under the restricted container.
+     */
     protected DocumentModelList orderedVersions(CoreSession session, String liveDocId) {
         String nxql = "SELECT * FROM Document WHERE ecm:versionVersionableId = "
                 + NXQL.escapeString(liveDocId)
                 + " AND ecm:isVersion = 1 ORDER BY uid:major_version DESC, uid:minor_version DESC";
-        return session.query(nxql);
+        // An explicit Function is required: an inline lambda is both Function- and
+        // Consumer-compatible, which makes the doPrivileged overload ambiguous.
+        Function<CoreSession, DocumentModelList> query = s -> s.query(nxql, null, 2, 0, false);
+        return CoreInstance.doPrivileged(session, query);
     }
 
     protected List<String> collectBlobXPaths(DocumentModel previous, DocumentModel current,

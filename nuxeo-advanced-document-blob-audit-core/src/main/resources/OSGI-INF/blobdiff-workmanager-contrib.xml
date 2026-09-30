@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.workmanager">
+
+  <extension target="org.nuxeo.ecm.core.work.service" point="queues">
+    <documentation>
+      Dedicated queue for BlobDiffWork. Without it the "blobDiff" category falls back to the
+      "default" queue, which is shared with the rest of the platform: a burst of check-ins on large
+      Office or PDF files would then starve every other asynchronous work of the instance.
+
+      A blob diff is deliberately CPU and I/O heavy (any2text conversion, Apache POI, PDFBox, then
+      an O(n*m) alignment), so the concurrency is kept low on purpose. Raise maxThreads only after
+      measuring, and remember that each thread can hold a whole extracted document in memory.
+    </documentation>
+    <queue id="blobDiff">
+      <name>Binary content diff</name>
+      <maxThreads>2</maxThreads>
+      <capacity>10000</capacity>
+      <category>blobDiff</category>
+    </queue>
+  </extension>
+
+</component>

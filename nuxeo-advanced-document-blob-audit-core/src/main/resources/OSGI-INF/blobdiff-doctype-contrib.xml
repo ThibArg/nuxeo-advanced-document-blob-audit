@@ -14,6 +14,14 @@
       <!-- Never surfaced in navigation or collections -->
       <facet name="HiddenInNavigation" />
       <facet name="NotCollectionMember" />
+      <!--
+        Critical. bdiff:diff is a blob holding business content extracted from the source document.
+        Without this facet the platform runs its binary text extraction on it and copies that
+        content into the fulltext index (and therefore into Elasticsearch), which both defeats the
+        confidentiality of the restricted /change-diff container and doubles the conversion cost of
+        every diff. See FulltextConfigurationFactory and FacetNames.NOT_FULLTEXT_INDEXABLE.
+      -->
+      <facet name="NotFulltextIndexable" />
     </doctype>
     <!-- Search document of BLOB_DIFFS_ADMIN, never persisted -->
     <doctype name="BlobDiffSearch" extends="Document">

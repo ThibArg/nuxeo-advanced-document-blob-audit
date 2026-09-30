@@ -22,6 +22,17 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 
 The audit log never contains business content. It stores only the xpath, file names, and a `diffCorrelationId` pointing to the BlobDiff document.
 
+> [!WARNING]
+> **The plugin assumes normal, monotonically increasing version numbers.**
+>
+> To find the version preceding the one that was just created, the listener orders the version series by `uid:major_version DESC, uid:minor_version DESC`. This relies on the **usual and expected** Nuxeo behaviour: versions are created one after the other, and each new version is greater than the previous one.
+>
+> If version numbers are rewritten out of band — typically a bulk update performed directly in the database — that assumption no longer holds and the notion of "the previous version" becomes ambiguous.
+>
+> The plugin does **not** guess in that situation. It checks that the newest ordered version is the one that just triggered the event; when it is not, it logs a `WARN` (`version numbers may not be monotonically increasing, skipping blob diff`) and **skips the diff** rather than comparing an arbitrary pair. Grep your logs for that message after any such migration.
+>
+> In practice this has been observed once in ten years, but the guardrail is there.
+
 ## One Engine, Pluggable Extractors
 
 ```text
@@ -86,7 +97,7 @@ This is why `maxLines` still matters: the default limit of 10,000 lines caps a d
 
 Document type: `BlobDiff`
 
-Facets: `HiddenInNavigation`, `NotCollectionMember`
+Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 
 | Field | Purpose |
 |--------|--------|
@@ -100,7 +111,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
-The diff is stored as a blob, not a string: outside SQL/Mongo records and outside full-text indexing.
+The diff is stored as a blob, not a string: it stays outside the SQL/Mongo record. The `NotFulltextIndexable` facet is what keeps it outside the full-text index too — without it the platform would run its binary text extraction on the diff and copy the extracted business content into the full-text index and into Elasticsearch, defeating the whole point of the restricted container.
 
 ### Container and Security
 
@@ -114,6 +125,20 @@ The diff is stored as a blob, not a string: outside SQL/Mongo records and outsid
 
 Writes are performed with a **system session**: users modifying the file have no permission on this container.
 
+### Asynchronous Pipeline
+
+The synchronous side must stay cheap, and the asynchronous side must be safe to run more than once. Four guarantees back this up.
+
+**Dedicated work queue.** `BlobDiffWork` runs in the `blobDiff` category, bound to its own WorkManager queue (`blobdiff-workmanager-contrib.xml`, `maxThreads=2`). Without it the category would fall back to the shared `default` queue, where a burst of check-ins on large Office or PDF files would starve every other asynchronous work of the instance. Raise `maxThreads` only after measuring: each thread can hold a whole extracted document in memory.
+
+**Deterministic work id.** The work id is derived from the business identity of the comparison — the version pair, or the digest pair when no version context is available — never from the random correlation id. This is what `Scheduling.IF_NOT_RUNNING_OR_SCHEDULED` deduplicates on, so redundant works on the same pair collapse into one.
+
+**Idempotent work.** The WorkManager is *at-least-once*: a node crash, a redeployment or a retry can run the same work twice. Before creating anything, `BlobDiffWork` looks for an existing `BlobDiff` carrying the same `bdiff:correlationId` and returns early if it finds one. The diff being superseded by `BlobDiff.Retry` is excluded from that lookup, since it carries the same correlation id by design.
+
+**Retries.** `getRetryCount()` returns 2. Transient failures are the common case here (an S3 read timing out, a converter momentarily unavailable, a concurrent update on the dated container), and retrying is only safe because of the idempotence guard above.
+
+**Bounded version lookup.** On each version creation the listener fetches only the **two** most recent versions of the series, with a **privileged** session. Fetching them all made the cost grow quadratically over the life of a document; using the user session silently dropped versions the caller cannot read, so the "previous version" could be the wrong one. Nothing leaks: only ids, labels and blobs of the two versions are used, and the result lands in the restricted container.
+
 ### Page Providers
 
 | Name | Backend | Use |
@@ -122,7 +147,8 @@ Writes are performed with a **system session**: users modifying the file have no
 | `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL) | Diffs of one document, without Elasticsearch |
 | `BLOB_DIFFS_OLDER_THAN` | Core (NXQL) | Retention scripts |
 
-`BLOB_DIFFS_ADMIN` lives in its own component requiring `org.nuxeo.elasticsearch.ElasticSearchComponent`: without Elasticsearch it stays pending instead of failing.
+> [!NOTE]
+> `BLOB_DIFFS_ADMIN` is declared in `blobdiff-pageproviders-contrib.xml`, which is **not** guarded by a `<require>` on `org.nuxeo.elasticsearch.ElasticSearchComponent`. It relies on `SearchServicePageProvider`, backed by the LTS 2025 `SearchService` abstraction. Adding the `<require>` so the component stays pending instead of failing where no search engine is deployed is a pending task (see `AGENTS.md`).
 
 ## Web UI
 
@@ -194,6 +220,53 @@ Auditors group (server and Web UI):
 ```
 
 In production, restrict the feature to specific document types. Computing diffs for every binary in a repository is rarely worth the cost.
+
+### Disabling the Listener
+
+The `<config enabled="...">` switch above is the global, static one: it requires a redeployment. For targeted, runtime control, the plugin follows the platform convention (`DublinCoreListener.DISABLE_DUBLINCORE_LISTENER`, `CoreSession.DISABLE_AUDIT_LOGGER`, `VersioningService.DISABLE_AUTO_CHECKOUT`) and offers two complementary mechanisms.
+
+**1. Per-operation, through the document context data**
+
+```java
+import static org.nuxeo.audit.advanced.blob.BlobModificationListener.DISABLE_BLOB_DIFF_LISTENER;
+
+doc.putContextData(DISABLE_BLOB_DIFF_LISTENER, Boolean.TRUE);
+doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
+session.saveDocument(doc);   // version created, no audit entry and no BlobDiff
+```
+
+`CoreSession#saveDocument` copies the document context data into the event options, and `notifyCheckedInVersion` forwards them to the `documentCreated` event fired on the new version — which is exactly what the listener reads. The same key also works when you fire the event yourself and set it as an event property.
+
+> [!IMPORTANT]
+> This does **not** work with `session.checkIn(docRef, option, comment)`. That method builds a *fresh, empty* option map, so context data set on the document is never propagated on that path. Use the thread-scoped switch below when you check in explicitly.
+
+**2. Thread-scoped, for migrations, importers and explicit check-ins**
+
+```java
+BlobModificationListener.runDisabled(() -> {
+    for (DocumentModel doc : batch) {
+        session.checkIn(doc.getRef(), VersioningOption.MINOR, "bulk migration");
+    }
+});
+
+// value-returning variant
+DocumentRef ref = BlobModificationListener.runDisabled(
+        () -> session.checkIn(doc.getRef(), VersioningOption.MINOR, null));
+```
+
+The previous state is restored in a `finally` block, so nesting is safe and an exception can never leave the listener disabled for the rest of the thread — which, on a pooled request thread, would silently stop auditing the whole instance. `BlobModificationListener.isDisabledForThread()` exposes the current state.
+
+**3. Instance-wide, at runtime**
+
+The listener is named `blobModificationListener`, so the standard platform administration API applies:
+
+```java
+Framework.getService(EventServiceAdmin.class).setListenerEnabledFlag("blobModificationListener", false);
+```
+
+This is global and survives until it is set back or the node restarts. Prefer mechanisms 1 and 2 for anything scoped.
+
+When the listener is disabled by any of these means, **nothing** happens: no `blobContentModified` audit entry and no `BlobDiffWork`. The version itself is created normally.
 
 #### Image Analysis Level
 
@@ -321,6 +394,8 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
 | TestBlobDiffManagement | Yes | Binary keys, Delete / Purge / Retry operations and their access control, blobDiffSource enricher |
+| TestBlobDiffHardening | Yes | Full-text exclusion, dedicated work queue, deterministic work id, work idempotence, bounded version lookup |
+| TestBlobDiffListenerDisabling | Yes | Per-operation context data flag, thread-scoped `runDisabled`, no leak between operations |
 | TestBlobAuditIntegration | Yes | End-to-end validation |
 
 
