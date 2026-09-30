@@ -103,7 +103,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 165 tests (19 test classes)
+mvn -o install                                     # full build, 184 tests (21 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -121,7 +121,10 @@ mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
 this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-contrib.xml`).
-`blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`.
+`blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
+`blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on, and
+`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor.
+`TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 
 Do not run the build when a commit only touches `README.md`, `AGENTS.md` or `.gitignore`.
 
@@ -136,9 +139,9 @@ volume can no longer be waved away.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 9, 13 and 15 are done** (regression coverage:
+improvements were identified. **Items 1 to 10, 13 and 15 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
-`TestBlobDiffVersionPairing`):
+`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -155,6 +158,11 @@ improvements were identified. **Items 1 to 9, 13 and 15 are done** (regression c
    cached as templates (`files:files/*/file`) and resolved against the document.
 9. Listener moved to `aboutToCheckIn` + `documentCheckedIn`. Removes the `ORDER BY
    uid:major_version` heuristic, its bail-out, and the five `getSourceDocument` hops.
+10. Binaries materialised once per diff (`io/MaterializedBlob`), so every extraction pass reads a
+    local copy: four downloads for two files became two. `ImageInventoryExtractor` is now a plain
+    `BlobTextExtractor` contributed to the new `imageExtractors` point (one contribution per
+    format, so one can be disabled alone), bounded by `maxLines`, and reads the PDF from the file
+    instead of `readAllBytes()`.
 13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
     `BlobDiffTrigger.Outcome`, `skipReason` extended info).
 15. Non-`ManagedBlob` pairs get the third skip reason, `skippedNotManaged`.
@@ -164,23 +172,10 @@ improvements were identified. **Items 1 to 9, 13 and 15 are done** (regression c
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **E** | 10 | medium | Extraction I/O and the extractor extension model. Do first. |
 | **F** | 11 | high | Needed, see "Deployment target" |
 | — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
 
-
-### 10. Single materialisation of the binaries; `ImageInventoryExtractor` as a real extractor
-
-With `imageAnalysisLevel > 0`, `BlobDiffComponent#diff` calls `blob.getStream()` **four times** for
-two files — four S3 downloads. Materialise each side once (`blob.getFile()` or a `CloseableFile`)
-and hand it to both extractors.
-
-`ImageInventoryExtractor` is hardcoded (`new ImageInventoryExtractor()` inside the service) and is
-the only extraction class not implementing `BlobTextExtractor`: not contributable, not disableable
-per MIME type, **not bounded by `maxLines`**, and `extractPdf` does `in.readAllBytes()` (whole PDF
-in heap, times the concurrency). Fold it into the `extractors` point or add an `imageExtractors`
-point.
 
 ### 11. Move the purge to the Bulk Action Framework
 

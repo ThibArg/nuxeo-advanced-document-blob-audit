@@ -99,6 +99,35 @@ No external diff library is required.
 
 The extractor with the lowest `order` wins. A specialized extractor overrides a generic one.
 
+### Image Inventory Extractors
+
+Image inventories have a point of their own, `imageExtractors`, because an image extractor and a
+text extractor both run on the same blob: they cannot compete for the same MIME type in a single,
+order-based selection. The descriptor, the MIME type matching and the `enabled` switch are
+identical to `extractors`.
+
+```xml
+<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
+  <extractor name="imagePdf" enabled="false"
+             class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+    <mimeTypes>
+      <mimeType>application/pdf</mimeType>
+    </mimeTypes>
+  </extractor>
+</extension>
+```
+
+`ImageInventoryExtractor` is contributed once per format (`imageWord`, `imageSpreadsheet`,
+`imagePresentation`, `imagePdf`), so a single format can be turned off — the above disables the PDF
+inventory and leaves the others untouched. These extractors only run when `imageAnalysisLevel > 0`,
+and they are bounded by the same `maxLines` as the text.
+
+### Reading the Binaries
+
+Both binaries are materialised on the local filesystem **once per diff**, and every extraction pass
+reads the local copy. On an S3-backed blob provider this is one download per version, whatever the
+number of passes. A blob already backed by a file is used as is and never copied.
+
 ## Algorithm: Hirschberg + Prefix/Suffix Trimming
 
 Positional alignment relies on **Hirschberg's algorithm** instead of the traditional LCS table.
@@ -310,8 +339,8 @@ When the listener is disabled by any of these means, **nothing** happens: no `bl
 
 `imageAnalysisLevel` is optional and defaults to `0` when omitted.
 
-- `0`: no image analysis. This preserves the current text/cell-only behavior and adds no image-processing cost.
-- `1`: reserved for digest-based image inventory, allowing extractors to report image additions, removals, and replacements. The configuration contract is available now; image extraction itself is implemented per format in subsequent changes.
+- `0`: no image analysis. This preserves the text/cell-only behavior and adds no image-processing cost.
+- `1`: digest-based image inventory, reporting image additions, removals, and replacements. It is produced by the extractors contributed to the `imageExtractors` point (see above), which are selectable and disableable per MIME type.
 
 This version supports values from `0` to `1`. At component startup, an invalid value is clamped to the nearest supported bound and a `WARN` is logged. For example, `-1` becomes `0`, while `2` becomes `1`. Future versions may raise the maximum when richer image-analysis modes are implemented.
 
@@ -396,7 +425,8 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **Position-sensitive keys.** PowerPoint keys include the slide number and PDF keys the page number and ordinal: inserting a slide/page before an image reports it as removed + added.
 - **Word** keys are media part names: the same image used in several places appears once.
 - **Linked (external) images** and images in PowerPoint layouts/masters are ignored.
-- Image extraction failure silently falls back to the text-only result (logged as WARN).
+- **Bounded by `maxLines`**, like the text: past that many images the inventory stops and the diff is flagged `truncated`.
+- Image extraction failure silently falls back to the text-only result (logged as WARN). A format with no contributed image extractor simply gets no inventory.
 
 ### Security and Operations
 - **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.

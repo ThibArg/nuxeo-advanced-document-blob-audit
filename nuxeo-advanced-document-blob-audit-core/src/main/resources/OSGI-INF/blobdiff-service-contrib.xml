@@ -23,6 +23,17 @@
     </documentation>
   </extension-point>
 
+  <extension-point name="imageExtractors">
+    <object class="org.nuxeo.audit.advanced.blob.ExtractorDescriptor" />
+    <documentation>
+      Registers a BlobTextExtractor producing an image inventory, used only when
+      imageAnalysisLevel is greater than 0. A point of its own because an image extractor and a
+      text extractor both run on the same blob: they cannot compete for the same mime type in a
+      single, order-based selection. Same descriptor, same mime type matching, same "enabled"
+      switch.
+    </documentation>
+  </extension-point>
+
   <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
     <config enabled="false">
       <maxBlobSize>10485760</maxBlobSize>
@@ -98,6 +109,49 @@
       </mimeTypes>
       <property name="converter">any2text</property>
       <property name="minLineLength">1</property>
+    </extractor>
+
+  </extension>
+
+  <!--
+    Image inventories, bounded by the same maxLines as the text. One contribution per format so
+    that a single one can be turned off - the PDF inventory is the most expensive - without losing
+    the others.
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
+
+    <extractor name="imageWord" order="10"
+               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.wordprocessingml.document</mimeType>
+      </mimeTypes>
+    </extractor>
+
+    <extractor name="imageSpreadsheet" order="10"
+               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</mimeType>
+        <mimeType>application/vnd.ms-excel</mimeType>
+        <mimeType>application/vnd.ms-excel.sheet.macroenabled.12</mimeType>
+      </mimeTypes>
+    </extractor>
+
+    <extractor name="imagePresentation" order="10"
+               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.presentation</mimeType>
+        <mimeType>application/vnd.ms-powerpoint.presentation.macroenabled.12</mimeType>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.slideshow</mimeType>
+        <mimeType>application/vnd.ms-powerpoint.slideshow.macroenabled.12</mimeType>
+        <mimeType>application/vnd.openxmlformats-officedocument.presentationml.template</mimeType>
+      </mimeTypes>
+    </extractor>
+
+    <extractor name="imagePdf" order="10"
+               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+      <mimeTypes>
+        <mimeType>application/pdf</mimeType>
+      </mimeTypes>
     </extractor>
 
   </extension>

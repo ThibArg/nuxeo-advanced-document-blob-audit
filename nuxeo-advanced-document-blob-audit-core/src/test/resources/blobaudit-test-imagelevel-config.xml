@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.imagelevel">
+
+  <require>org.nuxeo.audit.advanced.blob.test.config</require>
+
+  <!-- Turns the image inventory on, to exercise the imageExtractors extension point. -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <maxBlobSize>1048576</maxBlobSize>
+      <maxLines>1000</maxLines>
+      <maxDiffEntries>500</maxDiffEntries>
+      <imageAnalysisLevel>1</imageAnalysisLevel>
+      <docTypes />
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+    </config>
+  </extension>
+
+</component>

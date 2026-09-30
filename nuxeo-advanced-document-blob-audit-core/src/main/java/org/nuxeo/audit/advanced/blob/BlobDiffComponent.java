@@ -53,7 +53,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
+import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.api.CoreSession;
@@ -81,9 +81,20 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     public static final String XP_EXTRACTORS = "extractors";
 
+    /**
+     * Image inventory extractors, used when {@code imageAnalysisLevel > 0}. A separate point on
+     * purpose: both an image extractor and a text extractor run on the same blob, so they cannot
+     * compete for the same mime type in a single, order-based selection.
+     *
+     * @since 2025.3
+     */
+    public static final String XP_IMAGE_EXTRACTORS = "imageExtractors";
+
     public static final String XP_CONFIG = "config";
 
     protected List<ResolvedExtractor> extractors;
+
+    protected List<ResolvedExtractor> imageExtractors;
 
     protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor) {
     }
@@ -100,8 +111,13 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                     BlobDiffConfigDescriptor.MIN_IMAGE_ANALYSIS_LEVEL,
                     BlobDiffConfigDescriptor.MAX_IMAGE_ANALYSIS_LEVEL);
         }
+        extractors = resolve(XP_EXTRACTORS);
+        imageExtractors = resolve(XP_IMAGE_EXTRACTORS);
+    }
+
+    protected List<ResolvedExtractor> resolve(String extensionPoint) {
         List<ResolvedExtractor> resolved = new ArrayList<>();
-        for (ExtractorDescriptor descriptor : this.<ExtractorDescriptor> getDescriptors(XP_EXTRACTORS)) {
+        for (ExtractorDescriptor descriptor : this.<ExtractorDescriptor> getDescriptors(extensionPoint)) {
             if (!descriptor.isEnabled()) {
                 continue;
             }
@@ -114,13 +130,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             }
         }
         resolved.sort(Comparator.comparingInt(r -> r.descriptor().getOrder()));
-        extractors = resolved;
+        return resolved;
     }
 
     @Override
     public void stop(ComponentContext context) throws InterruptedException {
         super.stop(context);
         extractors = null;
+        imageExtractors = null;
     }
 
     @Override
@@ -148,10 +165,19 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     protected BlobTextExtractor findExtractor(String mimeType) {
-        if (extractors == null) {
+        return findExtractor(extractors, mimeType);
+    }
+
+    /** @since 2025.3 */
+    protected BlobTextExtractor findImageExtractor(String mimeType) {
+        return findExtractor(imageExtractors, mimeType);
+    }
+
+    protected BlobTextExtractor findExtractor(List<ResolvedExtractor> candidates, String mimeType) {
+        if (candidates == null) {
             return null;
         }
-        for (ResolvedExtractor resolved : extractors) {
+        for (ResolvedExtractor resolved : candidates) {
             if (resolved.descriptor().accepts(mimeType)) {
                 return resolved.extractor();
             }
@@ -176,8 +202,20 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
     }
 
+    /**
+     * Both binaries are materialised locally <b>once</b> and every extraction pass reads the local
+     * copy. Without this, a pair of S3-backed blobs meant one download per pass: four for two files
+     * as soon as {@code imageAnalysisLevel > 0}.
+     */
     @Override
     public DiffResult diff(Blob oldBlob, Blob newBlob) {
+        try (MaterializedBlob oldLocal = MaterializedBlob.of(oldBlob);
+                MaterializedBlob newLocal = MaterializedBlob.of(newBlob)) {
+            return diffLocal(oldLocal.blob(), newLocal.blob());
+        }
+    }
+
+    protected DiffResult diffLocal(Blob oldBlob, Blob newBlob) {
         DiffableContent oldContent = extract(oldBlob);
         DiffableContent newContent = extract(newBlob);
         if (oldContent == null || newContent == null) {
@@ -186,17 +224,27 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         BlobDiffConfigDescriptor config = getConfig();
         TextDiffer differ = new TextDiffer(config.getMaxDiffEntries());
         DiffResult textResult = differ.diff(oldContent, newContent);
-        if (config.getImageAnalysisLevel() == 0) {
+        if (config.normalizeImageAnalysisLevel() == 0) {
+            return textResult;
+        }
+        BlobTextExtractor imageExtractor = newBlob == null ? null : findImageExtractor(newBlob.getMimeType());
+        if (imageExtractor == null) {
             return textResult;
         }
         try {
-            ImageInventoryExtractor imageExtractor = new ImageInventoryExtractor();
-            DiffResult imageResult = differ.diff(imageExtractor.extract(oldBlob), imageExtractor.extract(newBlob));
+            int maxLines = config.getMaxLines();
+            DiffResult imageResult = differ.diff(extractImages(imageExtractor, oldBlob, maxLines),
+                    extractImages(imageExtractor, newBlob, maxLines));
             return merge(textResult, imageResult);
-        } catch (Exception e) {
+        } catch (Exception e) { // NOSONAR - the image inventory must never lose the text diff
             log.warn("Image inventory extraction failed for mime type {}", newBlob.getMimeType(), e);
             return textResult;
         }
+    }
+
+    /** A missing side (first version, blob added or removed) has an empty inventory, not none. */
+    protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws Exception {
+        return blob == null ? DiffableContent.keyed(List.of(), false) : extractor.extract(blob, maxLines);
     }
 
     protected DiffResult merge(DiffResult text, DiffResult images) {

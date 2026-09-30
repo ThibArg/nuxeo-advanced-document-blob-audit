@@ -77,7 +77,7 @@ public class TestPresentationDiff {
     }
 
     protected DiffResult imageDiff(Blob before, Blob after) throws Exception {
-        return differ.diff(images.extract(before), images.extract(after));
+        return differ.diff(images.extract(before, MAX_LINES), images.extract(after, MAX_LINES));
     }
 
     @Test
@@ -140,7 +140,7 @@ public class TestPresentationDiff {
 
     @Test
     public void testImageIsInventoriedBySlide() throws Exception {
-        DiffableContent content = images.extract(pptx("f.pptx", "Title|img:A"));
+        DiffableContent content = images.extract(pptx("f.pptx", "Title|img:A"), MAX_LINES);
         assertTrue(content.keyed());
         assertEquals(1, content.size());
         assertTrue(content.lines().get(0).key().startsWith("powerpoint:slide:1:image:"));
@@ -169,7 +169,7 @@ public class TestPresentationDiff {
 
     @Test
     public void testSameMediaTwiceOnOneSlideIsNotCollapsed() throws Exception {
-        DiffableContent content = images.extract(pptx("f.pptx", "img:A|img:A"));
+        DiffableContent content = images.extract(pptx("f.pptx", "img:A|img:A"), MAX_LINES);
         assertEquals(2, content.size());
     }
 

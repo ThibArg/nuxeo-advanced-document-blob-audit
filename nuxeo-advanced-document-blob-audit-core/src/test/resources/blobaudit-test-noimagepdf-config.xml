@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.noimagepdf">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <!-- Turns the PDF image inventory off, leaving the other formats untouched. -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
+    <extractor name="imagePdf" enabled="false"
+               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+      <mimeTypes>
+        <mimeType>application/pdf</mimeType>
+      </mimeTypes>
+    </extractor>
+  </extension>
+
+</component>
