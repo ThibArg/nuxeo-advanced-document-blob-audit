@@ -24,6 +24,7 @@ import static org.junit.Assert.fail;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -275,6 +276,51 @@ public class TestBlobDiffManagement {
                 // expected
             }
         }
+    }
+
+    /**
+     * COR-01, end to end: an extraction that <b>fails</b> must be filed as {@code error}, not as
+     * {@code skippedUnsupportedType}.
+     * <p>
+     * The distinction is not cosmetic. {@code BlobDiff.Retry} only accepts {@code error}, so a
+     * failure recorded as "unsupported format" could never be replayed: the audit trail kept a
+     * permanent hole, and the auditor read a reason that was not the real one. The fixture is a
+     * pair of .xlsx whose mime type has an extractor - so the check-in path finds the work
+     * eligible - but whose bytes are not a zip, so the extractor blows up at work time.
+     */
+    @Test
+    public void testAnExtractionFailureIsRetryable() throws Exception {
+        DocumentModel doc = file("corrupted-xlsx", corruptXlsx("v1 is not a zip"));
+        session.checkIn(doc.getRef(), VersioningOption.MAJOR, "v1");
+        session.save();
+        txFeature.nextTransaction();
+        doc = session.getDocument(doc.getRef());
+        doc.setPropertyValue("file:content", (Serializable) corruptXlsx("v2 is not a zip either"));
+        session.saveDocument(doc);
+        session.checkIn(doc.getRef(), VersioningOption.MINOR, "v2");
+        session.save();
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(doc.getId());
+        assertEquals("a changed binary with an extractor must still produce a BlobDiff", 1, diffs.size());
+        DocumentModel failed = diffs.get(0);
+        assertEquals("a failed extraction is an incident, not an unsupported format",
+                BlobAuditConstants.STATUS_ERROR, failed.getPropertyValue(BlobAuditConstants.XP_STATUS));
+
+        // ... and that status is exactly what makes the diff replayable
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> replayed = diffsOf(doc.getId());
+        assertEquals("the retry must replace the failed diff, not duplicate it", 1, replayed.size());
+        assertEquals(BlobAuditConstants.STATUS_ERROR,
+                replayed.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /** An .xlsx by mime type and filename only: the extractor is found, then fails on the bytes. */
+    protected Blob corruptXlsx(String content) throws Exception {
+        return BlobAuditTestHelper.blob(content.getBytes(StandardCharsets.UTF_8), BlobAuditTestHelper.XLSX_MIME,
+                "corrupt.xlsx");
     }
 
     /* --------------------------------------------------------------- enricher */

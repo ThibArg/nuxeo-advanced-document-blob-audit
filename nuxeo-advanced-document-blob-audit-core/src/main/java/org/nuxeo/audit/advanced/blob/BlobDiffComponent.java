@@ -185,6 +185,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return null;
     }
 
+    /**
+     * {@code null} means <b>no extractor is registered</b> for the mime type, and nothing else.
+     * <p>
+     * A failing extractor used to be reported the same way, so {@code BlobDiffWork} filed a real
+     * incident as {@code skippedUnsupportedType} - a status {@code BlobDiff.Retry} refuses, which
+     * made the failure permanent and invisible. Raising is what lets the work record {@code error}
+     * instead, through the {@code catch (RuntimeException)} it already has.
+     */
     @Override
     public DiffableContent extract(Blob blob) {
         if (blob == null) {
@@ -196,9 +204,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
         try {
             return extractor.extract(blob, getConfig().getMaxLines());
-        } catch (Exception e) { // NOSONAR - extraction must never break the caller
-            log.warn("Blob content extraction failed for mime type {}", blob.getMimeType(), e);
-            return null;
+        } catch (Exception e) { // NOSONAR - checked exceptions of the extractor SPI
+            throw new NuxeoException("Blob content extraction failed for mime type " + blob.getMimeType(), e);
         }
     }
 
@@ -237,6 +244,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                     extractImages(imageExtractor, newBlob, maxLines));
             return merge(textResult, imageResult);
         } catch (Exception e) { // NOSONAR - the image inventory must never lose the text diff
+            // Deliberately asymmetric with extract(): a failing *text* extraction raises, because
+            // there is nothing left to record, while a failing image inventory only costs a
+            // section of the report. Do not "harmonize" the two.
             log.warn("Image inventory extraction failed for mime type {}", newBlob.getMimeType(), e);
             return textResult;
         }

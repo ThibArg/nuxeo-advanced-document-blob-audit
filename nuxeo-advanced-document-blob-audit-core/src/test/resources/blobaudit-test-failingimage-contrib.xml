@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.failingimage">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <!--
+    Wins the Word mime type over "imageWord" thanks to a lower order, and throws. Used to check
+    that a failing image inventory still yields the text diff, while a failing text extraction
+    raises (COR-01).
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
+    <extractor name="imageWordFailing" order="1"
+               class="org.nuxeo.audit.advanced.blob.FailingImageExtractor">
+      <mimeTypes>
+        <mimeType>application/vnd.openxmlformats-officedocument.wordprocessingml.document</mimeType>
+      </mimeTypes>
+    </extractor>
+  </extension>
+
+</component>

@@ -19,12 +19,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.cells;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
@@ -36,6 +38,7 @@ import org.junit.runner.RunWith;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.api.security.ACL;
 import org.nuxeo.ecm.core.api.security.ACP;
@@ -88,7 +91,10 @@ public class TestBlobDiffService {
         assertFalse("text must produce positional content", content.keyed());
     }
 
-    /** No extractor means no diff, and a {@code null} result the caller must handle. */
+    /**
+     * No extractor means no diff, and a {@code null} result the caller must handle. This is now the
+     * <b>only</b> meaning of {@code null}: the counterpart of the test just below.
+     */
     @Test
     public void testUnsupportedMimeTypeYieldsNoExtractor() throws Exception {
         Blob blob = textBlob("binary-ish", "application/x-unknown-binary", "f.bin");
@@ -98,13 +104,23 @@ public class TestBlobDiffService {
         assertFalse(blobDiffService.isDiffable("File", "file:content", blob));
     }
 
-    /** Extraction failures must be swallowed, never propagated to the listener or the work. */
+    /**
+     * A failing extraction is an incident, not an unsupported format.
+     * <p>
+     * The previous version of this test asserted the opposite ("a corrupted blob must not throw"),
+     * on the premise that {@code extract} runs on the synchronous listener path. It does not: the
+     * only callers are {@code BlobDiffComponent#diffLocal} and, through it, {@code BlobDiffWork},
+     * which turns the raised failure into {@code error} - the one status {@code BlobDiff.Retry}
+     * accepts.
+     */
     @Test
-    public void testCorruptedSpreadsheetIsHandledGracefully() throws Exception {
-        Blob corrupted = BlobAuditTestHelper.blob("not a zip at all".getBytes(),
+    public void testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported() throws Exception {
+        Blob corrupted = BlobAuditTestHelper.blob("not a zip at all".getBytes(StandardCharsets.UTF_8),
                 BlobAuditTestHelper.XLSX_MIME, "corrupt.xlsx");
 
-        assertNull("a corrupted blob must not throw", blobDiffService.extract(corrupted));
+        assertThrows(NuxeoException.class, () -> blobDiffService.extract(corrupted));
+        assertThrows("the failure must reach the caller through diff() too", NuxeoException.class,
+                () -> blobDiffService.diff(corrupted, corrupted));
     }
 
     /* ------------------------------------------------------------- guardrails */

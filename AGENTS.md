@@ -152,7 +152,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 194 tests (23 test classes)
+mvn -o install                                     # full build, 196 tests (21 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -171,8 +171,11 @@ mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
 this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-contrib.xml`).
 `blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
-`blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on, and
-`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor, and
+`blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on,
+`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor,
+`blobaudit-test-failingimage-contrib.xml` to make the Word image inventory throw
+(`FailingImageExtractor`, a test class contributed to `imageExtractors` with a lower `order` than
+`imageWord`), and
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
@@ -195,11 +198,12 @@ Action Framework) mandatory rather than optional.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`;
-those that turn into work get the next free number in this same list. **Items 1 to 11, 13, 15 and
-16 are done** (regression coverage: `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`,
-`TestTextDifferScaling`, `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`,
-`TestMaterializedBlob`, `TestBlobDiffPurgeAction`):
+improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`,
+and a later correctness audit its own, numbered `COR-nn`; those that turn into work get the next
+free number in this same list. **Items 1 to 11, 13 and 15 to 17 are done** (regression coverage:
+`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
+`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
+`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -262,6 +266,40 @@ those that turn into work get the next free number in this same list. **Items 1 
     No automated coverage — this repository has no JS test infrastructure (no runner, no
     `*.test.js`). Verified by reading the Web UI and Polymer sources; behavioural check is manual
     (open the page as an auditor, confirm a search request leaves in the network tab).
+
+17. *(correctness audit, finding `COR-01`)* `BlobDiffService#extract` returned `null` for two
+    unrelated situations: "no extractor is registered for this mime type" and "the extractor was
+    found and blew up". `diffLocal` propagated the `null` and `BlobDiffWork` mapped it to the
+    single status `skippedUnsupportedType`, so a genuine failure was persisted as a format
+    limitation. `BlobDiff.Retry` only accepts `error`, so that diff could **never** be replayed:
+    a silent, permanent hole in the audit trail, under a reason that was not the real one.
+
+    Fixed by narrowing the contract rather than widening the return type: `extract` now wraps any
+    extractor failure in a `NuxeoException` and keeps `null` for the absence of an extractor alone.
+    Nothing else had to change — `BlobDiffWork` already had the `catch (RuntimeException)` that
+    records `error` right below the `result == null` branch. The two rejected alternatives were an
+    `ExtractionOutcome{OK, UNSUPPORTED, FAILED}` enum (a public API signature change for no gain
+    here) and keeping `null` while exposing the last error elsewhere (implicit, non-thread-safe
+    state).
+
+    **The image inventory stays swallowed, and that asymmetry is deliberate.** `diffLocal`'s own
+    `catch (Exception)` around `extractImages` degrades to the text result with a WARN: a failing
+    inventory costs one section of the report, a failing text extraction leaves nothing to record.
+    Do not "harmonize" the two.
+
+    `skippedUnsupportedType` remains reachable, and its meaning is now exact: `service.diff()`
+    returned `null` because one side had no extractor at work time — typically a version pair whose
+    two blobs do not share a mime type. `DiffEligibility.UNSUPPORTED_TYPE` (the pre-work skip
+    reason, decided at check-in) is untouched, and so is the purge dialog offering that status.
+
+    Coverage: `TestBlobDiffService#testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported`
+    (which replaces a test whose javadoc asserted the bug, "extraction failures must be swallowed" —
+    its premise was wrong, `extract` never runs on the synchronous listener path),
+    `TestBlobDiffManagement#testAnExtractionFailureIsRetryable` (end to end: a corrupted `.xlsx`
+    versioned twice yields a `BlobDiff` in `error` that `BlobDiff.Retry` accepts) and
+    `TestBlobDiffImageExtraction#testAFailingImageInventoryStillYieldsTheTextDiff` (which injects
+    the failure through `FailingImageExtractor` + `blobaudit-test-failingimage-contrib.xml`,
+    there being no dependable binary that the text converter reads and the inventory chokes on).
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

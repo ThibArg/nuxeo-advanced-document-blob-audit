@@ -20,6 +20,7 @@ import java.util.Date;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.NuxeoException;
 
 /**
  * Entry point of the blob diff feature.
@@ -46,10 +47,26 @@ public interface BlobDiffService {
         return getEligibility(docType, xpath, blob) == DiffEligibility.ELIGIBLE;
     }
 
-    /** Extracts the comparable content, or {@code null} if no extractor handles the mime type. */
+    /**
+     * Extracts the comparable content of a blob.
+     * <p>
+     * {@code null} means <b>no extractor is registered</b> for the mime type - a legitimate,
+     * expected outcome. An extractor that was found but failed raises: the two used to be collapsed
+     * into the same {@code null}, which had {@code BlobDiffWork} persist a genuine failure as
+     * {@code skippedUnsupportedType}, a status {@code BlobDiff.Retry} refuses to replay.
+     *
+     * @return the extracted content, or {@code null} if and only if no extractor handles the mime
+     *         type; an empty content for a {@code null} blob
+     * @throws NuxeoException if an extractor was found but could not read the binary
+     */
     DiffableContent extract(Blob blob);
 
-    /** Compares two blobs, or {@code null} if either side could not be extracted. */
+    /**
+     * Compares two blobs.
+     *
+     * @return the result, or {@code null} if either side has no registered extractor
+     * @throws NuxeoException if an extraction failed
+     */
     DiffResult diff(Blob oldBlob, Blob newBlob);
 
     /**

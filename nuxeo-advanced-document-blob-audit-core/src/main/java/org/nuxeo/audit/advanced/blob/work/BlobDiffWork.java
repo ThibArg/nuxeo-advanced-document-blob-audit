@@ -281,6 +281,8 @@ public class BlobDiffWork extends AbstractWork {
             try {
                 result = service.diff(oldBlob, newBlob);
                 if (result == null) {
+                    // Since COR-01, a null can only mean "no extractor for that mime type": an
+                    // extraction that fails raises and lands in the catch below, as an error.
                     status = STATUS_SKIPPED_TYPE;
                 }
             } catch (RuntimeException e) {

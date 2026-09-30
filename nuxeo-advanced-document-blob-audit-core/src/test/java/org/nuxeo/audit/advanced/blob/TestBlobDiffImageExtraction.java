@@ -153,6 +153,29 @@ public class TestBlobDiffImageExtraction {
         assertFalse(result.unified().contains("# Images"));
     }
 
+    /**
+     * COR-01 leaves this path untouched, and that is deliberate: the image inventory is a bonus,
+     * the text diff is the point. A failing <i>text</i> extraction raises, a failing image
+     * inventory degrades to the text result with a WARN.
+     * <p>
+     * The same fixture produces an image section when the inventory works
+     * ({@link #testImageInventoryIsMergedIntoTheTextDiff}), so its absence here is the failure
+     * being absorbed, not two identical images.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-failingimage-contrib.xml")
+    public void testAFailingImageInventoryStillYieldsTheTextDiff() throws Exception {
+        assertTrue("the failing inventory must win the Word mime type",
+                component().findImageExtractor(BlobAuditTestHelper.DOCX_MIME) instanceof FailingImageExtractor);
+
+        DiffResult result = blobDiffService.diff(docx("a.docx", "Before", PNG), docx("b.docx", "After", PNG_2));
+
+        assertNotNull("a failing image inventory must not lose the text diff", result);
+        assertFalse(result.unified().contains("# Images"));
+        assertTrue(result.unified().contains("Before"));
+        assertTrue(result.unified().contains("After"));
+    }
+
     /* ==================== single materialisation ==================== */
 
     /**
