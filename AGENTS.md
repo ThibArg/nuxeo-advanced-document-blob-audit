@@ -96,7 +96,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 140 tests (18 test classes)
+mvn -o install                                     # full build, 148 tests (18 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -129,8 +129,8 @@ volume can no longer be waved away.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 5 and 13 are done** (regression coverage:
-`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`):
+improvements were identified. **Items 1 to 6 and 13 are done** (regression coverage:
+`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -138,6 +138,8 @@ improvements were identified. **Items 1 to 5 and 13 are done** (regression cover
 3. Version lookup bounded to 2 rows, run with a privileged session.
 4. Deterministic work id derived from the version pair, not the random correlation id.
 5. Idempotent work: an existing `BlobDiff` with the same correlation id short-circuits the run.
+6. Common prefix/suffix trimming + interned line ids in `TextDiffer`. One modified paragraph at
+   20 000 lines: 1.45 s → 2.4 ms, and flat as the document grows.
 13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
     `BlobDiffTrigger.Outcome`, `skipReason` extended info).
 
@@ -146,28 +148,16 @@ improvements were identified. **Items 1 to 5 and 13 are done** (regression cover
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **B** | 6 | low | Self-contained, large measurable gain, tests in place. Do first. |
-| **C** | 7 + 15 | low | Purely mechanical; 15 is a small hole in the same area |
+| **C** | 7 + 15 | low | Purely mechanical; 15 is a small hole in the same area. Do first. |
 | **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key |
 | **E** | 10 | medium | Extraction I/O and the extractor extension model |
 | **F** | 11 | high | Needed, see "Deployment target" |
 | — | 14 | — | Needs a product decision |
-| — | 12 | — | **Conditional**: only if measurements after item 6 justify it |
+| — | 12 | — | **Dropped**, see below |
 
 Before starting session D: item 9 **removes the need** for the `ORDER BY uid:major_version`
 heuristic, so the `[!WARNING]` block in `README.md` and the "Version ordering" invariant above must
 be rewritten, not merely adjusted.
-
-### 6. Common prefix/suffix trimming in `TextDiffer`
-
-`TextDiffer` uses Hirschberg: memory O(min(n,m)) but **time stays O(n*m)** (~1.1 s at 10 000 lines,
-~4.6 s at 20 000). That is the only reason `maxLines` is capped at 10 000. In the dominant real case
-(one paragraph changed in a 5 000-paragraph document) the sequences share a huge common prefix and
-suffix; strip them before the alignment and 5000×5000 collapses to ~1×1.
-
-Implement in `diffPositional`, before `lcsEdits`; counters and unified output are unaffected. Extend
-`TestTextDifferScaling` with a near-linear assertion. Consider hashing lines to `int` before
-alignment.
 
 ### 7. Cleanups (purely mechanical)
 
@@ -239,11 +229,16 @@ volume. Use a `BulkCommand` over the NXQL (scalable, resumable, status tracking)
 `Bulk.RunAction`. Also: `removeEmptyFolders` loads all children via `session.getChildren` without
 pagination.
 
-### 12. Myers diff instead of Hirschberg (after item 6)
+### 12. Myers diff instead of Hirschberg — DROPPED
 
-If item 6 is not enough, replace the quadratic LCS with Myers' O(ND). With Myers plus prefix/suffix
-trimming, `maxLines` could go to 100 000. `TestTextDiffer` and `TestTextDifferScaling` assert
-alignment **optimality** — that is the contract any replacement must satisfy.
+Was conditional on the measurements after item 6. Those measurements settled it: the dominant real
+case is now flat (2.4 ms whatever the document size) and the pathological case — a document
+rewritten from end to end — costs 339 ms at 20 000 lines, well inside the asynchronous budget.
+Myers' O(ND) would buy nothing worth the risk of re-deriving an optimal alignment.
+
+Reopen only if a real corpus shows documents where prefix/suffix trimming finds nothing *and* the
+line count goes far past 20 000. `TestTextDiffer` and `TestTextDifferScaling` assert alignment
+**optimality** — that is the contract any replacement must satisfy.
 
 ### 14. `DiffResult#summary()` is a persisted, untranslatable English string (needs a decision)
 

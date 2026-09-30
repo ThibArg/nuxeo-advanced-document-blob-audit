@@ -91,26 +91,34 @@ No external diff library is required.
 
 The extractor with the lowest `order` wins. A specialized extractor overrides a generic one.
 
-## Algorithm: Hirschberg
+## Algorithm: Hirschberg + Prefix/Suffix Trimming
 
 Positional alignment relies on **Hirschberg's algorithm** instead of the traditional LCS table.
 
-A classic `int[n+1][m+1]` matrix costs approximately `4 × n × m` bytes, or about **92 MB** for 4,900 lines, **per concurrent worker**.
+A classic `int[n+1][m+1]` matrix costs approximately `4 × n × m` bytes, or about **92 MB** for 4,900 lines, **per concurrent worker**. Hirschberg produces the **same optimal alignment** while requiring only O(min(n,m)) memory.
 
-Hirschberg produces the **same optimal alignment** while requiring only O(min(n,m)) memory.
+Hirschberg fixes memory, not time, which stays O(n×m) **on the sequences it is given**. So before aligning anything, the diff strips the longest common prefix and the longest common suffix: only the part that actually differs reaches the alignment. Identical lines produce no diff entry, so the result is unchanged — and since a shared first line always belongs to some optimal alignment, optimality is preserved too.
 
-Measured results (JDK 17, single modification):
+The alignment then runs over interned line identifiers, so the `n×m` inner loop compares integers rather than calling `String.equals` on paragraphs that usually share a long common prefix.
 
-| Lines | Time | Allocated Memory |
+Measured results (JDK 17, one modified paragraph in a document of N paragraphs):
+
+| Lines | Before | After |
 |--------|--------|--------|
-| 1,000 | 13 ms | Negligible |
-| 4,900 | ~400 ms | **1 MB** |
-| 10,000 | ~1.1 s | Negligible |
-| 20,000 | ~4.6 s *(extrapolated)* | Negligible |
+| 5,000 | 139 ms | **4.7 ms** |
+| 10,000 | 336 ms | **2.4 ms** |
+| 20,000 | 1.45 s | **2.4 ms** |
 
-**Execution time remains quadratic**. Only memory consumption becomes linear.
+The cost stops growing with the size of the document: what drives it is the size of the change, not the size of the file.
 
-This is why `maxLines` still matters: the default limit of 10,000 lines caps a diff operation at roughly 1.1 seconds.
+The worst case — a document rewritten from end to end — shares nothing, trims nothing and stays quadratic, though the integer comparison still helps:
+
+| Lines | Before | After |
+|--------|--------|--------|
+| 10,000 | 229 ms | 138 ms |
+| 20,000 | 891 ms | 339 ms |
+
+This is why `maxLines` still matters, but it now bounds only the pathological case.
 
 ## Data Model
 

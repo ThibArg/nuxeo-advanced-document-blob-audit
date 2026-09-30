@@ -119,6 +119,46 @@ public class TestTextDifferScaling {
     }
 
     /**
+     * The point of the prefix/suffix trimming: the dominant real case is no longer quadratic.
+     * <p>
+     * 40 000 paragraphs - four times the shipped {@code maxLines} cap - with a single amended
+     * paragraph. Without trimming the alignment would run 1.6 billion cell comparisons, about 18 s
+     * on the reference machine. With it, the middle is one line and the cost collapses to the two
+     * linear scans. The bound is deliberately generous: it is there to catch a regression to the
+     * quadratic path, not to measure the machine.
+     */
+    @Test
+    public void testSingleChangeInAVeryLargeDocumentIsNearLinear() {
+        int size = 40_000;
+        List<String> before = paragraphs(size, "");
+        List<String> after = new ArrayList<>(before);
+        after.set(size / 2, "Paragraph " + (size / 2) + " of the contract AMENDED");
+
+        long start = System.nanoTime();
+        DiffResult result = differ.diff(lines(before), lines(after));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertEquals(1, result.changed());
+        assertEquals(0, result.added());
+        assertEquals(0, result.removed());
+        assertTrue("a single change in a " + size + " line document must not trigger a quadratic "
+                + "alignment, took " + elapsedMs + " ms", elapsedMs < 2_000);
+    }
+
+    /**
+     * Trimming must not turn the worst case into a wrong answer: nothing is shared here, so the
+     * full alignment still runs and the counters must be exactly what they were before.
+     */
+    @Test
+    public void testTrimmingDoesNotChangeTheFullyRewrittenCase() {
+        DiffResult trimmed = differ.diff(lines(paragraphs(200, "")), lines(paragraphs(200, " REWRITTEN")));
+
+        assertEquals(199, trimmed.removed());
+        assertEquals(199, trimmed.added());
+        assertEquals(1, trimmed.changed());
+    }
+
+    /**
      * Hirschberg must produce an <em>optimal</em> alignment, not merely a plausible one. The
      * invariant checked here is the defining property of an LCS-based diff: the number of preserved
      * lines equals the length of the longest common subsequence.

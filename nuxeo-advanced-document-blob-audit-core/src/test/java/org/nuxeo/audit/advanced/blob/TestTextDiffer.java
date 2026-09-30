@@ -141,6 +141,75 @@ public class TestTextDiffer {
         assertFalse(result.isEmpty());
     }
 
+    /* ------------------------------------------------- prefix/suffix trimming */
+
+    /**
+     * The prefix and the suffix scans must not overlap. When one sequence is entirely contained in
+     * the other, a naive suffix scan would count the same lines twice and produce crossed sublist
+     * bounds.
+     */
+    @Test
+    public void testSequenceFullyContainedInTheOther() {
+        DiffResult result = differ.diff(positional("A", "B"), positional("A", "B", "C"));
+
+        assertEquals(1, result.added());
+        assertEquals(0, result.removed());
+        assertEquals(0, result.changed());
+        assertTrue(result.unified().contains("+ C"));
+    }
+
+    @Test
+    public void testSequenceFullyContainedInTheOtherReversed() {
+        DiffResult result = differ.diff(positional("A", "B", "C"), positional("A", "B"));
+
+        assertEquals(0, result.added());
+        assertEquals(1, result.removed());
+        assertEquals(0, result.changed());
+    }
+
+    /** Everything is common prefix: the alignment must never be reached. */
+    @Test
+    public void testIdenticalSequencesAreFullyTrimmed() {
+        DiffResult result = differ.diff(positional("A", "B", "C"), positional("A", "B", "C"));
+
+        assertTrue(result.isEmpty());
+    }
+
+    /** A change on the very first line leaves no common prefix, only a suffix. */
+    @Test
+    public void testChangeOnTheFirstLine() {
+        DiffResult result = differ.diff(positional("A", "B", "C"), positional("A-modified", "B", "C"));
+
+        assertEquals(1, result.changed());
+        assertEquals(0, result.added());
+        assertEquals(0, result.removed());
+    }
+
+    /** ... and symmetrically on the very last one. */
+    @Test
+    public void testChangeOnTheLastLine() {
+        DiffResult result = differ.diff(positional("A", "B", "C"), positional("A", "B", "C-modified"));
+
+        assertEquals(1, result.changed());
+        assertEquals(0, result.added());
+        assertEquals(0, result.removed());
+    }
+
+    /**
+     * Repeated lines are the classic trap of a trimming pass: the prefix scan stops at the first
+     * difference, so identical lines further down must still be aligned by the LCS, not silently
+     * consumed.
+     */
+    @Test
+    public void testRepeatedLinesAroundTheChange() {
+        DiffResult result = differ.diff(positional("A", "A", "A", "B", "A", "A"),
+                positional("A", "A", "A", "B-modified", "A", "A"));
+
+        assertEquals(1, result.changed());
+        assertEquals(0, result.added());
+        assertEquals(0, result.removed());
+    }
+
     @Test
     public void testPositionalTruncationIsReported() {
         TextDiffer limited = new TextDiffer(2);
