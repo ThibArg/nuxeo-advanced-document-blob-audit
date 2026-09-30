@@ -166,7 +166,7 @@ improvements were identified. **Items 1 to 9, 13 and 15 are done** (regression c
 |---|---|---|---|
 | **E** | 10 | medium | Extraction I/O and the extractor extension model. Do first. |
 | **F** | 11 | high | Needed, see "Deployment target" |
-| — | 14 | — | Needs a product decision |
+| — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
 
 
@@ -201,13 +201,18 @@ Reopen only if a real corpus shows documents where prefix/suffix trimming finds 
 line count goes far past 20 000. `TestTextDiffer` and `TestTextDifferScaling` assert alignment
 **optimality** — that is the contract any replacement must satisfy.
 
-### 14. `DiffResult#summary()` is a persisted, untranslatable English string (needs a decision)
+### 14. `DiffResult#summary()` stays English — CLOSED
 
-It builds a hardcoded English sentence ("2 modifications, 1 addition"), **persisted** in
-`bdiff:summary` and displayed as-is, while `added`/`removed`/`changed` are already stored as
-separate fields. Composing in the UI is the clean fix but every stored `BlobDiff` keeps its English
-string. Decision needed: leave as is / compose in UI and accept mixed display / compose and migrate
-(likely a Bulk Action, see item 11).
+`bdiff:summary` holds a hardcoded English sentence ("2 modifications, 1 addition", or "No textual
+change detected"), built by `DiffResult#summary()` and persisted as is.
+
+**Decision (2026-09, product owner): leave it in English.** Do not "fix" this by composing the
+sentence in the UI: it would split the display between already-stored English strings and newly
+composed translated ones, and realigning them would mean rewriting every existing `BlobDiff`.
+
+`bdiff:added`, `bdiff:removed`, `bdiff:changed` and `bdiff:truncated` are stored as separate
+fields, so a UI that wants a translated summary can build one from those without touching
+`bdiff:summary`. `nuxeo-blobdiff-status` already does exactly that for its counters.
 
 ---
 

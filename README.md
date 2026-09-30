@@ -141,10 +141,13 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:correlationId | Link to the audit entry |
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
-| bdiff:summary, added/removed/changed, truncated | Short, indexable summary |
+| bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
 | bdiff:status | ok, skippedUnsupportedType, error (see note above on skippedTooLarge) |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
+
+> [!NOTE]
+> `bdiff:summary` is deliberately **not** translated. It is written once, when the diff is computed, and persisted as is — so translating it later would mean rewriting every existing `BlobDiff`, and composing it in the UI instead would mix already-stored English sentences with newly translated ones. A UI that wants a localised summary should build it from `bdiff:added`, `bdiff:removed`, `bdiff:changed` and `bdiff:truncated`, which are stored separately for exactly that reason. The `nuxeo-blobdiff-status` element already does this for its counters.
 
 The diff is stored as a blob, not a string: it stays outside the SQL/Mongo record. The `NotFulltextIndexable` facet is what keeps it outside the full-text index too — without it the platform would run its binary text extraction on the diff and copy the extracted business content into the full-text index and into Elasticsearch, defeating the whole point of the restricted container.
 
