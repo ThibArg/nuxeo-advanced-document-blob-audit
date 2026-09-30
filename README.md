@@ -44,16 +44,21 @@ Nothing at all is written when the property is simply out of scope — feature d
 > [!NOTE]
 > `skippedTooLarge` therefore never appears as a `bdiff:status`: an over-sized blob never reaches the asynchronous work. `skippedUnsupportedType` still can, when extraction succeeds at trigger time but fails once the work runs.
 
-> [!WARNING]
-> **The plugin assumes normal, monotonically increasing version numbers.**
->
-> To find the version preceding the one that was just created, the listener orders the version series by `uid:major_version DESC, uid:minor_version DESC`. This relies on the **usual and expected** Nuxeo behaviour: versions are created one after the other, and each new version is greater than the previous one.
->
-> If version numbers are rewritten out of band — typically a bulk update performed directly in the database — that assumption no longer holds and the notion of "the previous version" becomes ambiguous.
->
-> The plugin does **not** guess in that situation. It checks that the newest ordered version is the one that just triggered the event; when it is not, it logs a `WARN` (`version numbers may not be monotonically increasing, skipping blob diff`) and **skips the diff** rather than comparing an arbitrary pair. Grep your logs for that message after any such migration.
->
-> In practice this has been observed once in ten years, but the guardrail is there.
+### How the Version Pair Is Established
+
+The listener hooks the two events of a check-in, **both fired on the live document**:
+
+| Event | What the plugin does |
+|-------|----------------------|
+| `aboutToCheckIn` | Records which version is currently the last one, *before* the new one exists |
+| `documentCheckedIn` | Reads the new version from the platform's `checkedInVersionRef` property and compares it with the recorded one |
+
+Capturing the predecessor before the fact makes the pair exact. Nothing is inferred from version numbering, so renumbering versions out of band — a bulk update straight in the database, a migration — no longer affects which pair is compared.
+
+Two core call sites notify a check-in without forwarding the event options, so the recorded reference cannot always reach the second event. The plugin then falls back to a query ordered by `ecm:versionCreated`, which is a record of *when* a version was created rather than an assumption about how its label was numbered.
+
+> [!NOTE]
+> Earlier versions of this plugin hooked `documentCreated`, filtered on `isVersion()`, walked back up to the live document and re-derived the previous version from `ORDER BY uid:major_version DESC, uid:minor_version DESC`. That assumed monotonically increasing version numbers and had to skip the diff with a `WARN` whenever the assumption could not be verified. Both the assumption and the bail-out are gone.
 
 ## One Engine, Pluggable Extractors
 
@@ -265,7 +270,7 @@ doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
 session.saveDocument(doc);   // version created, no audit entry and no BlobDiff
 ```
 
-`CoreSession#saveDocument` copies the document context data into the event options, and `notifyCheckedInVersion` forwards them to the `documentCreated` event fired on the new version — which is exactly what the listener reads. The same key also works when you fire the event yourself and set it as an event property.
+`CoreSession#saveDocument` copies the document context data into the event options, which are then passed to both `aboutToCheckIn` and `documentCheckedIn` — the two events the listener reads. The same key also works when you fire the event yourself and set it as an event property.
 
 > [!IMPORTANT]
 > This does **not** work with `session.checkIn(docRef, option, comment)`. That method builds a *fresh, empty* option map, so context data set on the document is never propagated on that path. Use the thread-scoped switch below when you check in explicitly.

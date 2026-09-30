@@ -5,13 +5,20 @@
 
   <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
     <documentation>
-      Synchronous listener on documentCreated, restricted to version documents. It compares the new
-      version with the immediately preceding normally ordered version and schedules the expensive
-      work; ordinary saves, live documents and proxies are ignored.
+      Synchronous listener on the check-in pair, both fired on the *live* document.
+
+      aboutToCheckIn records which version is the current last one, just before the new one is
+      created. documentCheckedIn receives the new version through its checkedInVersionRef property
+      and compares the two. Capturing the previous version before the fact is what removes any
+      need to guess it afterwards from the version numbering.
+
+      Ordinary saves, versions and proxies are ignored. The listener name is the one to pass to
+      EventServiceAdmin#setListenerEnabledFlag to mute the feature instance-wide.
     </documentation>
     <listener name="blobModificationListener" async="false" postCommit="false"
               class="org.nuxeo.audit.advanced.blob.BlobModificationListener" priority="130">
-      <event>documentCreated</event>
+      <event>aboutToCheckIn</event>
+      <event>documentCheckedIn</event>
     </listener>
   </extension>
 

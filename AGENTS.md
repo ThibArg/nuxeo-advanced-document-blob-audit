@@ -11,8 +11,8 @@ formats line by line.
 
 Pipeline:
 
-1. `BlobModificationListener` (synchronous, on `documentCreated` of a version) compares the digests
-   of the blob on the two most recent versions.
+1. `BlobModificationListener` (synchronous, on `aboutToCheckIn` + `documentCheckedIn`, both fired
+   on the live document) compares the digests of the blob on the previous and the new version.
 2. If they differ, it fires a `blobContentModified` audit entry (**no business data**: only xpath,
    filenames and a `diffCorrelationId`) and schedules a `BlobDiffWork`.
 3. `BlobDiffWork` (asynchronous, queue `blobDiff`) extracts and compares the two binaries, then
@@ -43,18 +43,25 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
 
 ## Invariants to keep in mind
 
-**Version ordering.** The previous version is found with
-`ORDER BY uid:major_version DESC, uid:minor_version DESC`, which assumes the usual Nuxeo behaviour.
-If version numbers are rewritten out of band, the listener detects that the newest ordered version
-is not the one that just triggered the event, logs a WARN and **skips** the diff rather than
-comparing an arbitrary pair. Do not "fix" that bail-out by guessing — backlog item 9 removes the
-need for the heuristic altogether.
+**Version pairing is captured, not inferred.** `ABOUT_TO_CHECKIN` fires inline on the live document
+just before the new version exists; the listener records `getLastDocumentVersionRef` in the event
+properties. `AbstractSession` passes that very same option map to `notifyCheckedInVersion`, which
+copies it into the `DOCUMENT_CHECKEDIN` properties, where the listener reads it back alongside the
+platform's `checkedInVersionRef`. There is no assumption about version numbering left, and no
+bail-out.
+
+Two core call sites (`saveDocument`'s snapshot branch and the publishing path) call
+`notifyCheckedInVersion` with `null` options, so the captured ref can be missing.
+`previousVersionRefFallback` covers them, ordering by `ecm:versionCreated` — a fact, not a
+convention. Do not "simplify" it away, and do not reintroduce `ORDER BY uid:major_version`.
+Coverage: `TestBlobDiffVersionPairing`.
 
 **The listener can be muted.** `BlobModificationListener` honours three switches (see README,
 "Disabling the Listener"):
 
 - `DISABLE_BLOB_DIFF_LISTENER` context data / event property — works through
-  `session.saveDocument`, **not** through `session.checkIn` (which builds a fresh, empty option map);
+  `session.saveDocument` (its options reach both check-in events), **not** through
+  `session.checkIn` (which builds a fresh, empty option map);
 - `BlobModificationListener.runDisabled(Runnable|Supplier)`, thread-scoped — the answer for explicit
   check-ins, migrations and importers;
 - `EventServiceAdmin.setListenerEnabledFlag("blobModificationListener", false)`, instance-wide.
@@ -96,7 +103,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 157 tests (18 test classes)
+mvn -o install                                     # full build, 165 tests (19 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -129,8 +136,9 @@ volume can no longer be waved away.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 7, 13 and 15 are done** (regression coverage:
-`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`):
+improvements were identified. **Items 1 to 9, 13 and 15 are done** (regression coverage:
+`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
+`TestBlobDiffVersionPairing`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -142,6 +150,11 @@ improvements were identified. **Items 1 to 7, 13 and 15 are done** (regression c
    20 000 lines: 1.45 s → 2.4 ms, and flat as the document grows.
 7. Cleanups: dead page provider removed, UTC dated containers, bounded root-container retry,
    charset/BOM handling in `PlainTextExtractor`, wildcard import, duplicated `<vendor>`.
+8. Blob xpaths derived from the document type through `SchemaManager` and cached, instead of
+   walking every property of both versions and calling `getValue()` on each. Blobs inside lists are
+   cached as templates (`files:files/*/file`) and resolved against the document.
+9. Listener moved to `aboutToCheckIn` + `documentCheckedIn`. Removes the `ORDER BY
+   uid:major_version` heuristic, its bail-out, and the five `getSourceDocument` hops.
 13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
     `BlobDiffTrigger.Outcome`, `skipReason` extended info).
 15. Non-`ManagedBlob` pairs get the third skip reason, `skippedNotManaged`.
@@ -151,34 +164,11 @@ improvements were identified. **Items 1 to 7, 13 and 15 are done** (regression c
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key. Do first. |
-| **E** | 10 | medium | Extraction I/O and the extractor extension model |
+| **E** | 10 | medium | Extraction I/O and the extractor extension model. Do first. |
 | **F** | 11 | high | Needed, see "Deployment target" |
 | — | 14 | — | Needs a product decision |
 | — | 12 | — | **Dropped**, see below |
 
-Before starting session D: item 9 **removes the need** for the `ORDER BY uid:major_version`
-heuristic, so the `[!WARNING]` block in `README.md` and the "Version ordering" invariant above must
-be rewritten, not merely adjusted.
-
-### 8. Rework `collectBlobXPaths`
-
-It walks **every schema and every property** of both document models, and `isBlobProperty` calls
-`property.getValue()`, forcing the load of all complex and list properties **inside the user
-transaction**. Replace with a static per-document-type computation from the `SchemaManager`
-(`DocumentType` → `Schema` → `Field`, recursing into complex/list), cached in a
-`Map<String, List<String>>`. Only matters when `<xpaths>` is empty; the shipped default
-(`file:content`) short-circuits the walk.
-
-### 9. Move the listener to `documentCheckedIn`
-
-Currently hooks `documentCreated`, filters on `isVersion()`, then walks back up to the live document
-with up to five `getSourceDocument` calls. `AbstractSession#notifyCheckedInVersion` fires
-`DOCUMENT_CHECKEDIN` **on the live document** with a `checkedInVersionRef` property — strictly
-richer. Better still: capture the previous version in `aboutToCheckIn`
-(`getLastDocumentVersionRef`) and schedule in `documentCheckedIn`. Removes the
-`ORDER BY uid:major_version` heuristic and its bail-out. Alternative: keep the query but order by
-`ecm:versionCreated DESC`.
 
 ### 10. Single materialisation of the binaries; `ImageInventoryExtractor` as a real extractor
 

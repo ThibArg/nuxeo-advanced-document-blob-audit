@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.allxpaths">
+
+  <require>org.nuxeo.audit.advanced.blob.test.config</require>
+
+  <!--
+    Empty <xpaths>: exercises the document-type driven discovery of item 8, which is the only
+    branch where it runs. The shipped default lists file:content and short-circuits the walk.
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <maxBlobSize>1048576</maxBlobSize>
+      <maxLines>1000</maxLines>
+      <maxDiffEntries>500</maxDiffEntries>
+      <docTypes />
+      <xpaths />
+    </config>
+  </extension>
+
+</component>

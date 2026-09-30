@@ -16,10 +16,11 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SI
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -30,28 +31,39 @@ import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentModelList;
+import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.event.DocumentEventTypes;
-import org.nuxeo.ecm.core.api.model.Property;
 import org.nuxeo.ecm.core.event.Event;
 import org.nuxeo.ecm.core.event.EventListener;
 import org.nuxeo.ecm.core.event.EventService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.core.query.sql.NXQL;
-import org.nuxeo.ecm.core.schema.types.SimpleTypeImpl;
+import org.nuxeo.ecm.core.schema.DocumentType;
+import org.nuxeo.ecm.core.schema.SchemaManager;
+import org.nuxeo.ecm.core.schema.TypeConstants;
+import org.nuxeo.ecm.core.schema.types.ComplexType;
+import org.nuxeo.ecm.core.schema.types.Field;
+import org.nuxeo.ecm.core.schema.types.ListType;
+import org.nuxeo.ecm.core.schema.types.Schema;
 import org.nuxeo.ecm.core.schema.types.Type;
-import org.nuxeo.ecm.core.schema.types.primitives.BinaryType;
 import org.nuxeo.runtime.api.Framework;
 
 /**
- * Creates one content audit per pair of successive, normally ordered Nuxeo versions.
- * Ordinary saves, live documents and proxies are deliberately ignored.
+ * Creates one content audit per pair of successive Nuxeo versions. Ordinary saves, versions and
+ * proxies are deliberately ignored.
  * <p>
- * <b>Assumption on version ordering.</b> The previous version is looked up with
- * {@code ORDER BY uid:major_version DESC, uid:minor_version DESC}, which assumes the usual, expected
- * Nuxeo behaviour: versions are created one after the other and each new version is greater than the
- * previous one. When that is not true - typically after a bulk rewrite of version numbers straight
- * in the database - the listener detects that the newest ordered version is not the one just
- * created, logs a WARN and skips the diff rather than comparing an ambiguous pair.
+ * <b>How the version pair is established.</b> The listener hooks the two events of a check-in, both
+ * fired on the <em>live</em> document. On {@code ABOUT_TO_CHECKIN}, fired inline just before the
+ * new version exists, it records the current last version. On {@code DOCUMENT_CHECKEDIN} it reads
+ * the new version from the platform's {@code checkedInVersionRef} property and compares the two.
+ * <p>
+ * Capturing the previous version <em>before</em> the fact is what makes the pair exact. Earlier
+ * versions of this listener hooked {@code documentCreated}, filtered on {@code isVersion()}, walked
+ * back up to the live document and then re-derived the previous version from
+ * {@code ORDER BY uid:major_version DESC, uid:minor_version DESC} - an assumption about how labels
+ * are numbered, which had to bail out whenever it could not be trusted. Nothing is assumed any
+ * more; {@link #previousVersionRefFallback} only exists for the two core call sites that pass no
+ * option map, and it orders by {@code ecm:versionCreated}, a fact rather than a convention.
  * <p>
  * <b>Disabling.</b> See {@link #DISABLE_BLOB_DIFF_LISTENER} and {@link #runDisabled(Runnable)}.
  */
@@ -59,7 +71,27 @@ public class BlobModificationListener implements EventListener {
 
     private static final Logger log = LogManager.getLogger(BlobModificationListener.class);
 
-    protected static final int MAX_SOURCE_HOPS = 5;
+    /**
+     * Event property holding the {@code DocumentRef} of the version that precedes the one being
+     * created. Set by this listener on {@code ABOUT_TO_CHECKIN}, read back on
+     * {@code DOCUMENT_CHECKEDIN}.
+     */
+    protected static final String PREVIOUS_VERSION_REF = "blobDiffPreviousVersionRef";
+
+    /**
+     * Platform property carrying the new version, set by {@code AbstractSession#notifyCheckedInVersion}.
+     * There is no constant for it in the core API; the platform's own listeners use the raw string too.
+     */
+    protected static final String CHECKED_IN_VERSION_REF = "checkedInVersionRef";
+
+    /** Guards against a complex type that refers to itself while walking a schema. */
+    protected static final int MAX_SCHEMA_DEPTH = 10;
+
+    /**
+     * Blob xpath templates per document type. A document type is immutable for the life of the
+     * runtime, so this never needs invalidating.
+     */
+    protected static final Map<String, List<String>> BLOB_XPATH_TEMPLATES = new ConcurrentHashMap<>();
 
     /**
      * Context data / event property disabling this listener for a single operation, following the
@@ -139,162 +171,226 @@ public class BlobModificationListener implements EventListener {
 
     @Override
     public void handleEvent(Event event) {
-        if (!DocumentEventTypes.DOCUMENT_CREATED.equals(event.getName())
-                || !(event.getContext() instanceof DocumentEventContext context)) {
+        if (!(event.getContext() instanceof DocumentEventContext context)) {
+            return;
+        }
+        boolean aboutToCheckIn = DocumentEventTypes.ABOUT_TO_CHECKIN.equals(event.getName());
+        if (!aboutToCheckIn && !DocumentEventTypes.DOCUMENT_CHECKEDIN.equals(event.getName())) {
             return;
         }
         if (isDisabledForThread() || Boolean.TRUE.equals(context.getProperty(DISABLE_BLOB_DIFF_LISTENER))) {
             // Explicitly muted by the caller: no audit entry, no work, no BlobDiff.
             return;
         }
-        DocumentModel receivedVersion = context.getSourceDocument();
-        if (receivedVersion == null || receivedVersion.isProxy() || !receivedVersion.isVersion()) {
+        // Both events are fired on the live document, never on the version.
+        DocumentModel liveDoc = context.getSourceDocument();
+        if (liveDoc == null || liveDoc.isProxy() || liveDoc.isVersion()) {
             return;
         }
         BlobDiffService service = Framework.getService(BlobDiffService.class);
-        if (service == null || !service.getConfig().isEnabled()) {
+        if (service == null) {
             return;
         }
-        CoreSession session = receivedVersion.getCoreSession();
+        BlobDiffConfigDescriptor config = service.getConfig();
+        if (!config.isEnabled() || !config.acceptsDocType(liveDoc.getType())) {
+            return;
+        }
+        CoreSession session = liveDoc.getCoreSession();
         if (session == null) {
             return;
         }
+        if (aboutToCheckIn) {
+            capturePreviousVersion(session, liveDoc, context);
+        } else {
+            scheduleDiffs(session, liveDoc, context, config, event.getTime());
+        }
+    }
 
-        DocumentModel liveDoc = findLiveDocument(session, receivedVersion);
-        if (liveDoc == null) {
-            log.warn("Cannot resolve the live document for version {}, skipping blob diff", receivedVersion.getId());
+    /**
+     * Records, <b>before</b> the check-in happens, which version is the current last one.
+     * <p>
+     * This is what removes any need to guess afterwards. {@code ABOUT_TO_CHECKIN} is fired inline on
+     * the live document just before the new version is created, so
+     * {@code getLastDocumentVersionRef} returns exactly the version the new one will succeed - no
+     * ordering assumption, no heuristic.
+     * <p>
+     * The value is stored in the event properties because {@code AbstractSession} passes the very
+     * same option map to {@code notifyCheckedInVersion}, which copies it into the
+     * {@code DOCUMENT_CHECKEDIN} properties. Two call sites pass {@code null} options there, so the
+     * value can be missing; {@link #scheduleDiffs} falls back to a query in that case.
+     */
+    protected void capturePreviousVersion(CoreSession session, DocumentModel liveDoc, DocumentEventContext context) {
+        // Privileged: a version the caller cannot read must not silently look like "no previous
+        // version", which would turn a real modification into an unaudited first version.
+        Function<CoreSession, DocumentRef> lookup = s -> s.getLastDocumentVersionRef(liveDoc.getRef());
+        DocumentRef previous = CoreInstance.doPrivileged(session, lookup);
+        if (previous != null) {
+            context.setProperty(PREVIOUS_VERSION_REF, previous);
+        }
+    }
+
+    protected void scheduleDiffs(CoreSession session, DocumentModel liveDoc, DocumentEventContext context,
+            BlobDiffConfigDescriptor config, long eventTime) {
+        if (!(context.getProperty(CHECKED_IN_VERSION_REF) instanceof DocumentRef newRef)) {
+            log.warn("No {} on the {} event of {}, skipping blob diff", CHECKED_IN_VERSION_REF,
+                    DocumentEventTypes.DOCUMENT_CHECKEDIN, liveDoc.getId());
+            return;
+        }
+        DocumentRef previousRef = context.getProperty(PREVIOUS_VERSION_REF) instanceof DocumentRef captured ? captured
+                : previousVersionRefFallback(session, liveDoc.getId(), newRef);
+        if (previousRef == null) {
+            log.debug("Document {} has no previous version, nothing to diff", liveDoc.getId());
             return;
         }
 
-        DocumentModelList versions = orderedVersions(session, liveDoc.getId());
-        if (versions.isEmpty()) {
-            log.warn("No version returned for live document {} immediately after creating version {}",
-                    liveDoc.getId(), receivedVersion.getId());
-            return;
-        }
-        DocumentModel currentVersion = versions.get(0);
-        if (!receivedVersion.getId().equals(currentVersion.getId())) {
-            // The algorithm assumes normal, monotonically increasing Nuxeo version numbers.
-            // Never compare an ambiguous pair silently.
-            log.warn("Newest ordered version {} is not the documentCreated version {} for live document {}; "
-                    + "version numbers may not be monotonically increasing, skipping blob diff",
-                    currentVersion.getId(), receivedVersion.getId(), liveDoc.getId());
-            return;
-        }
-        if (versions.size() < 2) {
-            log.debug("Version {} is the first version of {}, no previous version to diff",
-                    currentVersion.getVersionLabel(), liveDoc.getId());
+        Function<CoreSession, DocumentModel[]> load = s -> new DocumentModel[] {
+                s.exists(previousRef) ? s.getDocument(previousRef) : null,
+                s.exists(newRef) ? s.getDocument(newRef) : null };
+        DocumentModel[] pair = CoreInstance.doPrivileged(session, load);
+        DocumentModel previousVersion = pair[0];
+        DocumentModel newVersion = pair[1];
+        if (previousVersion == null || newVersion == null) {
+            log.warn("Cannot load the version pair ({}, {}) of {}, skipping blob diff", previousRef, newRef,
+                    liveDoc.getId());
             return;
         }
 
-        DocumentModel previousVersion = versions.get(1);
         VersionContext versionContext = new VersionContext(previousVersion.getId(), previousVersion.getVersionLabel(),
-                currentVersion.getId(), currentVersion.getVersionLabel(), currentVersion.getVersionSeriesId());
+                newVersion.getId(), newVersion.getVersionLabel(), newVersion.getVersionSeriesId());
         EventService eventService = Framework.getService(EventService.class);
         String principal = session.getPrincipal().getName();
-        for (String xpath : collectBlobXPaths(previousVersion, currentVersion, service)) {
+        for (String xpath : blobXPaths(liveDoc, newVersion, config)) {
             Blob oldBlob = safeGetBlob(previousVersion, xpath);
-            Blob newBlob = safeGetBlob(currentVersion, xpath);
+            Blob newBlob = safeGetBlob(newVersion, xpath);
             BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(liveDoc, xpath, oldBlob, newBlob,
-                    versionContext, principal, event.getTime());
+                    versionContext, principal, eventTime);
             if (outcome.isAuditable()) {
                 eventService.fireEvent(buildAuditEvent(liveDoc, session, xpath, oldBlob, newBlob, outcome));
             }
         }
     }
 
-    protected DocumentModel findLiveDocument(CoreSession session, DocumentModel version) {
-        DocumentModel doc = version;
-        for (int i = 0; i < MAX_SOURCE_HOPS && doc != null && !isLive(doc); i++) {
-            doc = session.getSourceDocument(doc.getRef());
+    /**
+     * Previous version when {@code ABOUT_TO_CHECKIN} could not hand it over.
+     * <p>
+     * Ordered by {@code ecm:versionCreated}, which is a fact about when the version was created,
+     * not an assumption about how its label was numbered. Two rows are fetched because the newest
+     * one is the version that was just created.
+     */
+    protected DocumentRef previousVersionRefFallback(CoreSession session, String liveDocId, DocumentRef newRef) {
+        String nxql = "SELECT * FROM Document WHERE ecm:versionVersionableId = " + NXQL.escapeString(liveDocId)
+                + " AND ecm:isVersion = 1 ORDER BY ecm:versionCreated DESC";
+        Function<CoreSession, DocumentModelList> query = s -> s.query(nxql, null, 2, 0, false);
+        for (DocumentModel version : CoreInstance.doPrivileged(session, query)) {
+            if (!version.getRef().equals(newRef)) {
+                return version.getRef();
+            }
         }
-        return doc != null && isLive(doc) ? doc : null;
-    }
-
-    protected boolean isLive(DocumentModel doc) {
-        return !doc.isVersion() && !doc.isProxy();
+        return null;
     }
 
     /**
-     * The two most recent versions of the series, newest first.
+     * The blob xpaths to inspect on this document type.
      * <p>
-     * Two deliberate choices here.
+     * When {@code <xpaths>} is configured - the shipped default is {@code file:content} - it is
+     * used verbatim: a path holding no blob simply yields {@code null} in {@link #safeGetBlob} and
+     * is skipped downstream, so there is nothing to pre-filter.
      * <p>
-     * <b>Bounded.</b> Only two rows are fetched. The previous implementation selected every version
-     * of the series at each check-in, so a document with 500 versions loaded 500 document models
-     * inside the user transaction - a cost growing quadratically over the life of the document.
-     * <p>
-     * <b>Privileged.</b> The query runs unfiltered. With the user session, a version the caller
-     * cannot read is silently dropped from the result and the second row is <em>not</em> the real
-     * previous version: the diff would then compare a wrong pair without any way to notice. Nothing
-     * leaks, since only ids, labels and blobs of the two versions are used, and the resulting
-     * BlobDiff lives under the restricted container.
+     * Otherwise the paths are derived from the <b>document type</b> and cached. The previous
+     * implementation walked every schema and every property of both version documents and called
+     * {@code property.getValue()} on each, forcing the load of every complex and list property
+     * inside the user transaction, on every single check-in. A document type does not change
+     * between two check-ins, so this is computed once per type and per JVM.
      */
-    protected DocumentModelList orderedVersions(CoreSession session, String liveDocId) {
-        String nxql = "SELECT * FROM Document WHERE ecm:versionVersionableId = "
-                + NXQL.escapeString(liveDocId)
-                + " AND ecm:isVersion = 1 ORDER BY uid:major_version DESC, uid:minor_version DESC";
-        // An explicit Function is required: an inline lambda is both Function- and
-        // Consumer-compatible, which makes the doPrivileged overload ambiguous.
-        Function<CoreSession, DocumentModelList> query = s -> s.query(nxql, null, 2, 0, false);
-        return CoreInstance.doPrivileged(session, query);
+    protected List<String> blobXPaths(DocumentModel liveDoc, DocumentModel version,
+            BlobDiffConfigDescriptor config) {
+        if (!config.getXPaths().isEmpty()) {
+            return config.getXPaths();
+        }
+        List<String> templates = BLOB_XPATH_TEMPLATES.computeIfAbsent(liveDoc.getType(),
+                BlobModificationListener::computeBlobXPathTemplates);
+        return expandTemplates(templates, version);
     }
 
-    protected List<String> collectBlobXPaths(DocumentModel previous, DocumentModel current,
-            BlobDiffService service) {
-        BlobDiffConfigDescriptor config = service.getConfig();
-        if (!config.acceptsDocType(current.getType())) {
+    /**
+     * Blob xpaths of a document type, as <b>templates</b>: a {@code *} stands for the index of a
+     * list entry, which only a document can resolve.
+     */
+    protected static List<String> computeBlobXPathTemplates(String docType) {
+        SchemaManager schemaManager = Framework.getService(SchemaManager.class);
+        DocumentType type = schemaManager == null ? null : schemaManager.getDocumentType(docType);
+        if (type == null) {
             return List.of();
         }
-        if (!config.getXPaths().isEmpty()) {
-            return config.getXPaths().stream()
-                    .filter(xpath -> isBlob(previous, xpath) || isBlob(current, xpath))
-                    .toList();
-        }
         Set<String> xpaths = new LinkedHashSet<>();
-        collectBlobXPaths(previous, xpaths);
-        collectBlobXPaths(current, xpaths);
-        return new ArrayList<>(xpaths);
-    }
-
-    protected void collectBlobXPaths(DocumentModel doc, Set<String> xpaths) {
-        for (String schema : doc.getSchemas()) {
-            for (Property property : rootPropertiesOf(doc, schema)) {
-                collectBlobs(property, xpaths);
+        for (Schema schema : type.getSchemas()) {
+            String prefix = schema.getNamespace().hasPrefix() ? schema.getNamespace().prefix : schema.getName();
+            for (Field field : schema.getFields()) {
+                collectBlobFields(prefix + ":" + field.getName().getLocalName(), field.getType(), xpaths, 0);
             }
         }
+        return List.copyOf(xpaths);
     }
 
-    protected Collection<Property> rootPropertiesOf(DocumentModel doc, String schema) {
-        return doc.getPropertyObjects(schema);
-    }
-
-    protected void collectBlobs(Property property, Set<String> xpaths) {
-        if (isBlobProperty(property)) {
-            xpaths.add(normalize(property.getXPath()));
+    /**
+     * Walks a field type, appending the path of every blob found underneath.
+     * <p>
+     * The depth is bounded: a complex type referring to itself would otherwise recurse for ever.
+     */
+    protected static void collectBlobFields(String path, Type type, Set<String> xpaths, int depth) {
+        if (depth > MAX_SCHEMA_DEPTH) {
+            log.warn("Giving up on blob xpath {} beyond depth {}", path, MAX_SCHEMA_DEPTH);
             return;
         }
-        if (property.isComplex() || property.isList()) {
-            for (Property child : property.getChildren()) {
-                collectBlobs(child, xpaths);
+        if (TypeConstants.isContentType(type)) {
+            xpaths.add(path);
+            return;
+        }
+        if (type instanceof ListType list) {
+            collectBlobFields(path + "/*", list.getFieldType(), xpaths, depth + 1);
+        } else if (type instanceof ComplexType complex) {
+            for (Field field : complex.getFields()) {
+                collectBlobFields(path + "/" + field.getName().getLocalName(), field.getType(), xpaths, depth + 1);
             }
         }
     }
 
-    protected boolean isBlob(DocumentModel doc, String xpath) {
-        try {
-            return isBlobProperty(doc.getProperty(xpath));
-        } catch (RuntimeException e) {
-            return false;
+    /**
+     * Resolves the {@code *} of list templates against the actual entries of a document.
+     * <p>
+     * Only the list properties that really lead to a blob are read, instead of every property of
+     * every schema.
+     */
+    protected List<String> expandTemplates(List<String> templates, DocumentModel doc) {
+        List<String> xpaths = new ArrayList<>(templates.size());
+        for (String template : templates) {
+            if (template.indexOf('*') < 0) {
+                xpaths.add(template);
+            } else {
+                expandTemplate(template, doc, xpaths);
+            }
         }
+        return xpaths;
     }
 
-    protected boolean isBlobProperty(Property property) {
-        Type type = property.getType();
-        if (type instanceof SimpleTypeImpl simple) {
-            type = simple.getPrimitiveType();
+    protected void expandTemplate(String template, DocumentModel doc, List<String> xpaths) {
+        int star = template.indexOf('*');
+        String listPath = template.substring(0, star - 1);
+        int size;
+        try {
+            Object value = doc.getPropertyValue(listPath);
+            size = value instanceof List<?> list ? list.size() : 0;
+        } catch (RuntimeException e) {
+            return;
         }
-        return type instanceof BinaryType || property.getValue() instanceof Blob;
+        for (int i = 0; i < size; i++) {
+            String resolved = template.substring(0, star) + i + template.substring(star + 1);
+            if (resolved.indexOf('*') < 0) {
+                xpaths.add(resolved);
+            } else {
+                expandTemplate(resolved, doc, xpaths);
+            }
+        }
     }
 
     protected Blob safeGetBlob(DocumentModel doc, String xpath) {
@@ -306,16 +402,6 @@ public class BlobModificationListener implements EventListener {
         }
     }
 
-    /**
-     * Builds the {@code blobContentModified} entry, for a scheduled diff or for a binary change
-     * that cannot be diffed.
-     * <p>
-     * The skip case carries {@code skipReason} and <b>no</b> {@code diffCorrelationId}: no
-     * {@code BlobDiff} will ever be created, and a correlation id pointing at a document that does
-     * not exist would be worse than no id at all.
-     * <p>
-     * The comment is a plain English sentence, persisted as is, consistent with the nominal path.
-     */
     protected Event buildAuditEvent(DocumentModel liveDoc, CoreSession session, String xpath, Blob oldBlob,
             Blob newBlob, BlobDiffTrigger.Outcome outcome) {
         DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), liveDoc);
@@ -349,7 +435,4 @@ public class BlobModificationListener implements EventListener {
         return blob != null && blob.getFilename() != null ? blob.getFilename() : "";
     }
 
-    protected String normalize(String xpath) {
-        return xpath != null && xpath.startsWith("/") ? xpath.substring(1) : xpath;
-    }
 }
