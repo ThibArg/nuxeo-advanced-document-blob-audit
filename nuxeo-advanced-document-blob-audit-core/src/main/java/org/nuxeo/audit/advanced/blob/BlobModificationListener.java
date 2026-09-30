@@ -380,7 +380,9 @@ public class BlobModificationListener implements EventListener {
         try {
             Object value = doc.getPropertyValue(listPath);
             size = value instanceof List<?> list ? list.size() : 0;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // NOSONAR - an unreadable list is simply not expanded
+            // The xpath template comes from the schema, the document may not carry the schema.
+            log.debug("Cannot read list {} on {} to expand template {}", listPath, doc.getId(), template, e);
             return;
         }
         for (int i = 0; i < size; i++) {
@@ -397,7 +399,8 @@ public class BlobModificationListener implements EventListener {
         try {
             Object value = doc.getPropertyValue(xpath);
             return value instanceof Blob blob ? blob : null;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException e) { // NOSONAR - an unreadable property is not a binary change
+            log.debug("Cannot read property {} on {}", xpath, doc.getId(), e);
             return null;
         }
     }

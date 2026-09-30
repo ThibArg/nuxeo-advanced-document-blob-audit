@@ -64,7 +64,8 @@ import org.nuxeo.runtime.api.Framework;
  * @since 1.2
  */
 @Operation(id = BlobDiffRetryOp.ID, category = "Audit", label = "BlobDiff: Retry",
-        description = "Schedules again the computation of a BlobDiff in error. Reserved to administrators and auditors.")
+        description = "Schedules again the computation of a BlobDiff in error."
+                + " Reserved to administrators and auditors.")
 public class BlobDiffRetryOp {
 
     public static final String ID = "BlobDiff.Retry";
@@ -86,8 +87,8 @@ public class BlobDiffRetryOp {
         String oldProvider = str(diff, XP_OLD_BLOB_PROVIDER);
         String newProvider = str(diff, XP_NEW_BLOB_PROVIDER);
         if (oldKey == null || newKey == null || oldProvider == null || newProvider == null) {
-            throw new NuxeoException("This BlobDiff has no stored binary keys (created before 1.2), it cannot be retried",
-                    400);
+            throw new NuxeoException(
+                    "This BlobDiff has no stored binary keys (created before 1.2), it cannot be retried", 400);
         }
         Calendar date = (Calendar) diff.getPropertyValue(XP_DATE);
         String newMime = str(diff, XP_MIMETYPE);

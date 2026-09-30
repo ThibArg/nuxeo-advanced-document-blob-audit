@@ -15,7 +15,8 @@
  */
 package org.nuxeo.audit.advanced.blob.operations;
 
-import java.text.SimpleDateFormat;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Calendar;
 
 import org.apache.logging.log4j.LogManager;
@@ -70,6 +71,15 @@ public class BlobDiffPurgeOp {
 
     private static final Logger log = LogManager.getLogger(BlobDiffPurgeOp.class);
 
+    /**
+     * Boundary of the retention query, always in UTC - the same zone {@code BlobDiffComponent}
+     * uses to build the dated containers. Formatting it in the JVM default zone would shift the
+     * boundary by a day, and two nodes of a cluster in different zones would not purge the same
+     * set for a single "before" parameter.
+     */
+    protected static final DateTimeFormatter BOUNDARY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+                                                                                .withZone(ZoneOffset.UTC);
+
     @Context
     protected CoreSession session;
 
@@ -103,7 +113,7 @@ public class BlobDiffPurgeOp {
     }
 
     protected String query() {
-        String day = new SimpleDateFormat("yyyy-MM-dd").format(before.getTime());
+        String day = BOUNDARY_FORMAT.format(before.toInstant());
         StringBuilder sb = new StringBuilder("SELECT * FROM ").append(BlobAuditConstants.DIFF_DOCTYPE)
                                                               .append(" WHERE ")
                                                               .append(BlobAuditConstants.XP_DATE)

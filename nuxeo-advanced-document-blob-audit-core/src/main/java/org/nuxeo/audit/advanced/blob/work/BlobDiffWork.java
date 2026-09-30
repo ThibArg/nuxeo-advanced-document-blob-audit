@@ -255,9 +255,9 @@ public class BlobDiffWork extends AbstractWork {
             // already exists, so leave a trace instead of failing silently.
             log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
             DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
-                                             .createDiffDocument(session, docId, repositoryName, sourceTitle, xpath, null,
-                                                     null, frozen(), versions, principal, new Date(eventTime), null,
-                                                     STATUS_ERROR, correlationId);
+                                             .createDiffDocument(session, docId, repositoryName, sourceTitle,
+                                                     xpath, null, null, frozen(), versions, principal,
+                                                     new Date(eventTime), null, STATUS_ERROR, correlationId);
             diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
             session.saveDocument(diffDoc);
             removeReplaced();

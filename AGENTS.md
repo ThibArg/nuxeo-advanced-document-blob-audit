@@ -141,7 +141,9 @@ All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `Core
 this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-contrib.xml`).
 `blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
 `blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on, and
-`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor.
+`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor, and
+`blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
+xpaths.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 `TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
 `BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`.
