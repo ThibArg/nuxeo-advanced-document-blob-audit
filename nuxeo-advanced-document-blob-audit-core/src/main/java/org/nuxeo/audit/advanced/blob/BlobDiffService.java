@@ -30,8 +30,21 @@ public interface BlobDiffService {
 
     BlobDiffConfigDescriptor getConfig();
 
+    /**
+     * Why the given document/xpath/blob can, or cannot, be content-diffed.
+     * <p>
+     * Callers that need to audit a binary change they cannot diff must use this rather than
+     * {@link #isDiffable}, which collapses "out of scope" and "changed but not diffable" into the
+     * same {@code false}.
+     *
+     * @since 2025.2
+     */
+    DiffEligibility getEligibility(String docType, String xpath, Blob blob);
+
     /** {@code true} if the given document/xpath/blob is eligible for a content diff. */
-    boolean isDiffable(String docType, String xpath, Blob blob);
+    default boolean isDiffable(String docType, String xpath, Blob blob) {
+        return getEligibility(docType, xpath, blob) == DiffEligibility.ELIGIBLE;
+    }
 
     /** Extracts the comparable content, or {@code null} if no extractor handles the mime type. */
     DiffableContent extract(Blob blob);

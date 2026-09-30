@@ -19,6 +19,10 @@ Pipeline:
    stores the unified diff as a **blob** on a dedicated `BlobDiff` document under the
    ACL-restricted `/change-diff/YYYY/MM/DD/` container.
 
+A binary that changed but cannot be diffed (over `maxBlobSize`, or no extractor for the mime type)
+produces the **audit entry only**, with a `skipReason` extended info and no `diffCorrelationId`.
+See the "Skip reporting" invariant below.
+
 Formats are supported by contributing `BlobTextExtractor` implementations to the `extractors`
 extension point. The diff engine (`TextDiffer`) is format-agnostic.
 
@@ -58,6 +62,17 @@ need for the heuristic altogether.
 Any change to `handleEvent` must keep these checks first, before any I/O.
 Coverage: `TestBlobDiffListenerDisabling`.
 
+**Skip reporting: the order of the checks in `BlobDiffTrigger#scheduleIfNeeded` is significant.**
+Eligibility (`DiffEligibility`) is evaluated, then `sameContent`, then the skip is reported. Moving
+`sameContent` back after the eligibility branch would audit every new version of an over-sized
+document as a binary change even when the binary never moved. `NOT_APPLICABLE` short-circuits
+before `sameContent` and stays fully silent; `TOO_LARGE` and `UNSUPPORTED_TYPE` only produce an
+entry once the digests are known to differ. Coverage: `TestBlobDiffSkipReporting`.
+
+`skippedTooLarge` is **not** a reachable `bdiff:status` (an over-sized blob never reaches the work,
+so no `BlobDiff` is created); `skippedUnsupportedType` still is, set by `BlobDiffWork` when
+`service.diff()` returns `null` at work time. The purge dialog offers only the latter.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -81,7 +96,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 131 tests (17 test classes)
+mvn -o install                                     # full build, 140 tests (18 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -114,8 +129,8 @@ volume can no longer be waved away.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 5 are done** (regression coverage:
-`TestBlobDiffHardening`):
+improvements were identified. **Items 1 to 5 and 13 are done** (regression coverage:
+`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -123,15 +138,16 @@ improvements were identified. **Items 1 to 5 are done** (regression coverage:
 3. Version lookup bounded to 2 rows, run with a privileged session.
 4. Deterministic work id derived from the version pair, not the random correlation id.
 5. Idempotent work: an existing `BlobDiff` with the same correlation id short-circuits the run.
+13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
+    `BlobDiffTrigger.Outcome`, `skipReason` extended info).
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| **A** | 13 | medium | Functional hole, decision already taken. Do first. |
-| **B** | 6 | low | Self-contained, large measurable gain, tests in place |
-| **C** | 7 | low | Purely mechanical |
+| **B** | 6 | low | Self-contained, large measurable gain, tests in place. Do first. |
+| **C** | 7 + 15 | low | Purely mechanical; 15 is a small hole in the same area |
 | **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key |
 | **E** | 10 | medium | Extraction I/O and the extractor extension model |
 | **F** | 11 | high | Needed, see "Deployment target" |
@@ -141,35 +157,6 @@ improvements were identified. **Items 1 to 5 are done** (regression coverage:
 Before starting session D: item 9 **removes the need** for the `ORDER BY uid:major_version`
 heuristic, so the `[!WARNING]` block in `README.md` and the "Version ordering" invariant above must
 be rewritten, not merely adjusted.
-
-### 13. Non-diffable binary changes are completely silent (do first)
-
-**The functional hole of the plugin as it stands.** A user replaces a 40 MB PowerPoint, a `.zip` or
-any unsupported format: the plugin leaves **no trace at all**. For an audit tool that is the worst
-failure mode — absence of an entry is indistinguishable from absence of a change.
-
-`BlobDiffComponent#isDiffable` returns `false` both when the blob is over `maxBlobSize` and when no
-extractor matches. `BlobDiffTrigger#scheduleIfNeeded` collapses both into `return null`, so
-`handleEvent` never calls `fireEvent`: no work, no `BlobDiff`, **and no audit entry**. As a result
-`skippedTooLarge` is unreachable and `skippedUnsupportedType` practically so.
-
-**Decision taken (2026-09, product owner): option (b).**
-
-- Write the **audit entry only**. No `BlobDiff` document for a non-diffable change.
-- Compact reason: comment `file:content : binary changed (too large)` / `(unsupported format)`,
-  plus extended info `skipReason` = `skippedTooLarge` / `skippedUnsupportedType` (reuse
-  `BlobAuditConstants`).
-- Turn `isDiffable` into a method returning an enum (`ELIGIBLE`, `TOO_LARGE`, `UNSUPPORTED_TYPE`,
-  `NOT_APPLICABLE`), keeping `isDiffable` as a thin boolean façade. Both checks already run today;
-  distinguishing them costs nothing (`blob.getLength()` is loaded metadata, `findExtractor` is an
-  in-memory loop).
-- `NOT_APPLICABLE` (feature disabled, doc type or xpath out of scope) must stay **fully silent**.
-- Only report a skip when the binary actually changed: `BlobDiffTrigger#sameContent` must still run
-  first.
-- The Web UI purge dialog filters on `bdiff:status` for both statuses, which will never hold those
-  values under option (b) — remove or repoint those filters.
-- Add end-to-end coverage: an over-sized blob and an unsupported MIME type must each produce exactly
-  one audit entry with the right `skipReason` and **zero** `BlobDiff`.
 
 ### 6. Common prefix/suffix trimming in `TextDiffer`
 
@@ -196,13 +183,22 @@ alignment.
   `DateTimeFormatter` in UTC.
 - `BlobDiffComponent#ensureRootContainer` recurses after `removeDocument` with no bound.
 - `BlobDiffComponent#diff` calls `getConfig()` four times. Capture once.
-- `BlobDiffTrigger#sameContent`: when one side has a null `digestAlgorithm`, digests from possibly
-  different algorithms are compared and may wrongly conclude "identical".
 - `PlainTextExtractor` passes the blob encoding straight to `InputStreamReader` (throws on a bogus
   name) and does no BOM handling.
 - `package.xml` declares `<vendor>Hyland</vendor>` twice.
 - `blobdiff.xsd` uses `xs:date` for `bdiff:date`. Harmless (Nuxeo maps both onto `DateType`) but
   `xs:dateTime` is more honest. Cosmetic.
+
+### 15. Non-`ManagedBlob` pairs are still silent
+
+The same functional hole item 13 closed, in its last corner. When the two version blobs are not both
+`ManagedBlob`, `BlobDiffTrigger#scheduleIfNeeded` logs a WARN and returns `Outcome.none()`: the
+binary changed, and nothing is audited. It was deliberately left out of item 13 because the product
+decision only covered `TOO_LARGE` and `UNSUPPORTED_TYPE`.
+
+Needs a third skip reason (`skippedNotManaged`?) plus its i18n keys, or a decision that this case is
+an instance misconfiguration worth failing loudly instead. In practice it only happens with an
+unusual blob provider setup.
 
 ### 8. Rework `collectBlobXPaths`
 

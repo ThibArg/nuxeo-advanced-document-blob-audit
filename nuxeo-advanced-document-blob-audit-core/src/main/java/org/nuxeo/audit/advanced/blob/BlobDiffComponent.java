@@ -128,18 +128,21 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     @Override
-    public boolean isDiffable(String docType, String xpath, Blob blob) {
+    public DiffEligibility getEligibility(String docType, String xpath, Blob blob) {
         BlobDiffConfigDescriptor config = getConfig();
         if (!config.isEnabled() || blob == null) {
-            return false;
+            return DiffEligibility.NOT_APPLICABLE;
         }
         if (!config.acceptsDocType(docType) || !config.acceptsXPath(xpath)) {
-            return false;
+            return DiffEligibility.NOT_APPLICABLE;
         }
         if (blob.getLength() > config.getMaxBlobSize()) {
-            return false;
+            return DiffEligibility.TOO_LARGE;
         }
-        return findExtractor(blob.getMimeType()) != null;
+        if (findExtractor(blob.getMimeType()) == null) {
+            return DiffEligibility.UNSUPPORTED_TYPE;
+        }
+        return DiffEligibility.ELIGIBLE;
     }
 
     protected BlobTextExtractor findExtractor(String mimeType) {

@@ -26,6 +26,9 @@
     <extendedInfo event="blobContentModified" key="newFilename" expression="${message.properties.newFilename}" />
     <extendedInfo event="blobContentModified" key="diffCorrelationId"
       expression="${message.properties.diffCorrelationId}" />
+    <!-- Set only when the binary changed but could not be diffed (too large, unsupported format).
+         Mutually exclusive with diffCorrelationId; absent on the nominal path. -->
+    <extendedInfo event="blobContentModified" key="skipReason" expression="${message.properties.skipReason}" />
   </extension>
 
 </component>

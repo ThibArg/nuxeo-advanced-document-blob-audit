@@ -129,6 +129,15 @@ public static final String XP_VERSION_SERIES_ID = "bdiff:versionSeriesId";
 
     public static final String EXT_CORRELATION_ID = "diffCorrelationId";
 
+    /**
+     * Extended info carrying why a binary change was audited without a diff. Holds
+     * {@link #STATUS_SKIPPED_SIZE} or {@link #STATUS_SKIPPED_TYPE}; absent on the nominal path,
+     * where {@link #EXT_CORRELATION_ID} is set instead. The two are mutually exclusive.
+     *
+     * @since 2025.2
+     */
+    public static final String EXT_SKIP_REASON = "skipReason";
+
     /* Status values */
     public static final String STATUS_OK = "ok";
 

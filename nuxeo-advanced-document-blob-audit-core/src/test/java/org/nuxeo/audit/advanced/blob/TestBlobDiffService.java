@@ -137,6 +137,52 @@ public class TestBlobDiffService {
         assertFalse(blobDiffService.isDiffable("File", "file:content", null));
     }
 
+    /* ------------------------------------------------------------ eligibility */
+
+    /**
+     * isDiffable collapses "out of scope" and "changed but not diffable" into the same false;
+     * getEligibility must keep them apart, which is what lets the listener audit the second case.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-smallblob-config.xml")
+    public void testEligibilityDistinguishesTheReasons() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        while (sb.length() < 2048) {
+            sb.append("padding padding padding\n");
+        }
+
+        assertEquals(DiffEligibility.TOO_LARGE, blobDiffService.getEligibility("File", "file:content",
+                textBlob(sb.toString(), "text/plain", "big.txt")));
+        assertEquals(DiffEligibility.UNSUPPORTED_TYPE, blobDiffService.getEligibility("File", "file:content",
+                textBlob("tiny", "application/x-unknown-binary", "f.bin")));
+        assertEquals(DiffEligibility.ELIGIBLE,
+                blobDiffService.getEligibility("File", "file:content", textBlob("tiny", "text/plain", "f.txt")));
+        assertEquals(DiffEligibility.NOT_APPLICABLE, blobDiffService.getEligibility("File", "file:content", null));
+        assertEquals(DiffEligibility.NOT_APPLICABLE, blobDiffService.getEligibility("File", "files:files/0/file",
+                textBlob("tiny", "text/plain", "f.txt")));
+    }
+
+    /**
+     * NOT_APPLICABLE wins over everything: it does not depend on the blob, so the state of the
+     * other side must never turn it into a reported skip.
+     */
+    @Test
+    public void testEligibilityCombinationPrecedence() {
+        assertEquals(DiffEligibility.NOT_APPLICABLE,
+                DiffEligibility.combine(DiffEligibility.NOT_APPLICABLE, DiffEligibility.TOO_LARGE));
+        assertEquals(DiffEligibility.TOO_LARGE,
+                DiffEligibility.combine(DiffEligibility.UNSUPPORTED_TYPE, DiffEligibility.TOO_LARGE));
+        assertEquals(DiffEligibility.UNSUPPORTED_TYPE,
+                DiffEligibility.combine(DiffEligibility.ELIGIBLE, DiffEligibility.UNSUPPORTED_TYPE));
+        assertEquals(DiffEligibility.ELIGIBLE,
+                DiffEligibility.combine(DiffEligibility.ELIGIBLE, DiffEligibility.ELIGIBLE));
+
+        assertFalse(DiffEligibility.ELIGIBLE.isReportable());
+        assertFalse(DiffEligibility.NOT_APPLICABLE.isReportable());
+        assertTrue(DiffEligibility.TOO_LARGE.isReportable());
+        assertTrue(DiffEligibility.UNSUPPORTED_TYPE.isReportable());
+    }
+
     /* -------------------------------------------------------------- container */
 
     @Test

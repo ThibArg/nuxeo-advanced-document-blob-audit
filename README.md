@@ -22,6 +22,25 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 
 The audit log never contains business content. It stores only the xpath, file names, and a `diffCorrelationId` pointing to the BlobDiff document.
 
+### Binary Changes That Cannot Be Diffed
+
+A binary that changed but cannot be compared — larger than `maxBlobSize`, or in a format no extractor handles — is **still audited**. For an audit tool, staying silent would be the worst possible behaviour: the absence of an entry would be indistinguishable from the absence of a change.
+
+In that case the plugin writes the `blobContentModified` entry **only**, and creates no BlobDiff document:
+
+| Case | Audit comment | `skipReason` extended info | BlobDiff |
+|------|---------------|----------------------------|----------|
+| Blob over `maxBlobSize` | `file:content : binary changed (too large)` | `skippedTooLarge` | none |
+| No extractor for the mime type | `file:content : binary changed (unsupported format)` | `skippedUnsupportedType` | none |
+| Diffable change | `file:content : binary content modified between versions` | absent | created |
+
+`skipReason` and `diffCorrelationId` are mutually exclusive: a skipped entry carries no correlation id, because no BlobDiff will ever exist to point at.
+
+Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent.
+
+> [!NOTE]
+> `skippedTooLarge` therefore never appears as a `bdiff:status`: an over-sized blob never reaches the asynchronous work. `skippedUnsupportedType` still can, when extraction succeeds at trigger time but fails once the work runs.
+
 > [!WARNING]
 > **The plugin assumes normal, monotonically increasing version numbers.**
 >
@@ -107,7 +126,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary |
-| bdiff:status | ok, skippedTooLarge, skippedUnsupportedType, error |
+| bdiff:status | ok, skippedUnsupportedType, error (see note above on skippedTooLarge) |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 

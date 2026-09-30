@@ -13,8 +13,10 @@
         <paper-item key="">[[i18n('label.blobaudit.purge.anyStatus')]]</paper-item>
         <paper-item key="ok">[[i18n('label.blobaudit.status.ok')]]</paper-item>
         <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
+        <!-- skippedTooLarge is not offered: an over-sized blob is audited without ever creating a
+             BlobDiff, so no document can carry that status. skippedUnsupportedType stays, it is
+             still set by BlobDiffWork when extraction fails at diff time. -->
         <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
-        <paper-item key="skippedTooLarge">[[i18n('label.blobaudit.status.skippedTooLarge')]]</paper-item>
       </nuxeo-select>
       <div class="blobdiff-warning">
         <iron-icon icon="icons:warning"></iron-icon>

@@ -9,7 +9,10 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EVENT_BLOB_MODIFI
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -191,10 +194,10 @@ public class BlobModificationListener implements EventListener {
         for (String xpath : collectBlobXPaths(previousVersion, currentVersion, service)) {
             Blob oldBlob = safeGetBlob(previousVersion, xpath);
             Blob newBlob = safeGetBlob(currentVersion, xpath);
-            String correlationId = BlobDiffTrigger.scheduleIfNeeded(liveDoc, xpath, oldBlob, newBlob, versionContext,
-                    principal, event.getTime());
-            if (correlationId != null) {
-                eventService.fireEvent(buildAuditEvent(liveDoc, session, xpath, oldBlob, newBlob, correlationId));
+            BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(liveDoc, xpath, oldBlob, newBlob,
+                    versionContext, principal, event.getTime());
+            if (outcome.isAuditable()) {
+                eventService.fireEvent(buildAuditEvent(liveDoc, session, xpath, oldBlob, newBlob, outcome));
             }
         }
     }
@@ -302,16 +305,40 @@ public class BlobModificationListener implements EventListener {
         }
     }
 
+    /**
+     * Builds the {@code blobContentModified} entry, for a scheduled diff or for a binary change
+     * that cannot be diffed.
+     * <p>
+     * The skip case carries {@code skipReason} and <b>no</b> {@code diffCorrelationId}: no
+     * {@code BlobDiff} will ever be created, and a correlation id pointing at a document that does
+     * not exist would be worse than no id at all.
+     * <p>
+     * The comment is a plain English sentence, persisted as is, consistent with the nominal path.
+     */
     protected Event buildAuditEvent(DocumentModel liveDoc, CoreSession session, String xpath, Blob oldBlob,
-            Blob newBlob, String correlationId) {
+            Blob newBlob, BlobDiffTrigger.Outcome outcome) {
         DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), liveDoc);
         ctx.setCategory(AUDIT_CATEGORY);
-        ctx.setComment(xpath + " : binary content modified between versions");
+        ctx.setComment(xpath + " : " + commentSuffix(outcome));
         ctx.setProperty(EXT_XPATH, xpath);
         ctx.setProperty(EXT_OLD_FILENAME, filenameOf(oldBlob));
         ctx.setProperty(EXT_NEW_FILENAME, filenameOf(newBlob));
-        ctx.setProperty(EXT_CORRELATION_ID, correlationId);
+        if (outcome.skipReason() != null) {
+            ctx.setProperty(EXT_SKIP_REASON, outcome.skipReason());
+        } else {
+            ctx.setProperty(EXT_CORRELATION_ID, outcome.correlationId());
+        }
         return ctx.newEvent(EVENT_BLOB_MODIFIED);
+    }
+
+    protected String commentSuffix(BlobDiffTrigger.Outcome outcome) {
+        if (STATUS_SKIPPED_SIZE.equals(outcome.skipReason())) {
+            return "binary changed (too large)";
+        }
+        if (STATUS_SKIPPED_TYPE.equals(outcome.skipReason())) {
+            return "binary changed (unsupported format)";
+        }
+        return "binary content modified between versions";
     }
 
     protected String filenameOf(Blob blob) {
