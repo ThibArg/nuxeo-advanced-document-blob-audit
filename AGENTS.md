@@ -34,11 +34,18 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
   - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`),
     `BlobModificationListener`, `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`,
     `image/`, `io/`, `operations/`, `work/`.
-  - `src/main/resources/OSGI-INF/` — 13 components + `deployment-fragment.xml`.
+  - `src/main/resources/OSGI-INF/` — 12 components + `deployment-fragment.xml` + `l10n/`.
+  - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
+    **server-side** i18n, appended by `deployment-fragment.xml` to
+    `nuxeo.war/WEB-INF/classes/messages*.properties`. This is the bundle
+    `SuggestDirectoryEntries` reads to localize vocabulary labels, so the `eventTypes` label of
+    `blobContentModified` must live here. Nothing reads a `nuxeo.war/server-side-i18n/` folder.
   - `src/main/resources/web/nuxeo.war/` — Polymer elements under
     `ui/nuxeo-advanced-document-blob-audit/elements/`, layouts under `ui/document/blobdiff/`,
-    client i18n in `ui/i18n/messages*.json`, server i18n in `server-side-i18n/messages*.properties`.
-    **Both i18n sets must be kept in sync** (fr + en exist for each).
+    **client** i18n in `ui/i18n/messages*.json`, read by Web UI only.
+    The two i18n sets have different roles and different consumers: they are **not** copies of one
+    another. A key may exist in both (`label.blobaudit.event.blobContentModified` does), but adding
+    a key to one does not imply adding it to the other.
 - `nuxeo-advanced-document-blob-audit-package/` — the Nuxeo marketplace package.
 
 ## Invariants to keep in mind
@@ -98,6 +105,30 @@ submission — and with it the exclusivity check and the parameter validation �
 error, and the returned id is not queryable until commit. The operation writes nothing to the
 repository, so there is nothing to undo if it does not commit. Do not "fix" this back.
 
+**Never put a `<dataFile>` on a vocabulary the plugin does not own.** A
+`<directory name="eventTypes" extends="template-vocabulary"><dataFile>…</dataFile></directory>` does
+not add rows, it **replaces** the platform's: `dataFileName` is single-valued,
+`BaseDirectoryDescriptor#merge` overwrites it rather than concatenating, and `DirectoryRegistry`
+recomputes the effective descriptor from a `clone()` of the template for every contribution carrying
+`extends`, so the last one wins outright. `dataLoadingPolicy=skip_duplicate` does **not** save it: it
+only protects rows that are already in storage, which is true of an instance that predates the
+plugin and false of a greenfield one. Measured on empty storage: `eventTypes` held 1 row and the
+platform's 51 were gone.
+
+`blobContentModified` is therefore created at runtime, by
+`BlobDiffInitComponent#registerAuditEventType` — guarded by `hasEntry`, wrapped in
+`TransactionHelper.runInTransaction` + `Framework.doPrivileged`, and with any `RuntimeException`
+logged rather than propagated, because a vocabulary row must never break startup. The same rule
+applies to `eventCategories`, `nature`, `subject` and every other platform vocabulary.
+Coverage: `TestAuditEventTypeRegistration`.
+
+**The `eventTypes` label is resolved server side, not by Web UI.** `nuxeo-audit-search` asks for
+`localize=true` without `dbl10n`, so `SuggestDirectoryEntries` translates the label against the
+server `messages` bundle and `I18NUtils` falls back to returning the key. That is why
+`OSGI-INF/l10n/messages_*.properties` is appended to `nuxeo.war/WEB-INF/classes/messages*.properties`
+by `deployment-fragment.xml`. Adding the key to `web/nuxeo.war/ui/i18n/messages*.json` alone makes
+the filter display `label.blobaudit.event.blobContentModified`.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -121,7 +152,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 193 tests (22 test classes)
+mvn -o install                                     # full build, 194 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -144,6 +175,9 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 `blobaudit-test-noimagepdf-config.xml` to disable a single image extractor, and
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths.
+`blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
+`template-vocabulary`, which the platform ships in `org.nuxeo.ecm.default.config` — a bundle nothing
+in this test stack deploys, and without which the `eventTypes` directory never registers.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 `TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
 `BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`.
@@ -161,10 +195,11 @@ Action Framework) mandatory rather than optional.
 ## Backlog
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. **Items 1 to 11, 13 and 15 are done** (regression coverage:
-`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
-`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
-`TestBlobDiffPurgeAction`):
+improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`;
+those that turn into work get the next free number in this same list. **Items 1 to 11, 13, 15 and
+16 are done** (regression coverage: `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`,
+`TestTextDifferScaling`, `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`,
+`TestMaterializedBlob`, `TestBlobDiffPurgeAction`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -200,6 +235,33 @@ improvements were identified. **Items 1 to 11, 13 and 15 are done** (regression 
     handful of years, twelve months, thirty-one days — so the longest list ever loaded is about
     thirty entries whatever the number of diffs. It moved to `getChildrenIterator` anyway, and to
     its own operation, because it can only run once the asynchronous purge has emptied the folders.
+
+16. *(front-end audit, finding `WEB-01`)* "Content changes audit" never issued a single query.
+    `nuxeo-blobdiff-search-page` bound its table with `nx-provider="provider"` — a **string id** —
+    while `#provider` sits in the element's own template and `nuxeo-data-table` sits inside the
+    `_isAuditor` `dom-if`. `PageProviderDisplayBehavior._nxProviderChanged` resolves a string
+    through `this.__dataHost.$[id]`, which for a stamped node is the *template instance*, whose `$`
+    only covers ids internal to that `dom-if`. The lookup yields `undefined`, the `querySelector`
+    fallback is guarded by `=== null` so it never runs, `nxProvider` stays the string `'provider'`,
+    `_hasPageProvider()` is false and `fetch()` returns `Promise.resolve()` — silently. The page
+    showed `label.blobaudit.empty` forever.
+
+    Fixed by passing the **node**, not the id: a `_nxProvider` property set to `this.$.provider` in
+    `ready()`, bound as `nx-provider="[[_nxProvider]]"`. The binding crosses the `dom-if` through
+    the templatizer. This is verbatim what Web UI does in `nuxeo-results-view`
+    (`_nxProvider: HTMLElement`, initialised in `ready()`, consumed inside a `dom-if`). Legacy
+    `Polymer({…})` is safe here: `ready` is a lifecycle key, so `GenerateClassFromInfo` calls
+    `super.ready()` *before* it and `this.$` is populated.
+
+    Three things not to "fix" by symmetry: the `this.$$('#table')` calls in `_refresh` and
+    `_deleteSelection` are correct and must stay — `this.$.table` does not exist; and
+    `nuxeo-blobdiff-document-history` keeps `nx-provider="provider"` because its table is *not*
+    inside a `dom-if`. Rule of thumb: **a `nuxeo-data-table` stamped by a `dom-if` must be handed
+    the provider element, never its id.**
+
+    No automated coverage — this repository has no JS test infrastructure (no runner, no
+    `*.test.js`). Verified by reading the Web UI and Polymer sources; behavioural check is manual
+    (open the page as an auditor, confirm a search request leaves in the network tab).
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

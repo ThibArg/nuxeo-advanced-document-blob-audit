@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.vocabularyTemplate">
+
+  <documentation>
+    Test-only. Supplies the "template-vocabulary" directory template, which the platform ships in
+    org.nuxeo.ecm.default.config - a bundle no runtime feature used here pulls in. Without it the
+    eventTypes directory of org.nuxeo.ecm.platform.audit never registers, and
+    TestAuditEventTypeRegistration would have nothing to assert against.
+
+    Copied verbatim from nuxeo-platform-default-config/OSGI-INF/nxdirectories-contrib.xml;
+    "template-directory" itself comes from SQLDirectoryFeature.
+  </documentation>
+
+  <require>org.nuxeo.directory.test.sql</require>
+
+  <extension target="org.nuxeo.ecm.directory.GenericDirectory" point="directories">
+    <directory name="template-vocabulary" template="true" extends="template-directory">
+      <schema>vocabulary</schema>
+      <idField>id</idField>
+    </directory>
+  </extension>
+
+</component>

@@ -180,7 +180,13 @@ public class TestBlobDiffLocationAndSecurity {
         assertEquals(1, diffs.size());
         DocumentModel diff = diffs.get(0);
         Calendar date = (Calendar) diff.getPropertyValue(BlobAuditConstants.XP_DATE);
-        String expectedParent = String.format("%s/%tY/%tm/%td", CONTAINER_PATH, date, date, date);
+        /*
+          Render the expected path in UTC, like BlobDiffComponent.CONTAINER_PATH_FORMAT does.
+          Formatting the Calendar with %t* uses its own (local) zone, so east of Greenwich the
+          test failed for every run between midnight and the UTC offset.
+         */
+        String expectedParent = CONTAINER_PATH + "/"
+                + BlobDiffComponent.CONTAINER_PATH_FORMAT.format(date.toInstant());
         assertEquals(expectedParent, session.getParentDocument(diff.getRef()).getPathAsString());
 
         // every BlobDiff of the repository lives under the container

@@ -120,6 +120,22 @@ public class BlobAuditConstants {
     public static final String EVENT_BLOB_MODIFIED = "blobContentModified";
 
     /**
+     * Platform vocabulary listing the audit event ids. Fed by {@code nuxeo-platform-audit-core}; the
+     * plugin only adds its own row to it, at runtime.
+     *
+     * @since 2025.2
+     */
+    public static final String EVENT_TYPES_DIRECTORY = "eventTypes";
+
+    /**
+     * Label of the {@link #EVENT_BLOB_MODIFIED} row. Resolved server side against the
+     * {@code messages} bundle, not by Web UI, hence the properties files in {@code OSGI-INF/l10n}.
+     *
+     * @since 2025.2
+     */
+    public static final String LABEL_EVENT_BLOB_MODIFIED = "label.blobaudit.event.blobContentModified";
+
+    /**
      * Audit category. Reusing Nuxeo's default document category means the entries show up in the Web
      * UI audit table and under the existing "Document" filter without any extra contribution.
      */

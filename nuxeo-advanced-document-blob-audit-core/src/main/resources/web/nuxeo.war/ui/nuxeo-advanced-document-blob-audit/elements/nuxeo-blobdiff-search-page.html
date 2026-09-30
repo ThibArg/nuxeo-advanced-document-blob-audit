@@ -82,7 +82,7 @@
             </template>
           </div>
 
-          <nuxeo-data-table id="table" nx-provider="provider" selection-enabled
+          <nuxeo-data-table id="table" nx-provider="[[_nxProvider]]" selection-enabled
                             selected-items="{{selectedItems}}"
                             empty-label="[[i18n('label.blobaudit.empty')]]">
             <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.date')]]" sort-by="bdiff:date" flex="12">
@@ -164,11 +164,24 @@
         userAgg: { type: Array, value: function () { return []; } },
         aggregations: Object,
         selectedItems: { type: Array, value: function () { return []; } },
-        _params: Object
+        _params: Object,
+        /*
+          The #provider element itself, not its id. nuxeo-data-table lives inside a dom-if, so
+          PageProviderDisplayBehavior._nxProviderChanged would resolve a string id against the
+          template instance's scope, where #provider is absent, and leave nxProvider a string --
+          _hasPageProvider() false, fetch() a no-op. Passing the node makes the binding cross the
+          dom-if through the templatizer. Same pattern as nuxeo-results-view.
+        */
+        _nxProvider: Object
       },
       observers: [
         '_filtersChanged(dateMin, dateMax, sourceId, userFilter, truncatedOnly, statusAgg.*, mimetypeAgg.*, xpathAgg.*, userAgg.*)'
       ],
+
+      ready: function () {
+        this._nxProvider = this.$.provider;
+      },
+
       _isAuditor: function (user) { return Nuxeo.BlobAudit.isAuditor(user); },
 
       _filtersChanged: function () {

@@ -17,12 +17,30 @@
     <unzip from="${bundle.fileName}" to="${bundle.fileName}.tmp">
       <include>web/nuxeo.war/ui/i18n/**</include>
     </unzip>
+    <unzip from="${bundle.fileName}" to="${bundle.fileName}.tmp">
+      <include>OSGI-INF/l10n/**</include>
+    </unzip>
 
-    <!-- append the translations -->
+    <!-- append the client-side translations -->
     <append from="${bundle.fileName}.tmp/web/nuxeo.war/ui/i18n/messages.json" to="nuxeo.war/ui/i18n/messages.json" addNewLine="true"/>
     <append from="${bundle.fileName}.tmp/web/nuxeo.war/ui/i18n/messages-fr.json" to="nuxeo.war/ui/i18n/messages-fr.json" addNewLine="true"/>
     <append from="${bundle.fileName}.tmp/web/nuxeo.war/ui/i18n/messages-fr.json" to="nuxeo.war/ui/i18n/messages-fr-FR.json" addNewLine="true"/>
-    
+
+    <!--
+      Append the server-side translations. SuggestDirectoryEntries localizes vocabulary labels
+      against this bundle, so the eventTypes label is resolved here, not by Web UI.
+    -->
+    <append from="${bundle.fileName}.tmp/OSGI-INF/l10n/messages_en_US.properties"
+            to="nuxeo.war/WEB-INF/classes/messages.properties" addNewLine="true"/>
+    <append from="${bundle.fileName}.tmp/OSGI-INF/l10n/messages_en_US.properties"
+            to="nuxeo.war/WEB-INF/classes/messages_en.properties" addNewLine="true"/>
+    <append from="${bundle.fileName}.tmp/OSGI-INF/l10n/messages_en_US.properties"
+            to="nuxeo.war/WEB-INF/classes/messages_en_US.properties" addNewLine="true"/>
+    <append from="${bundle.fileName}.tmp/OSGI-INF/l10n/messages_fr_FR.properties"
+            to="nuxeo.war/WEB-INF/classes/messages_fr.properties" addNewLine="true"/>
+    <append from="${bundle.fileName}.tmp/OSGI-INF/l10n/messages_fr_FR.properties"
+            to="nuxeo.war/WEB-INF/classes/messages_fr_FR.properties" addNewLine="true"/>
+
     <!-- Cleanup -->
     <delete path="${bundle.fileName}.tmp"/>
 
