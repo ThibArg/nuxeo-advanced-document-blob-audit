@@ -80,11 +80,20 @@ mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
 
 Do not run the build when a commit only touches `README.md`, `AGENTS.md` or `.gitignore`.
 
+## Deployment target
+
+This plugin is heading for a **real instance**, not a demo. Two consequences on the backlog:
+item 11 (purge on the Bulk Action Framework) is needed rather than optional, and anything that only
+matters at small volume can no longer be waved away.
+
 ## State of the code
 
-A full architecture review was run on the whole plugin. The architecture was judged sound; twelve
-improvements were identified and ranked. **Items 1 to 5 are done.** Items 6 to 12 are open and
-described below so they can be picked up in another session.
+A full architecture review was run on the whole plugin. The architecture was judged sound; fourteen
+improvements were identified. **Items 1 to 5 are done.** The rest are open and described below.
+
+> **Numbers are stable identifiers, not priorities.** They are referenced in commit messages and in
+> earlier discussions, so they are never reused or renumbered. Item 13 was found last and must be
+> done first. Follow the "Recommended order" table, not the numbering.
 
 ### Done
 
@@ -98,11 +107,29 @@ described below so they can be picked up in another session.
 
 Regression coverage for all five: `TestBlobDiffHardening`.
 
+### Recommended order
+
+One session per row. The grouping is by blast radius, so each row is one reviewable commit that can
+be rolled back on its own.
+
+| Session | Items | Effort | Why grouped / notes |
+|---|---|---|---|
+| **A** | 13 | medium | Functional hole, decision already taken (see item 13). Do first. |
+| **B** | 6 | low | Self-contained, large measurable gain, tests already in place |
+| **C** | 7 | low | Purely mechanical, no design decision |
+| **D** | 8 + 9 | medium | **Must go together**: 9 changes which document the listener sees, hence 8's cache key |
+| **E** | 10 | medium | Extraction I/O and the extractor extension model |
+| **F** | 11 | high | Needed, see "Deployment target" |
+| — | 14 | — | Needs a product decision, see item 14 |
+| — | 12 | — | **Conditional**: only if measurements after item 6 justify it |
+
+Before starting session D: item 9 **removes the need** for the `ORDER BY uid:major_version`
+heuristic, so the `[!WARNING]` block in `README.md` and the "Version ordering" invariant at the top
+of this file must be rewritten, not merely adjusted.
+
 ---
 
-## Backlog — items 6 to 12
-
-Ordered by value/effort. Each item is self-contained.
+## Backlog
 
 ### 6. Common prefix/suffix trimming in `TextDiffer` (high value, low effort)
 
@@ -121,7 +148,9 @@ collapses from 5000×5000 to roughly 1×1.
 - Consider also hashing lines to `int` before alignment to avoid millions of `String.equals` on
   long paragraphs.
 
-### 7. Cleanups (low effort, mostly mechanical)
+### 7. Cleanups (low effort, purely mechanical)
+
+No design decision in this list. Anything that needed one has been moved to items 13 and 14.
 
 - `OSGI-INF/blobdiff-es-pageprovider-contrib.xml` has been **deleted** (it was dead code, absent
   from the `Nuxeo-Component` header, and duplicated `BLOB_DIFFS_ADMIN`). What remains to do: the
@@ -130,11 +159,6 @@ collapses from 5000×5000 to roughly 1×1.
   search engine the component fails instead of staying pending. Either add the `<require>` or
   confirm that `SearchServicePageProvider` degrades gracefully. `README.md` carries a `[!NOTE]`.
 - `BLOB_DIFFS_OLDER_THAN` page provider is referenced nowhere. Dead.
-- `STATUS_SKIPPED_SIZE` (`skippedTooLarge`) is **never produced**. When a blob exceeds
-  `maxBlobSize`, `isDiffable` returns `false` and **no audit entry is written at all** — a binary
-  change on a large file goes completely unnoticed. This is a functional hole, not just dead code:
-  the status is even offered in the purge dialog of the UI. Fix by recording the audit entry and a
-  `skippedTooLarge` `BlobDiff` instead of staying silent.
 - `BlobAuditConstants` lines ~39-43: five constants are stuck to the left margin. Fix indentation.
 - `BlobDiffRetryOp` uses `import static ...BlobAuditConstants.*` — wildcard import, against
   convention.
@@ -144,9 +168,6 @@ collapses from 5000×5000 to roughly 1×1.
 - `BlobDiffComponent#ensureRootContainer` recurses after `removeDocument` with no bound. Add a
   depth counter.
 - `BlobDiffComponent#diff` calls `getConfig()` four times (registry lookup each time). Capture once.
-- `DiffResult#summary()` builds a hardcoded English string that is **persisted** in `bdiff:summary`
-  and shown as-is in the UI. Not translatable, and redundant with the `added`/`removed`/`changed`
-  fields already stored. Let the UI compose it.
 - `BlobDiffTrigger#sameContent`: when one side has a null `digestAlgorithm`, digests possibly
   produced by different algorithms are compared and may wrongly conclude "identical". Do not
   short-circuit when algorithms cannot be proven equal.
@@ -225,6 +246,82 @@ constraint.
 
 `TestTextDiffer` and `TestTextDifferScaling` assert alignment **optimality**, so they are the
 contract any replacement must satisfy.
+
+### 13. Non-diffable binary changes are completely silent (do first)
+
+**The functional hole of the plugin as it stands.** A user replaces a 40 MB PowerPoint, a `.zip` or
+any unsupported format: the plugin leaves **no trace at all**. For an audit tool, that is the worst
+possible failure mode — the absence of an entry is indistinguishable from the absence of a change.
+
+Mechanics. `BlobDiffComponent#isDiffable` returns `false` in two distinct situations:
+
+```java
+if (blob.getLength() > config.getMaxBlobSize()) return false;   // too large
+return findExtractor(blob.getMimeType()) != null;               // unsupported type
+```
+
+`BlobDiffTrigger#scheduleIfNeeded` collapses both into a single `return null`. Back in
+`BlobModificationListener#handleEvent`, `correlationId == null` means `fireEvent` is never called:
+no work, no `BlobDiff`, **and no audit entry**.
+
+Consequence on the status values:
+
+| Status | Reachable today? |
+|---|---|
+| `skippedTooLarge` | **Never** |
+| `skippedUnsupportedType` | **Practically never** — only if an extractor disappears between the scheduling and the execution of the work (redeployment, configuration change) |
+
+The only test touching `STATUS_SKIPPED_TYPE` (`TestBlobDiffService`) builds the `BlobDiff` directly
+through the service; it never exercises the listener/trigger path.
+
+**Decision taken (2026-09, product owner): option (b).**
+
+- Write the **audit entry only**. No `BlobDiff` document is created for a non-diffable change —
+  there is nothing to diff, and creating one per changed image, video or archive would flood both
+  the repository and the dated containers.
+- The entry must carry a **very compact** reason. Keep the comment short, and put the machine
+  readable value in an extended info so the UI and NXQL can filter on it. Suggested shape:
+  comment `file:content : binary changed (too large)` / `(unsupported format)`, plus an extended
+  info `skipReason` = `skippedTooLarge` / `skippedUnsupportedType` (reuse `BlobAuditConstants`).
+- Distinguishing the two reasons costs **nothing**: both checks are already executed inside
+  `isDiffable` today, their result is merely collapsed into a boolean and discarded.
+  `blob.getLength()` is already-loaded metadata on a `ManagedBlob` (no I/O) and `findExtractor` is an
+  in-memory loop over a handful of descriptors. Turn `isDiffable` into a method returning an enum
+  (`ELIGIBLE`, `TOO_LARGE`, `UNSUPPORTED_TYPE`, `NOT_APPLICABLE`) and keep `isDiffable` as a thin
+  boolean façade for existing callers.
+
+Implementation notes:
+
+- `NOT_APPLICABLE` (feature disabled, doc type or xpath out of scope) must stay **fully silent** —
+  it is a deliberate configuration choice, not a skipped change.
+- Only report a skip when the binary actually changed. The digest comparison
+  (`BlobDiffTrigger#sameContent`) must still run first, otherwise every check-in of an unchanged
+  large file would produce an entry.
+- The two extra `AuditRouter` / `eventTypes` requirements do not change: the same
+  `blobContentModified` event is reused, only its extended infos differ.
+- The purge dialog of the Web UI already offers both statuses as filters; once the audit entry
+  carries `skipReason`, decide whether those filters should target the audit or stay on `BlobDiff`
+  (they currently filter `bdiff:status`, which will never hold those values under option (b) —
+  either remove them from the dialog or repoint them).
+- Add end-to-end coverage: a blob over `maxBlobSize` and a blob with an unsupported MIME type must
+  each produce exactly one audit entry with the right `skipReason`, and **zero** `BlobDiff`.
+
+### 14. `DiffResult#summary()` is a persisted, untranslatable English string (needs a decision)
+
+`DiffResult#summary()` builds a hardcoded English sentence ("2 modifications, 1 addition") that is
+**persisted** in `bdiff:summary` and displayed as-is by the Web UI listing and document view. It is
+neither translatable nor redundant-free: `added`, `removed` and `changed` are already stored as
+separate fields next to it.
+
+Letting the UI compose the sentence from the counters is the clean fix, but it is **not** a cleanup:
+every `BlobDiff` already stored keeps its English string, so the listing would mix generated and
+stored wording unless a migration rewrites them. Hence the product decision needed:
+
+- leave it as is and accept English-only summaries; or
+- compose in the UI and accept a mixed display on historical data; or
+- compose in the UI **and** migrate existing documents (likely a Bulk Action, see item 11).
+
+Not scheduled until that decision is taken.
 
 ---
 
