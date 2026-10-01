@@ -1,6 +1,13 @@
 <!--
   Main page (PAGES slot, name="blobdiffs"): filters, faceted listing of every BlobDiff, selection
-  deletion, retention purge. Backed by the BLOB_DIFFS_ADMIN Elasticsearch page provider.
+  deletion, retention purge. Backed by the BLOB_DIFFS_ADMIN page provider, which goes through the
+  LTS 2025 SearchService.
+
+  Where that actually lands depends on the deployed search client, not on this element. With the
+  OpenSearch/Elasticsearch search-client package installed - the real-world case - the query and
+  its four aggregates run on the engine. On a bare instance the default client is "repository"
+  (nuxeo.search.client.default.name), which does not support the AGGREGATE capability: the listing
+  still works, but the facets come back silently empty. See the README, "Search engine prerequisite".
 -->
 <dom-module id="nuxeo-blobdiff-search-page">
   <template>

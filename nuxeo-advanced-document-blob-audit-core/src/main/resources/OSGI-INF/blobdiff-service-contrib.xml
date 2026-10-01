@@ -44,6 +44,14 @@
       -->
       <maxLines>10000</maxLines>
       <maxDiffEntries>5000</maxDiffEntries>
+      <!--
+        maxDiffEntries bounds how *many* differences are reported, never how long each one is: an
+        Excel cell holds up to 32 767 characters and a Word paragraph is unbounded. maxDiffChars
+        caps the whole diff body, maxValueLength elides a single over-long unit. Together they make
+        the stored diff proportional to something known in advance instead of to the content.
+      -->
+      <maxDiffChars>4194304</maxDiffChars>
+      <maxValueLength>4096</maxValueLength>
       <!-- Optional; omitted is equivalent to 0. Level 1 support is implemented separately. -->
       <imageAnalysisLevel>0</imageAnalysisLevel>
       <!-- Empty docTypes means "every type". Narrow this down in production. -->

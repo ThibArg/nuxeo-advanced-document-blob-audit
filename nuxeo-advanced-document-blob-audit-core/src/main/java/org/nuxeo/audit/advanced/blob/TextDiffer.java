@@ -74,14 +74,61 @@ public class TextDiffer {
 
     public static final int DEFAULT_MAX_DIFF_ENTRIES = 5000;
 
+    /** @since 2025.4 */
+    public static final int DEFAULT_MAX_DIFF_CHARS = 4 * 1024 * 1024;
+
+    /** @since 2025.4 */
+    public static final int DEFAULT_MAX_VALUE_LENGTH = 4096;
+
+    /** Suffix appended to an elided value, before the character count. */
+    protected static final String ELLIPSIS = "… [";
+
     protected final int maxEntries;
+
+    /** @since 2025.4 */
+    protected final int maxChars;
+
+    /** @since 2025.4 */
+    protected final int maxValueLength;
 
     public TextDiffer() {
         this(DEFAULT_MAX_DIFF_ENTRIES);
     }
 
     public TextDiffer(int maxEntries) {
+        this(maxEntries, DEFAULT_MAX_DIFF_CHARS, DEFAULT_MAX_VALUE_LENGTH);
+    }
+
+    /**
+     * @param maxEntries how many entries may be written to the diff body
+     * @param maxChars hard cap on the length of the produced unified diff
+     * @param maxValueLength a single extracted unit longer than this is elided in the diff body
+     * @since 2025.4
+     */
+    public TextDiffer(int maxEntries, int maxChars, int maxValueLength) {
         this.maxEntries = maxEntries;
+        this.maxChars = maxChars;
+        this.maxValueLength = maxValueLength;
+    }
+
+    /**
+     * Truncates a single unit so that one entry can never, on its own, blow the budget.
+     * <p>
+     * An Excel cell holds up to 32 767 characters and a Word paragraph is unbounded, so without
+     * this a diff of a few thousand entries reaches hundreds of megabytes - held in a
+     * {@code StringBuilder}, copied by {@code toString()}, copied again into a blob.
+     * <p>
+     * <b>Known limitation.</b> When both sides of a modification are longer than
+     * {@code maxValueLength} and only differ past it, the rendered entry shows two identical
+     * prefixes ({@code ~ key : X… -> X…}). The counters stay exact and {@code bdiff:changed} still
+     * reports the modification; only the rendering is uninformative. Resolving it - a digest, or
+     * the offset of the first difference - was judged not worth the complexity for a rare case.
+     *
+     * @since 2025.4
+     */
+    protected String elide(String value) {
+        return value == null || value.length() <= maxValueLength ? value
+                : value.substring(0, maxValueLength) + ELLIPSIS + value.length() + " chars]";
     }
 
     public DiffResult diff(DiffableContent oldContent, DiffableContent newContent) {
@@ -89,6 +136,31 @@ public class TextDiffer {
         boolean truncated = oldContent.truncated() || newContent.truncated();
         return keyed ? diffKeyed(oldContent, newContent, truncated)
                 : diffPositional(oldContent, newContent, truncated);
+    }
+
+    /**
+     * Concatenates a text diff and an image inventory diff, under the same {@code maxChars} cap.
+     * <p>
+     * Each side is already bounded on its own, so without this the merged body could reach twice
+     * the cap - the image inventory would quietly undo the bound. The cut falls back to the last
+     * complete line, so the tail is never a half-rendered entry, and it flags the result as
+     * truncated.
+     *
+     * @since 2025.4
+     */
+    public DiffResult merge(DiffResult text, DiffResult images) {
+        String unified = text.unified();
+        if (!images.unified().isEmpty()) {
+            unified += (unified.isEmpty() ? "" : "\n") + "# Images\n" + images.unified();
+        }
+        boolean cut = false;
+        if (unified.length() > maxChars) {
+            int lastNewline = unified.lastIndexOf('\n', maxChars);
+            unified = lastNewline < 0 ? "" : unified.substring(0, lastNewline + 1);
+            cut = true;
+        }
+        return new DiffResult(text.added() + images.added(), text.removed() + images.removed(),
+                text.changed() + images.changed(), text.truncated() || images.truncated() || cut, unified);
     }
 
     /* ------------------------------------------------------------------ keyed */
@@ -120,18 +192,29 @@ public class TextDiffer {
             } else {
                 changed++;
             }
-            if (emitted >= maxEntries) {
+            if (cut || emitted >= maxEntries) {
+                // Counting continues past the budget on purpose: added/removed/changed must stay
+                // exact whatever the rendering had room for. Once cut, stay cut - letting a later,
+                // shorter entry through would produce a non-contiguous diff body.
                 cut = true;
                 continue;
             }
-            emitted++;
+            String entry;
             if (oldValue == null) {
-                sb.append("+ ").append(key).append(" = ").append(newValue).append('\n');
+                entry = "+ " + elide(key) + " = " + elide(newValue) + "\n";
             } else if (newValue == null) {
-                sb.append("- ").append(key).append(" = ").append(oldValue).append('\n');
+                entry = "- " + elide(key) + " = " + elide(oldValue) + "\n";
             } else {
-                sb.append("~ ").append(key).append(" : ").append(oldValue).append(" -> ").append(newValue).append('\n');
+                entry = "~ " + elide(key) + " : " + elide(oldValue) + " -> " + elide(newValue) + "\n";
             }
+            // Checked against the rendered entry, not before building it: testing sb.length()
+            // alone would let the result overshoot maxChars by one whole entry.
+            if (sb.length() + entry.length() > maxChars) {
+                cut = true;
+                continue;
+            }
+            sb.append(entry);
+            emitted++;
         }
         return new DiffResult(added, removed, changed, truncated || cut, sb.toString());
     }
@@ -164,21 +247,22 @@ public class TextDiffer {
             case REMOVE -> removed++;
             case CHANGE -> changed++;
             }
-            if (emitted >= maxEntries) {
+            if (cut || emitted >= maxEntries) {
+                // See diffKeyed: counters stay exact past the budget, and the cut is monotone.
                 cut = true;
                 continue;
             }
-            emitted++;
-            switch (edit.type) {
-            case ADD -> sb.append("+ ").append(edit.newValue).append('\n');
-            case REMOVE -> sb.append("- ").append(edit.oldValue).append('\n');
-            case CHANGE -> sb.append("- ")
-                             .append(edit.oldValue)
-                             .append('\n')
-                             .append("+ ")
-                             .append(edit.newValue)
-                             .append('\n');
+            String entry = switch (edit.type) {
+                case ADD -> "+ " + elide(edit.newValue) + "\n";
+                case REMOVE -> "- " + elide(edit.oldValue) + "\n";
+                case CHANGE -> "- " + elide(edit.oldValue) + "\n+ " + elide(edit.newValue) + "\n";
+            };
+            if (sb.length() + entry.length() > maxChars) {
+                cut = true;
+                continue;
             }
+            sb.append(entry);
+            emitted++;
         }
         return new DiffResult(added, removed, changed, truncated || cut, sb.toString());
     }

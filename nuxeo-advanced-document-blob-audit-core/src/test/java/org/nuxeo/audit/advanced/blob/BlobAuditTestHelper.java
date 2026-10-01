@@ -16,8 +16,12 @@
 package org.nuxeo.audit.advanced.blob;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +35,7 @@ import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
+import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 
 /**
  * Fixture builders shared by the tests.
@@ -63,6 +68,25 @@ public class BlobAuditTestHelper {
         Blob blob = new ByteArrayBlob(content.getBytes(StandardCharsets.UTF_8), mimeType, StandardCharsets.UTF_8.name());
         blob.setFilename(filename);
         return blob;
+    }
+
+    /**
+     * Same bytes, but backed by a real file, so {@code blob.getFile()} is not {@code null}.
+     * <p>
+     * The extractors read POI formats from the file when there is one - random access, read only -
+     * and fall back to the stream otherwise. Every other fixture builder here produces an in-memory
+     * blob, so the file branch, which is the one that actually runs in production behind
+     * {@code MaterializedBlob}, would never be exercised without this.
+     *
+     * @since 2025.4
+     */
+    public static Blob onDisk(Blob source) throws IOException {
+        File file = Files.createTempFile("blobaudit-test-", "-" + source.getFilename()).toFile();
+        file.deleteOnExit();
+        try (InputStream in = source.getStream()) {
+            Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+        return new FileBlob(file, source.getMimeType(), source.getEncoding(), source.getFilename(), null);
     }
 
     /**

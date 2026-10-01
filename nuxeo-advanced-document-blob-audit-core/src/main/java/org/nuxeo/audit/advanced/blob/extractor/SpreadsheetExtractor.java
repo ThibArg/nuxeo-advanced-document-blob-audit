@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
+import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,32 +57,56 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
         useFormulas = !"false".equalsIgnoreCase(properties.get("useFormulas"));
     }
 
+    /**
+     * Reads the workbook from the local file whenever there is one.
+     * <p>
+     * {@code WorkbookFactory.create(InputStream)} buffers the whole OOXML package in heap before
+     * building the XMLBeans model - POI cannot reposition a stream. The {@code File} variant opens
+     * the zip in random access, read only, and reads the parts on demand, so the footprint follows
+     * what is actually extracted rather than the size of the package.
+     * <p>
+     * {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob} guarantees a file on the nominal
+     * path. The stream fallback is for the blobs built in memory by the unit tests, and for the
+     * case where materialisation failed.
+     */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws Exception {
         List<ContentLine> lines = new ArrayList<>();
-        boolean truncated = false;
-        DataFormatter formatter = new DataFormatter();
-        try (InputStream in = blob.getStream(); Workbook workbook = WorkbookFactory.create(in)) {
-            sheets: for (int s = 0; s < workbook.getNumberOfSheets(); s++) {
-                Sheet sheet = workbook.getSheetAt(s);
-                String sheetName = sheet.getSheetName();
-                for (Row row : sheet) {
-                    for (Cell cell : row) {
-                        String value = formatCell(cell, formatter);
-                        if (value == null || value.isEmpty()) {
-                            continue;
-                        }
-                        if (lines.size() >= maxLines) {
-                            truncated = true;
-                            break sheets;
-                        }
-                        String key = sheetName + "!" + new CellReference(cell).formatAsString(false);
-                        lines.add(ContentLine.of(key, value));
-                    }
-                }
+        boolean truncated;
+        File file = blob.getFile();
+        if (file != null) {
+            try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
+                truncated = collect(workbook, maxLines, lines);
+            }
+        } else {
+            try (InputStream in = blob.getStream(); Workbook workbook = WorkbookFactory.create(in)) {
+                truncated = collect(workbook, maxLines, lines);
             }
         }
         return DiffableContent.keyed(lines, truncated);
+    }
+
+    /** @return {@code true} once maxLines has been reached */
+    protected boolean collect(Workbook workbook, int maxLines, List<ContentLine> lines) {
+        DataFormatter formatter = new DataFormatter();
+        for (int s = 0; s < workbook.getNumberOfSheets(); s++) {
+            Sheet sheet = workbook.getSheetAt(s);
+            String sheetName = sheet.getSheetName();
+            for (Row row : sheet) {
+                for (Cell cell : row) {
+                    String value = formatCell(cell, formatter);
+                    if (value == null || value.isEmpty()) {
+                        continue;
+                    }
+                    if (lines.size() >= maxLines) {
+                        return true;
+                    }
+                    String key = sheetName + "!" + new CellReference(cell).formatAsString(false);
+                    lines.add(ContentLine.of(key, value));
+                }
+            }
+        }
+        return false;
     }
 
     /**

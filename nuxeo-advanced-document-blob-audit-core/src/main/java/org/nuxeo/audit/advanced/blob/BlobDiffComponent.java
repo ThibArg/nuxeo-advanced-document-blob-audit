@@ -229,7 +229,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             return null;
         }
         BlobDiffConfigDescriptor config = getConfig();
-        TextDiffer differ = new TextDiffer(config.getMaxDiffEntries());
+        TextDiffer differ = new TextDiffer(config.getMaxDiffEntries(), config.getMaxDiffChars(),
+                config.getMaxValueLength());
         DiffResult textResult = differ.diff(oldContent, newContent);
         if (config.normalizeImageAnalysisLevel() == 0) {
             return textResult;
@@ -242,7 +243,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             int maxLines = config.getMaxLines();
             DiffResult imageResult = differ.diff(extractImages(imageExtractor, oldBlob, maxLines),
                     extractImages(imageExtractor, newBlob, maxLines));
-            return merge(textResult, imageResult);
+            return differ.merge(textResult, imageResult);
         } catch (Exception e) { // NOSONAR - the image inventory must never lose the text diff
             // Deliberately asymmetric with extract(): a failing *text* extraction raises, because
             // there is nothing left to record, while a failing image inventory only costs a
@@ -255,15 +256,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     /** A missing side (first version, blob added or removed) has an empty inventory, not none. */
     protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws Exception {
         return blob == null ? DiffableContent.keyed(List.of(), false) : extractor.extract(blob, maxLines);
-    }
-
-    protected DiffResult merge(DiffResult text, DiffResult images) {
-        String unified = text.unified();
-        if (!images.unified().isEmpty()) {
-            unified += (unified.isEmpty() ? "" : "\n") + "# Images\n" + images.unified();
-        }
-        return new DiffResult(text.added() + images.added(), text.removed() + images.removed(),
-                text.changed() + images.changed(), text.truncated() || images.truncated(), unified);
     }
 
     /* ------------------------------------------------------------- persistence */

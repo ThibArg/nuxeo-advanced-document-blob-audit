@@ -25,6 +25,8 @@ import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.opc.PackageAccess;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.Drawing;
 import org.apache.poi.ss.usermodel.Picture;
@@ -191,33 +193,51 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         return "sha256:" + HexFormat.of().formatHex(digest.digest());
     }
 
+    /**
+     * Reads the workbook from the local file whenever there is one, like
+     * {@link org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor}: the {@code InputStream}
+     * variant of {@code WorkbookFactory} buffers the whole OOXML package in heap.
+     */
     protected DiffableContent extractSpreadsheet(Blob blob, int maxLines) throws Exception {
         List<ContentLine> images = new ArrayList<>();
-        boolean truncated = false;
-        try (InputStream in = blob.getStream(); Workbook workbook = WorkbookFactory.create(in)) {
-            sheets: for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
-                Sheet sheet = workbook.getSheetAt(i);
-                Drawing<?> drawing = sheet.getDrawingPatriarch();
-                if (drawing == null) {
-                    continue;
-                }
-                int ordinal = 0;
-                for (Shape shape : drawing) {
-                    if (shape instanceof Picture picture) {
-                        if (images.size() >= maxLines) {
-                            truncated = true;
-                            break sheets;
-                        }
-                        PictureData data = picture.getPictureData();
-                        ClientAnchor anchor = picture.getClientAnchor();
-                        String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
-                        images.add(ContentLine.of("excel:image:" + sheet.getSheetName() + ":" + location,
-                                digest(data.getData())));
-                    }
-                }
+        boolean truncated;
+        File file = blob.getFile();
+        if (file != null) {
+            try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
+                truncated = collectSpreadsheetImages(workbook, images, maxLines);
+            }
+        } else {
+            try (InputStream in = blob.getStream(); Workbook workbook = WorkbookFactory.create(in)) {
+                truncated = collectSpreadsheetImages(workbook, images, maxLines);
             }
         }
         return DiffableContent.keyed(images, truncated);
+    }
+
+    /** @return {@code true} if the {@code maxLines} budget was exhausted */
+    protected boolean collectSpreadsheetImages(Workbook workbook, List<ContentLine> images, int maxLines)
+            throws Exception {
+        for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+            Sheet sheet = workbook.getSheetAt(i);
+            Drawing<?> drawing = sheet.getDrawingPatriarch();
+            if (drawing == null) {
+                continue;
+            }
+            int ordinal = 0;
+            for (Shape shape : drawing) {
+                if (shape instanceof Picture picture) {
+                    if (images.size() >= maxLines) {
+                        return true;
+                    }
+                    PictureData data = picture.getPictureData();
+                    ClientAnchor anchor = picture.getClientAnchor();
+                    String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
+                    images.add(ContentLine.of("excel:image:" + sheet.getSheetName() + ":" + location,
+                            digest(data.getData())));
+                }
+            }
+        }
+        return false;
     }
 
     protected String anchor(ClientAnchor anchor) {
@@ -338,23 +358,40 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * {@code powerpoint:slide:<n>:image:<media-part>}. The same media part used twice on one slide
      * gets a {@code #2}, {@code #3}... suffix so no placement is lost. Pictures inside group shapes
      * are included; layouts and masters are not (they belong to the template, not the content).
+     * <p>
+     * Opened from the local file when there is one. The {@link OPCPackage} is closed explicitly:
+     * {@link XMLSlideShow#close()} does not close a package it was handed.
      */
     protected DiffableContent extractPresentation(Blob blob, int maxLines) throws Exception {
         List<ContentLine> images = new ArrayList<>();
-        boolean truncated = false;
-        try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
-            int slideNumber = 0;
-            for (XSLFSlide slide : show.getSlides()) {
-                slideNumber++;
-                Map<String, Integer> seen = new HashMap<>();
-                if (collectSlidePictures(slide.getShapes(), "powerpoint:slide:" + slideNumber + ":image:", images,
-                        seen, maxLines)) {
-                    truncated = true;
-                    break;
-                }
+        boolean truncated;
+        File file = blob.getFile();
+        if (file != null) {
+            try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ);
+                    XMLSlideShow show = new XMLSlideShow(pkg)) {
+                truncated = collectPresentationImages(show, images, maxLines);
+            }
+        } else {
+            try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
+                truncated = collectPresentationImages(show, images, maxLines);
             }
         }
         return DiffableContent.keyed(images, truncated);
+    }
+
+    /** @return {@code true} if the {@code maxLines} budget was exhausted */
+    protected boolean collectPresentationImages(XMLSlideShow show, List<ContentLine> images, int maxLines)
+            throws Exception {
+        int slideNumber = 0;
+        for (XSLFSlide slide : show.getSlides()) {
+            slideNumber++;
+            Map<String, Integer> seen = new HashMap<>();
+            if (collectSlidePictures(slide.getShapes(), "powerpoint:slide:" + slideNumber + ":image:", images, seen,
+                    maxLines)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @return {@code true} if the {@code maxLines} budget was exhausted */

@@ -59,6 +59,27 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     protected int maxDiffEntries = 5000;
 
     /**
+     * Hard cap on the size of the produced unified diff, in characters.
+     * <p>
+     * {@code maxDiffEntries} bounds how many differences are reported, never how long they are. An
+     * Excel cell holds up to 32 767 characters and a Word paragraph is unbounded, so the two caps
+     * together are what keeps the diff body - built in a {@code StringBuilder}, copied by
+     * {@code toString()}, copied again into a blob - proportional to something known in advance.
+     *
+     * @since 2025.4
+     */
+    @XNode("maxDiffChars")
+    protected int maxDiffChars = TextDiffer.DEFAULT_MAX_DIFF_CHARS;
+
+    /**
+     * A single extracted unit longer than this is elided in the diff body.
+     *
+     * @since 2025.4
+     */
+    @XNode("maxValueLength")
+    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+
+    /**
      * Image analysis level. Level 0 disables image processing; level 1 enables digest-based image
      * inventory. Higher levels are reserved for future, more expensive analysis modes.
      */
@@ -105,6 +126,16 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public int getMaxDiffEntries() {
         return maxDiffEntries;
+    }
+
+    /** @since 2025.4 */
+    public int getMaxDiffChars() {
+        return maxDiffChars;
+    }
+
+    /** @since 2025.4 */
+    public int getMaxValueLength() {
+        return maxValueLength;
     }
 
     public int getImageAnalysisLevel() {

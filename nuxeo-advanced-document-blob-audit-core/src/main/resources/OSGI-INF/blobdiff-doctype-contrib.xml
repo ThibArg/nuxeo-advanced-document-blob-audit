@@ -4,6 +4,24 @@
   <extension target="org.nuxeo.ecm.core.schema.TypeService" point="schema">
     <schema name="blobdiff" prefix="bdiff" src="schemas/blobdiff.xsd" />
     <schema name="blobdiffsearch" prefix="bdsearch" src="schemas/blobdiffsearch.xsd" />
+
+    <!--
+      Repository indexes. Both fields are the sole predicate of a query that would otherwise scan
+      every BlobDiff of the instance, the only usable index being the one on ecm:primaryType:
+
+        - correlationId: BlobDiffWork#existingDiffId, the idempotency guard, runs once per work.
+          Its nominal outcome is *zero* match, which is precisely the case that forces a full scan.
+        - sourceId: the single predicate of the BLOB_DIFFS_FOR_DOCUMENT core query page provider,
+          public API for integrators.
+
+      Both are core repository queries - never search-engine ones - so indexOrder is the right
+      lever. Careful though: its only consumer in the platform is MongoDBIndexCreator. It has *no*
+      effect on VCS (SQL), where an index would have to be created by hand, and none on
+      Elasticsearch/OpenSearch, where there is no per-field opt-in at all - the default mapping
+      already maps every string property to a keyword through a dynamic template.
+    -->
+    <property schema="blobdiff" name="correlationId" indexOrder="ascending" />
+    <property schema="blobdiff" name="sourceId" indexOrder="ascending" />
   </extension>
 
   <extension target="org.nuxeo.ecm.core.schema.TypeService" point="doctype">

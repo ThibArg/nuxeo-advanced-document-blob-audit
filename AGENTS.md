@@ -144,6 +144,36 @@ server `messages` bundle and `I18NUtils` falls back to returning the key. That i
 by `deployment-fragment.xml`. Adding the key to `web/nuxeo.war/ui/i18n/messages*.json` alone makes
 the filter display `label.blobaudit.event.blobContentModified`.
 
+**Know where each query lands, it is not uniform.** The plugin has four query sites and they do
+not share a backend:
+
+| Site | Mechanism | Destination |
+|---|---|---|
+| `BlobDiffWork#existingDiffId:208` | `session.query` | repository, always |
+| `BlobModificationListener#previousVersionRefFallback:283` | `session.query` | repository, always |
+| `BLOB_DIFFS_FOR_DOCUMENT` | `<coreQueryPageProvider>` | repository, always |
+| `BLOB_DIFFS_ADMIN` | `SearchServicePageProvider` → `SearchService` | **the configured search client** |
+
+In LTS 2025 the default client is `repository` (`common-base/nuxeo.defaults:150`,
+`nuxeo.search.client.default.name`), and the OpenSearch search-client package flips it to
+`opensearch` through its own `nuxeo.defaults`. So `BLOB_DIFFS_ADMIN` only reaches the engine on an
+instance that has one — which is the real-world case, but not the test stack and not a bare server.
+
+Two consequences. First, `BLOB_DIFFS_FOR_DOCUMENT` is the **synchronous, read-your-writes** page
+provider: the tests depend on that and must not be moved to `SearchService`. Second,
+`RepositorySearchClient#hasCapability` returns `false` for everything including `AGGREGATE`
+(`:73-77`), and the mismatch is reported as a `SearchLimitation` rather than raised
+(`AbstractSearchResponseTransformer:54-66`) — which `SearchServicePageProvider` surfaces nowhere.
+On a bare instance the four facets of the audit page come back **silently empty**. Documented in
+the README as a prerequisite rather than worked around.
+
+**The diff body is bounded by construction, and the counters are not.** `maxDiffChars` caps the
+whole rendered body, `maxValueLength` a single unit, and both are checked **after** the entry is
+built — testing `sb.length()` beforehand lets the result overshoot by one whole entry. The cut is
+monotone, and `added` / `removed` / `changed` keep counting past the budget so they stay exact.
+Any change to `diffKeyed` or `diffPositional` must preserve all three properties.
+Coverage: `TestTextDifferBounding`.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -167,7 +197,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 200 tests (21 test classes)
+mvn -o install                                     # full build, 212 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -180,7 +210,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -214,15 +244,23 @@ Action Framework) mandatory rather than optional.
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
 improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`,
-a later correctness audit its own, numbered `COR-nn`, and a security audit its own, numbered
-`SEC-nn` / `BLD-nn`; those that turn into work get the next free number in this same list.
-**Items 1 to 11, 13 and 15 to 20 are done** (regression coverage:
+a later correctness audit its own, numbered `COR-nn`, a security audit its own, numbered
+`SEC-nn` / `BLD-nn`, and a scalability audit its own, numbered `RES-nn`; those that turn into work
+get the next free number in this same list.
+**Items 1 to 11, 13, 15 to 20 and 21 to 23 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
-`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`):
+`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
+`TestTextDifferBounding`, `TestExtractorFileBacking`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
-   full-text index and Elasticsearch.
+   full-text index and Elasticsearch. **Scope correction, see item 21**: the facet is a
+   *repository-side* switch (`FulltextConfigurationFactory`), so it stops `ecm:binarytext` being
+   computed on the `bdiff:diff` blob — which is the leak that mattered. It does **not** cover the
+   `copy_to: all_field` of the search-engine dynamic template, through which every *string*
+   property of the schema is reachable by `ecm:fulltext`. In this schema those are metadata
+   (`oldFilename`, `newFilename`, `summary`, version labels), not extracted content, so the
+   invariant holds — but for a narrower reason than originally written.
 2. Dedicated `blobDiff` WorkManager queue (`maxThreads=2`) + `getRetryCount()` = 2.
 3. Version lookup bounded to 2 rows, run with a privileged session.
 4. Deterministic work id derived from the version pair, not the random correlation id.
@@ -402,13 +440,130 @@ a later correctness audit its own, numbered `COR-nn`, and a security audit its o
     constant being read directly — so the test asserts the real behaviour without the JVM having to
     inflate a real bomb.
 
+21. *(scalability audit, finding `RES-01`)* No index on `bdiff:correlationId` nor on
+    `bdiff:sourceId`. The only usable index being the one on `ecm:primaryType`, the repository read
+    and filtered **every `BlobDiff` of the instance** on each of two queries — `BlobDiffWork#
+    existingDiffId`, the idempotency guard, run once per work; and the `BLOB_DIFFS_FOR_DOCUMENT`
+    core query page provider, public API for integrators. The `LIMIT 2` does not help: the nominal
+    outcome is *zero* match, which is exactly the case that forces the full scan.
+
+    Fixed with two `<property indexOrder="ascending">` inside the **`schema`** extension point of
+    `blobdiff-doctype-contrib.xml` — not `configuration`, see `PropertyDescriptor.java:62`.
+
+    **Three facts settled during the review, worth not re-deriving.**
+
+    - *`indexOrder` is a MongoDB mechanism and nothing else.* Its only consumer in the whole
+      platform is `MongoDBIndexCreator` (`:87-89`), called from `MongoDBConnection:314-322` at
+      repository init, idempotently (`existingIndexes.containsKey`, `:105`), over existing data. It
+      has **zero** usage in `nuxeo-core-storage-sql`: on VCS the equivalent indexes must be created
+      by hand. And zero effect on the search engine — there is no per-field opt-in there at all.
+    - *Nothing has to be deployed on OpenSearch/Elasticsearch.* `DefaultIndexingJsonWriter#
+      writeSchemas` serialises every schema with no allow-list, and the default mapping's bare
+      `match_mapping_type: "string"` dynamic template maps every string to `keyword` + doc_values +
+      `copy_to: all_field`. Term equality and `terms` aggregations on `bdiff:*` work out of the box.
+      **Do not ship a mapping fragment**: `OpenSearchComponent:101-143` only pushes a mapping when
+      the index has none (`mappingExists` is "does `GET /_mapping` answer 200", true of any existing
+      index), so a fragment would need a drop plus a full reindex, where a dynamic template needs
+      nothing — and the target component name differs between os1 and os2.
+    - *Be exact about the benefit.* The `sourceId` index serves **no UI path**: both Web UI elements
+      go through `BLOB_DIFFS_ADMIN`. It protects `BLOB_DIFFS_FOR_DOCUMENT` and the tests.
+
+    No automated coverage is possible — index creation is MongoDB behaviour, not observable from
+    `BlobAuditFeature`. Verified by `db.getCollection("default").getIndexes()` on the sandbox.
+
+22. *(scalability audit, finding `RES-02`)* Four POI call sites threw away the guarantee that
+    `MaterializedBlob` exists to provide. POI cannot reposition an `InputStream`, so
+    `WorkbookFactory.create(InputStream)` and `new XMLSlideShow(InputStream)` buffer the **whole**
+    OOXML package in heap before building the XMLBeans model, while the `File` variants open the
+    zip in random access, read only, and read the parts on demand.
+
+    `SpreadsheetExtractor:64`, `PresentationExtractor:74`, `ImageInventoryExtractor:197` and `:345`
+    now branch on `blob.getFile()`. **Two explicit branches, never a ternary inside the
+    try-with-resources**: `file != null ? create(file…) : create(blob.getStream())` leaves the
+    stream outside the resource list and leaks it if the factory throws. The `OPCPackage` is closed
+    explicitly — `XMLSlideShow.close()` does not close a package it was handed.
+
+    The stream fallback stays and is not dead code: `blob.getFile()` is null for a blob that is not
+    file-backed, and every other extractor fixture is built in memory. `extractDocx` is untouched —
+    it reads a `ZipInputStream` whose memory is already bounded by the streaming digest of item 20.
+
+    Coverage: `TestExtractorFileBacking`, which asserts **equivalence** of the two branches on the
+    three extractors plus the `maxLines` cut, and starts by asserting that both branches are
+    actually reachable so the comparisons cannot pass vacuously. The memory saving itself is not
+    dependably unit-testable; it is a manual check.
+
+23. *(scalability audit, finding `RES-03`)* `maxDiffEntries` bounded how **many** differences were
+    written, never how long they were, and nothing bounded a single extracted unit. An Excel cell
+    accepts 32 767 characters and a Word paragraph is unbounded. Measured against the unpatched
+    code: 5 000 modified worst-case cells render to **327 MB**, and 2 000 rewritten 5 000-character
+    paragraphs to **20 MB** — in one `StringBuilder`, copied by `toString()`, copied again into an
+    in-memory `StringBlob`, then encoded to bytes by the blob provider.
+
+    Two new options, `maxDiffChars` (4 MB) and `maxValueLength` (4 096), a three-argument
+    `TextDiffer` constructor, and `elide()` applied to **values and keys** — a keyed extractor is
+    free to use JSON pointers, so leaving the key unbounded would leave the per-entry size unbounded.
+
+    **The budget is checked against the rendered entry, not before building it.** The obvious form,
+    `if (sb.length() >= maxChars)`, lets the result overshoot by one whole entry — up to
+    `2 × maxValueLength` plus the key — so it cannot honour a `length() <= maxDiffChars` contract.
+    The cut is also **monotone** (`if (cut || emitted >= maxEntries)`): letting a later, shorter
+    entry through after a long one was rejected would produce a non-contiguous diff body.
+    Counters are incremented **before** the guard and stay exact past the budget; that was already
+    the behaviour and it must not change.
+
+    `merge()` moved from `BlobDiffComponent` to `TextDiffer`, which already owns `maxChars`. Each
+    side is bounded on its own, so the concatenation could otherwise reach twice the cap and the
+    image inventory would quietly undo the bound. The cut falls back to the last complete line.
+    The move had no cost: one caller, no test, and it makes the method testable in plain JUnit.
+
+    Not done, deliberately: streaming the diff to a temporary file. `DiffResult.unified` is a
+    `String` consumed by a dozen call sites and some thirty assertions; once the string is bounded
+    by construction, holding it in memory is safe and the change would buy nothing.
+
+    Known limitation, documented rather than worked around: when both sides of a modification are
+    longer than `maxValueLength` and differ only past it, the entry renders as two identical
+    prefixes (`~ key : X… -> X…`). The counters stay exact and `bdiff:changed` still reports it.
+
+    Coverage: `TestTextDifferBounding`. Four of its seven cases were checked to fail against the
+    unpatched code, with the measurements above.
+
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
+| next | 24 | S | Optional. The index of item 21 already solves the scalability problem |
 | — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
+
+
+### 24. Replace the idempotency query with a path lookup — OPTIONAL
+
+`BlobDiffWork#existingDiffId` runs an NXQL query whose answer is derivable without one: the
+`BlobDiff` path is fully deterministic, `getOrCreateContainer` giving `/change-diff/YYYY/MM/DD`
+(`BlobDiffComponent:303`) and `diffDocumentName` giving `sourceId-date.getTime()-correlationId`
+(`:513-515`). `BlobDiffWork` carries all three inputs, serialised. A `session.exists(PathRef)` would
+be O(1) and consistent within the transaction, and `bdiff:correlationId` — which has **exactly one
+reader in the whole plugin**, that query — would lose its only consumer.
+
+**Deliberately not done in the item 21-23 batch**, and the reasons should be weighed again before
+reopening:
+
+- the index already solves the scalability problem; this is an elegance gain, not a capacity one;
+- it needs new public API (`BlobDiffService#diffDocumentPath`, side-effect free —
+  `getOrCreateContainer` *creates*, so it cannot serve an existence check);
+- it touches the guard that implements item 5, whose failure mode is duplicated audit records;
+- **the naming invariant it relies on is not contractual.** `AbstractSession.createDocument:722`
+  re-reads `DESTINATION_NAME` from the options **after** firing `ABOUT_TO_CREATE`, so any listener
+  can rename the document. A correct implementation must therefore validate the doctype and
+  `bdiff:correlationId` of whatever sits at the computed path, and keep the query as a cold
+  fallback — at which point the index is still wanted.
+
+**Do not use the search engine for this.** Indexing is asynchronous by construction
+(`IndexingDomainEventProducer` → stream `source/indexing` → `ongoingIndexing`, `batchThreshold`
+250 ms, `maxRetries=4 delay=3s`; the platform's own comment says "almost real time"). The window
+between the commit of run 1 and its visibility in the index is exactly the window in which a retry
+runs, so a search-backed guard would be read-your-writes unsafe and would reintroduce item 5's bug.
 
 
 ### 12. Myers diff instead of Hirschberg — DROPPED

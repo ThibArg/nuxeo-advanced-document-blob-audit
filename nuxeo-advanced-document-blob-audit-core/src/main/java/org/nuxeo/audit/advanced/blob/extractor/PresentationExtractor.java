@@ -15,11 +15,14 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
+import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.opc.PackageAccess;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFGroupShape;
 import org.apache.poi.xslf.usermodel.XSLFNotes;
@@ -68,27 +71,51 @@ public class PresentationExtractor implements BlobTextExtractor {
         includeNotes = !"false".equalsIgnoreCase(properties.get("includeNotes"));
     }
 
+    /**
+     * Reads the slideshow from the local file whenever there is one.
+     * <p>
+     * {@code new XMLSlideShow(InputStream)} buffers the whole OOXML package in heap - POI cannot
+     * reposition a stream. Opening an {@link OPCPackage} on the file reads the parts on demand, in
+     * random access and read only.
+     * <p>
+     * The package is closed explicitly: {@link XMLSlideShow#close()} does <b>not</b> close an
+     * {@code OPCPackage} it was handed. {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob}
+     * guarantees a file on the nominal path; the stream fallback is for the blobs built in memory
+     * by the unit tests.
+     */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws Exception {
         Collector collector = new Collector(maxLines);
-        try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
-            for (XSLFSlide slide : show.getSlides()) {
-                String title = slide.getTitle();
-                if (!collector.add(SLIDE_MARKER + (title == null || title.isBlank() ? "" : ": " + title.trim()))) {
-                    break;
-                }
-                if (!collectShapes(slide.getShapes(), "", collector)) {
-                    break;
-                }
-                if (includeNotes) {
-                    XSLFNotes notes = slide.getNotes();
-                    if (notes != null && !collectNotes(notes, collector)) {
-                        break;
-                    }
-                }
+        File file = blob.getFile();
+        if (file != null) {
+            try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ);
+                    XMLSlideShow show = new XMLSlideShow(pkg)) {
+                collect(show, collector);
+            }
+        } else {
+            try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
+                collect(show, collector);
             }
         }
         return DiffableContent.positional(collector.lines, collector.truncated);
+    }
+
+    protected void collect(XMLSlideShow show, Collector collector) {
+        for (XSLFSlide slide : show.getSlides()) {
+            String title = slide.getTitle();
+            if (!collector.add(SLIDE_MARKER + (title == null || title.isBlank() ? "" : ": " + title.trim()))) {
+                return;
+            }
+            if (!collectShapes(slide.getShapes(), "", collector)) {
+                return;
+            }
+            if (includeNotes) {
+                XSLFNotes notes = slide.getNotes();
+                if (notes != null && !collectNotes(notes, collector)) {
+                    return;
+                }
+            }
+        }
     }
 
     /** @return {@code false} once maxLines has been reached */

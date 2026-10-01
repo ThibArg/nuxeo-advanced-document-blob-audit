@@ -289,6 +289,8 @@ web/nuxeo.war/ui/
     <maxBlobSize>10485760</maxBlobSize>
     <maxLines>10000</maxLines>
     <maxDiffEntries>5000</maxDiffEntries>
+    <maxDiffChars>4194304</maxDiffChars>
+    <maxValueLength>4096</maxValueLength>
     <imageAnalysisLevel>0</imageAnalysisLevel>
     <docTypes>
       <docType>Contract</docType>
@@ -309,6 +311,41 @@ Auditors group (server and Web UI):
 ```
 
 In production, restrict the feature to specific document types. Computing diffs for every binary in a repository is rarely worth the cost.
+
+### Bounding the Size of a Diff
+
+Four options bound the work, at two different stages, and they are not interchangeable:
+
+| Option | Stage | Bounds |
+|---|---|---|
+| `maxBlobSize` | before extraction | the binary that may be opened at all |
+| `maxLines` | extraction | how many units are extracted from each side |
+| `maxDiffEntries` | reporting | how **many** differences are written to the diff body |
+| `maxDiffChars` | reporting | the total **length** of the diff body, in characters |
+| `maxValueLength` | reporting | the length of a **single** rendered unit, beyond which it is elided |
+
+`maxDiffEntries` has never bounded anything but the count. An Excel cell accepts 32 767 characters and a Word paragraph is unbounded, so 5 000 entries of worst-case cells render to roughly 320 MB — accumulated in a single `StringBuilder`, copied by `toString()`, copied again into an in-memory blob, then encoded to bytes by the blob provider. `maxDiffChars` and `maxValueLength` are what make the stored diff proportional to something known in advance rather than to the content.
+
+When either cap is reached, the counters `bdiff:added`, `bdiff:removed` and `bdiff:changed` stay **exact** — counting continues past the budget — and `bdiff:truncated` is set. Only the rendering is shortened, never the accounting.
+
+> [!NOTE]
+> When both sides of a modification are longer than `maxValueLength` and only differ past it, the rendered entry shows two identical prefixes (`~ key : X… -> X…`). The modification is still counted and flagged; only that one line of the report is uninformative.
+
+### Search Engine Prerequisite
+
+The **Content changes audit** page and the document history tab are backed by `BLOB_DIFFS_ADMIN`, which goes through the LTS 2025 `SearchService`. Where the query lands depends on the deployed search client:
+
+- with the OpenSearch (or Elasticsearch) search-client package installed, the query **and its four aggregates** — status, MIME type, xpath, user — run on the engine;
+- on a bare instance, the default client is `repository` (`nuxeo.search.client.default.name`), which does not support the `AGGREGATE` capability. The listing still works, but the facet panel comes back **silently empty**: the platform reports a `SearchLimitation` on the response rather than raising, and the page provider does not surface it.
+
+A search engine is therefore a practical prerequisite for the faceted page. No mapping or configuration template has to be deployed for it: the default index mapping maps every string property to a `keyword` through a dynamic template, so `bdiff:*` is queryable and aggregatable as soon as the documents are indexed.
+
+### Repository Indexes
+
+`bdiff:correlationId` and `bdiff:sourceId` are declared with `indexOrder="ascending"`. Both are the sole predicate of a query that would otherwise scan every `BlobDiff` of the instance — the idempotency guard of `BlobDiffWork`, and the `BLOB_DIFFS_FOR_DOCUMENT` core query page provider.
+
+> [!IMPORTANT]
+> `indexOrder` is a **MongoDB** mechanism. The platform's only consumer of it is `MongoDBIndexCreator`, which builds the indexes at repository initialisation, idempotently, over existing data. On **VCS (SQL)** it has no effect at all: the equivalent indexes would have to be created by hand. It has no effect on Elasticsearch/OpenSearch either — there is no per-field opt-in there, the index mapping decides.
 
 ### Disabling the Listener
 
@@ -428,7 +465,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
 - **Positional counters are not an exact edit script.** A removal immediately followed by an addition is coalesced into a modification, so fully rewritten blocks report a mix of removals, additions and modifications (totals remain consistent).
 - **Quadratic running time.** Hirschberg keeps memory linear, but time stays O(n × m): `maxLines` must remain bounded.
-- **Truncation.** Beyond `maxLines` (extraction) or `maxDiffEntries` (reporting), the diff is partial and flagged `truncated`.
+- **Truncation.** Beyond `maxLines` (extraction), or `maxDiffEntries` / `maxDiffChars` / `maxValueLength` (reporting), the diff is partial and flagged `truncated`. The counters stay exact in every case.
 
 ### Excel
 - **Row/column insertions inflate the diff.** Keys are absolute cell references, so inserting a row shifts every cell below it (see `TestExcelDiff#testInsertingARowShiftsCellsAndInflatesTheDiff`).
