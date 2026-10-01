@@ -42,7 +42,7 @@ The third case only happens with an unusual blob provider setup: the asynchronou
 Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent.
 
 > [!NOTE]
-> `skippedTooLarge` therefore never appears as a `bdiff:status`: an over-sized blob never reaches the asynchronous work. `skippedUnsupportedType` still can, when extraction succeeds at trigger time but fails once the work runs.
+> Both skip reasons are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated blobs before extracting, so a `BlobDiff.Retry`, or a work outliving a `maxBlobSize` change, can be filed as `skippedTooLarge` or `skippedUnsupportedType`. `skippedUnsupportedType` is also what the work records when the two blobs no longer share a mime type an extractor handles. `skippedNotManaged`, on the other hand, is a skip reason only: no `BlobDiff` is ever created in that case.
 
 ### How the Version Pair Is Established
 
@@ -171,7 +171,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
-| bdiff:status | ok, skippedUnsupportedType, error (see note above on skippedTooLarge) |
+| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, error (see the note above on how the two skip statuses are reached) |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
@@ -210,12 +210,12 @@ The synchronous side must stay cheap, and the asynchronous side must be safe to 
 
 | Name | Backend | Use |
 |---|---|---|
-| `BLOB_DIFFS_ADMIN` | **Elasticsearch** | Web UI page and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
-| `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL) | Diffs of one document, without Elasticsearch |
-| `BLOB_DIFFS_OLDER_THAN` | Core (NXQL) | Retention scripts |
+| `BLOB_DIFFS_ADMIN` | `SearchService` → **the configured search client** | Web UI page and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
+| `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL), always the repository | Diffs of one document, synchronous and read-your-writes |
+| `BLOB_DIFFS_OLDER_THAN` | Core (NXQL), always the repository | Retention scripts |
 
 > [!NOTE]
-> `BLOB_DIFFS_ADMIN` is declared in `blobdiff-pageproviders-contrib.xml`, which is **not** guarded by a `<require>` on `org.nuxeo.elasticsearch.ElasticSearchComponent`. It relies on `SearchServicePageProvider`, backed by the LTS 2025 `SearchService` abstraction. Adding the `<require>` so the component stays pending instead of failing where no search engine is deployed is a pending task (see `AGENTS.md`).
+> `BLOB_DIFFS_ADMIN` relies on `SearchServicePageProvider`, which lives in `nuxeo-platform-query-api`, **not** in the Elasticsearch bundle — so its component always registers. Adding a `<require>` on `org.nuxeo.elasticsearch.ElasticSearchComponent` would be harmful rather than missing: it would keep the whole contribution — `BLOB_DIFFS_FOR_DOCUMENT` included — pending on any instance without a search engine, and in the tests. What does need a search engine is the *execution*: `SearchService` is resolved at query time. See "Search Engine Prerequisite" below for what happens without one.
 
 ## Web UI
 
@@ -490,7 +490,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 ### Security and Operations
 - **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
 - **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule it yourself for automatic retention, following the three-step asynchronous sequence described above.
-- **Elasticsearch required** for the Web UI listing and tab (`BLOB_DIFFS_ADMIN`).
+- **A search engine is a practical prerequisite** for the Web UI listing and tab (`BLOB_DIFFS_ADMIN`). Without one the listing still works, but the facet panel comes back silently empty — see "Search Engine Prerequisite" above.
 - **Retry** only works for diffs created from 1.2 on (binary keys stored), and as long as the binaries are still in the blob store (the binaries garbage collector may have removed an unreferenced old version).
 - **Web UI access** is based on the auditors group name exposed in `Nuxeo.UI.config`: overriding `<auditorsGroup>` without the configuration property desynchronises the UI (the server stays correct).
 - `blobContentModified` must be declared both in the audit route and in the `eventTypes` vocabulary, or entries are lost / hidden.
