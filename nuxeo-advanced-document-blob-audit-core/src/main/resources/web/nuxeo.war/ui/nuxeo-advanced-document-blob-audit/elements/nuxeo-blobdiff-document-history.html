@@ -57,6 +57,12 @@
       },
       _openAll: function () {
         Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': this.document.uid });
+      },
+      _versionPair: function (previousLabel, newLabel) {
+        return (previousLabel || '?') + ' → ' + (newLabel || '?');
+      },
+      _versionIds: function (previousId, newId) {
+        return [previousId, newId].filter(Boolean).join(' → ');
       }
     });
   </script>
