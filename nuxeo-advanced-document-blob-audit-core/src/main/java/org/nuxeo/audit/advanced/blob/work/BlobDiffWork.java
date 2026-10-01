@@ -29,6 +29,7 @@ import java.util.Date;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffService;
+import org.nuxeo.audit.advanced.blob.DiffEligibility;
 import org.nuxeo.audit.advanced.blob.DiffResult;
 import org.nuxeo.audit.advanced.blob.FrozenBlobs;
 import org.nuxeo.audit.advanced.blob.VersionContext;
@@ -278,16 +279,23 @@ public class BlobDiffWork extends AbstractWork {
                     newBlobKey, docId, xpath);
             status = STATUS_ERROR;
         } else {
-            try {
-                result = service.diff(oldBlob, newBlob);
-                if (result == null) {
-                    // Since COR-01, a null can only mean "no extractor for that mime type": an
-                    // extraction that fails raises and lands in the catch below, as an error.
-                    status = STATUS_SKIPPED_TYPE;
+            String ineligible = ineligibleStatus(service, source.getType(), oldBlob, newBlob);
+            if (ineligible != null) {
+                log.warn("Frozen blob pair for {} ({}) is no longer eligible for a diff ({}), recording the skip",
+                        docId, xpath, ineligible);
+                status = ineligible;
+            } else {
+                try {
+                    result = service.diff(oldBlob, newBlob);
+                    if (result == null) {
+                        // Since COR-01, a null can only mean "no extractor for that mime type": an
+                        // extraction that fails raises and lands in the catch below, as an error.
+                        status = STATUS_SKIPPED_TYPE;
+                    }
+                } catch (RuntimeException e) {
+                    log.warn("Blob diff failed for {} ({})", docId, xpath, e);
+                    status = STATUS_ERROR;
                 }
-            } catch (RuntimeException e) {
-                log.warn("Blob diff failed for {} ({})", docId, xpath, e);
-                status = STATUS_ERROR;
             }
         }
 
@@ -297,6 +305,37 @@ public class BlobDiffWork extends AbstractWork {
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");
+    }
+
+    /**
+     * Re-evaluates {@code maxBlobSize} and the mime type whitelist at work time.
+     * <p>
+     * The eligibility decided at check-in can be stale by the time the work runs: the queue is
+     * asynchronous, and {@code BlobDiff.Retry} replays a pair that was frozen arbitrarily long ago
+     * with no eligibility check of its own. Lowering {@code maxBlobSize} or disabling an extractor
+     * would otherwise leave queued and replayable works free to extract what the configuration now
+     * forbids.
+     * <p>
+     * <b>This is not the security boundary of {@code BlobDiff.Retry}</b>, and must not be mistaken
+     * for one: the length compared here comes from {@code BlobInfo}, which {@code resolveBlob}
+     * fills from {@code bdiff:oldLength} / {@code bdiff:newLength} - document properties, hence
+     * forgeable. What stops a forged input is
+     * {@code BlobDiffRetryOp#checkProvenance}. This check is about configuration drift, plus
+     * defence in depth.
+     * <p>
+     * {@code NOT_APPLICABLE} is deliberately <b>not</b> a skip: it means the feature was turned off
+     * or the xpath left the watched set, which says nothing about the binary. Filing it as
+     * {@code skippedTooLarge} or {@code skippedUnsupportedType} would record a reason that is not
+     * the real one. {@link DiffEligibility#getSkipReason()} returns {@code null} for it already, so
+     * the work simply carries on. The audit entry written at check-in carries a
+     * {@code diffCorrelationId}, so a {@code BlobDiff} has to exist for it either way.
+     *
+     * @return {@code STATUS_SKIPPED_SIZE}, {@code STATUS_SKIPPED_TYPE}, or {@code null} to diff
+     * @since 2025.4
+     */
+    protected String ineligibleStatus(BlobDiffService service, String docType, Blob oldBlob, Blob newBlob) {
+        return DiffEligibility.combine(service.getEligibility(docType, xpath, oldBlob),
+                service.getEligibility(docType, xpath, newBlob)).getSkipReason();
     }
 
     /** Re-hydrates one frozen side of the comparison through its blob provider. */

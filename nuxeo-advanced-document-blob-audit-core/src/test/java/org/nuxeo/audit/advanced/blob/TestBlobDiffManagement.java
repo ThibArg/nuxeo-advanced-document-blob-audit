@@ -135,6 +135,16 @@ public class TestBlobDiffManagement {
         fail("expected a DocumentSecurityException, got " + e);
     }
 
+    /** Pins <b>why</b> an operation refused, so an incidental failure cannot pass for the guard. */
+    protected void assertRefusedBecause(Exception e, String marker) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && t.getMessage().contains(marker)) {
+                return;
+            }
+        }
+        fail("expected a failure mentioning \"" + marker + "\", got " + e);
+    }
+
     protected List<DocumentModel> diffsOf(String sourceId) {
         return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + sourceId + "'");
     }
@@ -193,9 +203,13 @@ public class TestBlobDiffManagement {
      * A refused operation marks the current transaction rollback-only (automation behaviour), which
      * leaves the test without an active transaction afterwards. Each refused call therefore runs in
      * its own transaction, and a fresh one is started before the final checks.
+     * <p>
+     * {@code BlobDiff.Retry} was the one operation of the six with no such coverage (BLD-04): it
+     * was tested for its type and status preconditions only, never for its permission guard - the
+     * guard that stands between a member and a privileged read of any binary in the repository.
      */
     @Test
-    public void testNonAuditorCannotDeleteOrPurge() throws Exception {
+    public void testNonAuditorCannotDeletePurgeOrRetry() throws Exception {
         DocumentModel source = file("protected", textBlob("x", "text/plain", "x.txt"));
         DocumentModel d = diff(source, daysAgo(10), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
         txFeature.nextTransaction();
@@ -203,6 +217,7 @@ public class TestBlobDiffManagement {
         assertRefusedForJdoe(BlobDiffPurgeOp.ID, null, java.util.Map.of("before", Calendar.getInstance()));
         // jdoe cannot even read the diff; the auditor check is performed before any access
         assertRefusedForJdoe(BlobDiffDeleteOp.ID, d, null);
+        assertRefusedForJdoe(BlobDiffRetryOp.ID, d, null);
 
         restartTransaction();
         assertTrue("a refused operation must not delete anything", session.exists(d.getRef()));
@@ -276,6 +291,86 @@ public class TestBlobDiffManagement {
                 // expected
             }
         }
+    }
+
+    /**
+     * SEC-01: {@code BlobDiff.Retry} replays a pair of storage keys read off the input document, and
+     * {@code BlobDiffWork} re-reads them in a <b>system session</b> through
+     * {@code provider.readBlob(info)}. A blob provider is a store keyed by an opaque string: that
+     * call enforces no document ACL at all, and the extracted content then lands under
+     * {@code /change-diff}, where the caller - an auditor - can read it.
+     * <p>
+     * The document type and {@code bdiff:status} were the only checks, and both sit on the input.
+     * {@code AbstractSession.createDocument} calls {@code parent.addChild(name, type)} without
+     * consulting the allowed subtypes - a {@code TypeManager} concern, hence a UI one - so an
+     * auditor who is explicitly <b>not</b> an administrator could forge a {@code BlobDiff} in their
+     * own space, point it at someone else's binary and have the platform extract it for them.
+     * <p>
+     * The path is what establishes provenance, and it is checked before a single property of the
+     * input is read.
+     */
+    @Test
+    public void testRetryRefusesADiffCreatedOutsideTheContainer() throws Exception {
+        DocumentModel victim = file("victim", textBlob("confidential", "text/plain", "secret.txt"));
+        ManagedBlob target = storedBlob(victim);
+
+        DocumentModel forged = session.createDocumentModel("/", "forged", BlobAuditConstants.DIFF_DOCTYPE);
+        forged.setPropertyValue(BlobAuditConstants.XP_STATUS, BlobAuditConstants.STATUS_ERROR);
+        forged.setPropertyValue(BlobAuditConstants.XP_SOURCE_ID, victim.getId());
+        forged.setPropertyValue(BlobAuditConstants.XP_XPATH, "file:content");
+        forged.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_PROVIDER, target.getProviderId());
+        forged.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, target.getKey());
+        forged.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_PROVIDER, target.getProviderId());
+        forged.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY, target.getKey());
+        forged = session.createDocument(forged);
+        session.save();
+        assertFalse("the fixture must really sit outside the container",
+                forged.getPathAsString().startsWith("/" + BlobAuditConstants.CONTAINER_NAME + "/"));
+        txFeature.nextTransaction();
+
+        try {
+            run(session, BlobDiffRetryOp.ID, session.getDocument(forged.getRef()), null);
+            fail("a BlobDiff forged outside /change-diff must not be replayed");
+        } catch (Exception e) {
+            assertRefusedBecause(e, "Not a managed BlobDiff");
+        }
+
+        restartTransaction();
+        assertTrue("the refusal must leave the forged document alone, not consume it",
+                session.exists(forged.getRef()));
+    }
+
+    /**
+     * SEC-01, second half: the retry path went straight past {@code getEligibility}, so neither
+     * {@code maxBlobSize} nor the mime type whitelist applied to a replayed pair.
+     * <p>
+     * The work re-evaluates both now. That also covers the queue simply being asynchronous: a work
+     * scheduled while the blob was eligible must not extract what the configuration forbids by the
+     * time it runs. {@code skippedTooLarge} therefore became a reachable {@code bdiff:status},
+     * which it was not before.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-smallblob-config.xml")
+    public void testRetryDoesNotExtractABlobThatIsNoLongerEligible() throws Exception {
+        String big = "alpha\n".repeat(200); // comfortably over the 512 bytes cap of that config
+        DocumentModel v1 = file("big-v1", textBlob(big + "one", "text/plain", "notes.txt"));
+        DocumentModel v2 = file("big-v2", textBlob(big + "two", "text/plain", "notes.txt"));
+        ManagedBlob b1 = storedBlob(v1);
+        ManagedBlob b2 = storedBlob(v2);
+        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
+                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        txFeature.nextTransaction();
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(v2.getId());
+        assertEquals("the failed diff must still be replaced, not duplicated", 1, diffs.size());
+        assertEquals("an over-sized pair must be recorded as skipped, not extracted",
+                BlobAuditConstants.STATUS_SKIPPED_SIZE, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertNull("nothing may be extracted from a blob the configuration no longer allows",
+                diffs.get(0).getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB));
     }
 
     /**

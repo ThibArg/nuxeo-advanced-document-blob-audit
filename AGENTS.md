@@ -83,9 +83,24 @@ document as a binary change even when the binary never moved. `NOT_APPLICABLE` s
 before `sameContent` and stays fully silent; `TOO_LARGE` and `UNSUPPORTED_TYPE` only produce an
 entry once the digests are known to differ. Coverage: `TestBlobDiffSkipReporting`.
 
-`skippedTooLarge` is **not** a reachable `bdiff:status` (an over-sized blob never reaches the work,
-so no `BlobDiff` is created); `skippedUnsupportedType` still is, set by `BlobDiffWork` when
-`service.diff()` returns `null` at work time. The purge dialog offers only the latter.
+Both skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
+`BlobDiffWork` when `service.diff()` returns `null` at work time; `skippedTooLarge` **became**
+reachable with SEC-01, because the work now re-evaluates `getEligibility` on the rehydrated blobs
+(`BlobDiffWork#ineligibleStatus`) — a retry, or a work outliving a `maxBlobSize` change, can fail
+it. The purge dialog offers both. This reverses an earlier note claiming `skippedTooLarge` could
+never be persisted; that was true only of the check-in path.
+
+**`BlobDiff.Retry` trusts nothing on its input but the path.** The operation replays the provider
+id and the storage key persisted on the document, and `BlobDiffWork` re-reads them in a *system
+session* through `provider.readBlob(info)` — a keyed store lookup, subject to **no document ACL**.
+The doctype and `bdiff:status` checks are both on attacker-controlled properties, and
+`AbstractSession.createDocument` does not enforce allowed subtypes (that is `TypeManager`, i.e. UI).
+`BlobDiffRetryOp#checkProvenance` therefore rejects anything outside `/change-diff/` **before a
+single property is read**, and it must stay the first thing after `checkAuditor`.
+The eligibility recheck in the work is *not* a substitute: the length it compares comes from
+`BlobInfo`, which `resolveBlob` fills from `bdiff:oldLength` / `bdiff:newLength` — forgeable.
+Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
+`#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
 **The `blobDiffPurge` bulk action must stay off the HTTP surface.** `httpEnabled` is left to its
 default `false`, which is what keeps it out of `Bulk.RunAction` and of the
@@ -152,7 +167,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 196 tests (21 test classes)
+mvn -o install                                     # full build, 200 tests (21 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -199,11 +214,12 @@ Action Framework) mandatory rather than optional.
 
 A full architecture review was run on the plugin. The architecture was judged sound; fourteen
 improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`,
-and a later correctness audit its own, numbered `COR-nn`; those that turn into work get the next
-free number in this same list. **Items 1 to 11, 13 and 15 to 17 are done** (regression coverage:
+a later correctness audit its own, numbered `COR-nn`, and a security audit its own, numbered
+`SEC-nn` / `BLD-nn`; those that turn into work get the next free number in this same list.
+**Items 1 to 11, 13 and 15 to 20 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
-`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`):
+`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`):
 
 1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
    full-text index and Elasticsearch.
@@ -300,6 +316,91 @@ free number in this same list. **Items 1 to 11, 13 and 15 to 17 are done** (regr
     `TestBlobDiffImageExtraction#testAFailingImageInventoryStillYieldsTheTextDiff` (which injects
     the failure through `FailingImageExtractor` + `blobaudit-test-failingimage-contrib.xml`,
     there being no dependable binary that the text converter reads and the inventory chokes on).
+
+18. *(security audit, finding `SEC-01`)* `BlobDiff.Retry` decrypted caller-supplied storage keys.
+    The operation validated the doctype and `bdiff:status` — two properties of the input — then
+    handed the persisted provider id and key to `BlobDiffWork`, which opens a **system session** and
+    calls `provider.readBlob(info)`. A blob provider is a store keyed by an opaque string: that call
+    applies **no document ACL**. The extracted content then landed in `bdiff:diff` under
+    `/change-diff`, readable by the caller. Reachable because
+    `AbstractSession.createDocument` calls `parent.addChild(name, type)` without consulting the
+    allowed subtypes — a `TypeManager` concern, hence a UI one — so an auditor who is explicitly
+    *not* an administrator could create a `BlobDiff` in their own space, set `bdiff:status=error`
+    plus the keys of their choice, and have the platform extract any binary of the repository for
+    them.
+
+    Two changes, and only the first is a security boundary:
+
+    - `BlobDiffRetryOp#checkProvenance` rejects anything whose path is not under `/change-diff/`,
+      **before a single property of the input is read**. It sits immediately after `checkAuditor`
+      and must stay there.
+    - `BlobDiffWork#ineligibleStatus` re-evaluates `getEligibility` on the rehydrated blobs, before
+      `service.diff`. The retry path bypassed `maxBlobSize` and the mime type whitelist entirely;
+      so does any queued work that outlives a configuration change. **This one is not a boundary**:
+      the length it compares comes from `BlobInfo`, which `resolveBlob` fills from
+      `bdiff:oldLength` / `bdiff:newLength` — document properties, hence forgeable. It covers
+      configuration drift and nothing more. Do not present it as the fix for the forged input.
+
+    Two design points were settled rather than inferred. `NOT_APPLICABLE` at work time (feature
+    switched off, xpath out of scope) is **not** turned into a skip status: it says nothing about
+    the binary, and `getSkipReason()` already returns `null` for it, so the work simply carries on.
+    And a retry that is no longer eligible **replaces** the `error` diff with a skipped one, like
+    the nominal path: the audit entry carries a `diffCorrelationId`, so a `BlobDiff` has to exist
+    for it either way. The cost is accepted — `BlobDiff.Retry` only accepts `error`, so that diff
+    is no longer replayable once it is filed as skipped.
+
+    Consequence to remember: `skippedTooLarge` **became** a reachable `bdiff:status`, and the purge
+    dialog now offers it. See the invariant above.
+
+    Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer` and
+    `#testRetryDoesNotExtractABlobThatIsNoLongerEligible` (which deploys
+    `blobaudit-test-smallblob-config.xml` on the method). Both were checked to fail against the
+    unpatched code — the first accepted the forged document, the second recorded `ok`.
+
+19. *(security audit, finding `BLD-04`)* Five of the six operations had a refusal test for a
+    non-auditor; `BlobDiff.Retry` had none, only type and status precondition tests. It was the one
+    operation where the missing guard leads to a privileged read (see 18).
+    `TestBlobDiffManagement#testNonAuditorCannotDeleteOrPurge` became
+    `#testNonAuditorCannotDeletePurgeOrRetry`.
+
+20. *(security audit, findings `SEC-02` and `SEC-04`)* Zip bomb and heap blow-up in
+    `ImageInventoryExtractor`, both fixed by the same streaming digest.
+
+    `SEC-02`, the DOCX path: `zip.readAllBytes()` on a `word/media/` entry allocates an array of the
+    **inflated** size, unbounded. `java.util.zip.ZipInputStream` has none of POI's `ZipSecureFile`
+    protections, and the only upstream guard, `getEligibility`, compares the **deflated** size of
+    the container to `maxBlobSize`. Ten megabytes of deflate expand to gigabytes — times two
+    concurrent works on the `blobDiff` queue, times the two extra runs of `getRetryCount()`.
+    Reachable by anyone able to version a `.docx` as soon as `imageAnalysisLevel > 0`.
+
+    `SEC-04`, the PDF path: `image.createInputStream()` returns the stream PDFBox has already
+    **decoded**, and `transferTo` into a `ByteArrayOutputStream` plus `toByteArray()` held two full
+    copies of it. Treated here rather than in its own pass because it is the same file and reuses
+    the same helper.
+
+    `digestStream` computes SHA-256 in 8 KB chunks and gives up past `maxImageBytes()` (32 MB),
+    returning `null`; the entry is dropped and the inventory is flagged `truncated`. It does **not**
+    close its argument — the DOCX loop iterates over a shared `ZipInputStream`. Two cheap
+    pre-checks sit in front of it: `isInflationBomb` on the declared zip sizes (POI's ratio of 100,
+    with POI's grace size of 100 KB below which the ratio means nothing) and `exceedsPixelBudget` on
+    `width × height × bitsPerComponent`, which rejects a PDF image before a byte is decoded.
+
+    Both pre-checks are **opportunistic, by construction**. Read through a `ZipInputStream`, an
+    entry whose sizes live in a trailing data descriptor reports `-1` for both, and that is what POI
+    produces — measured: on the test fixture it is `digestStream` that fires, not the ratio.
+    `exceedsPixelBudget` ignores the component count, so it under-estimates a RGB image threefold;
+    that is the safe direction for a pre-check. `digestStream` is the guard that always applies.
+
+    On the PDF path the ordinal advances even for a dropped image: keys there are positional, so
+    renumbering one side would make every following image look changed. `collectPdfResources` grew
+    a `boolean[] dropped` out-parameter because its return value already means "the `maxLines`
+    budget is exhausted, stop", and an over-sized image must be skipped **without** ending the walk.
+
+    Coverage: `TestImageInventoryExtractor#testAnOverSizedWordImageIsDroppedInsteadOfBuffered` and
+    `#testAnOverSizedPdfImageIsDroppedInsteadOfBuffered`. Both go through a `CappedExtractor`
+    subclass overriding `maxImageBytes()` — which is why that method exists rather than the
+    constant being read directly — so the test asserts the real behaviour without the JVM having to
+    inflate a real bomb.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

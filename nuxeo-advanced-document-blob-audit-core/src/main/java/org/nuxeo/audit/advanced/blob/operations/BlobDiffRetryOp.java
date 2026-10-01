@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob.operations;
 
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
@@ -70,12 +71,16 @@ public class BlobDiffRetryOp {
 
     public static final String ID = "BlobDiff.Retry";
 
+    /** Every {@code BlobDiff} the plugin creates lives under this path, and nothing else does. */
+    protected static final String CONTAINER_PATH_PREFIX = "/" + CONTAINER_NAME + "/";
+
     @Context
     protected CoreSession session;
 
     @OperationMethod
     public DocumentModel run(DocumentModel diff) {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
+        checkProvenance(diff);
         if (!DIFF_DOCTYPE.equals(diff.getType())) {
             throw new NuxeoException("Not a BlobDiff document: " + diff.getId(), 400);
         }
@@ -108,6 +113,36 @@ public class BlobDiffRetryOp {
         work.withReplaceDiffId(diff.getId());
         Framework.getService(WorkManager.class).schedule(work, true);
         return diff;
+    }
+
+    /**
+     * Refuses anything that does not come from {@code /change-diff}, <b>before a single property of
+     * the input is read</b>.
+     * <p>
+     * The operation replays a diff from the provider id and the storage key persisted on the
+     * document, and {@link org.nuxeo.audit.advanced.blob.work.BlobDiffWork} re-reads them through
+     * {@code provider.readBlob(info)} in a <b>system session</b>. A blob provider is a store keyed
+     * by an opaque string: {@code readBlob} enforces no document ACL whatsoever. The extracted
+     * content then lands in {@code bdiff:diff} under {@code /change-diff}, where the caller can read
+     * it.
+     * <p>
+     * The document type and the {@code bdiff:status} were the only checks, and both are attacker
+     * controlled: {@code AbstractSession.createDocument} calls {@code parent.addChild(name, type)}
+     * without consulting the allowed subtypes - that is a {@code TypeManager} concern, so a UI one.
+     * An auditor, explicitly <b>not</b> an administrator, could therefore create a {@code BlobDiff}
+     * in their own workspace, set {@code bdiff:status=error} plus the keys of their choice, and have
+     * the platform decrypt any binary of the repository for them.
+     * <p>
+     * The path is the provenance: the plugin creates diffs nowhere else, and {@code /change-diff} is
+     * ACL-restricted to the auditors group, so a document sitting there was put there by the plugin.
+     *
+     * @since 2025.4
+     */
+    protected void checkProvenance(DocumentModel diff) {
+        String path = diff == null ? null : diff.getPathAsString();
+        if (path == null || !path.startsWith(CONTAINER_PATH_PREFIX)) {
+            throw new NuxeoException("Not a managed BlobDiff: " + path, 400);
+        }
     }
 
     protected String repo(DocumentModel diff) {
