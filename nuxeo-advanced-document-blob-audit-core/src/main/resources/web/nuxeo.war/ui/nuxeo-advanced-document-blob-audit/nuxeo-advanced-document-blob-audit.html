@@ -3,11 +3,17 @@
 
   Registered through org.nuxeo.ecm.platform.WebResources (OSGI-INF/blobaudit-webui-contrib.xml).
   Contributes:
-    - a main drawer entry + page listing every BlobDiff (auditors and "administrators" only)
+    - a named search "blobdiffs": drawer entry + form on the left, results in the main area,
+      exactly like the platform searches (auditors and "administrators" only)
     - a "Content changes" tab on documents holding files (same audience)
 
   Visibility in the UI is cosmetic: the real protection is the ACL of /change-diff and the
   server-side checks of the BlobDiff.* operations.
+
+  The two halves of the search are never parent and child. nuxeo-app matches them by string:
+  _updateSearch() resolves this.$$("[search-name='<app.searchName>']") in its own shadow root and
+  binds whatever it finds into the single, hardcoded <nuxeo-search-page name="search">. The
+  markup of each half is loaded at runtime from ui/search/blobdiffs/, by filename convention.
 -->
 <link rel="import" href="elements/nuxeo-blobdiff-common.html">
 <link rel="import" href="elements/nuxeo-blobdiff-source-link.html">
@@ -15,32 +21,52 @@
 <link rel="import" href="elements/nuxeo-blobdiff-viewer.html">
 <link rel="import" href="elements/nuxeo-blobdiff-delete-dialog.html">
 <link rel="import" href="elements/nuxeo-blobdiff-purge-dialog.html">
-<link rel="import" href="elements/nuxeo-blobdiff-search-page.html">
-<link rel="import" href="elements/nuxeo-blobdiff-drawer.html">
 <link rel="import" href="elements/nuxeo-blobdiff-document-history.html">
 
-<!-- Main drawer: icon -->
+<!--
+  Main drawer: icon. route="search:blobdiffs" gives the anchor an href to /search/blobdiffs, so a
+  single click both opens the drawer and brings the results to the front. The platform searches
+  omit it and only open the drawer, leaving the main area on the previous page until a filter
+  changes; for an audit entry point that is one click too many.
+-->
 <nuxeo-slot-content name="blobdiffsDrawerItem" slot="DRAWER_ITEMS" order="95">
   <template>
     <nuxeo-filter user="[[user]]" expression="Nuxeo.BlobAudit.isAuditor(user)">
       <template>
-        <nuxeo-menu-icon name="blobdiffs" icon="icons:compare-arrows" label="label.blobaudit.drawer"></nuxeo-menu-icon>
+        <nuxeo-menu-icon name="blobdiffs" route="search:blobdiffs" icon="icons:compare-arrows"
+                         label="label.blobaudit.drawer"></nuxeo-menu-icon>
       </template>
     </nuxeo-filter>
   </template>
 </nuxeo-slot-content>
 
-<!-- Main drawer: panel shown when the icon is selected -->
+<!--
+  Main drawer: the search form.
+
+  Two things here are load-bearing and look like style:
+
+  - search-name MUST be a literal attribute. searchName is not reflectToAttribute on
+    nuxeo-search-form, so search-name="[[...]]" would set the property and leave no attribute,
+    nuxeo-app's attribute selector would match nothing, and the results pane would stay empty
+    for ever with no error anywhere.
+  - name goes on the inner element, never on the nuxeo-filter. nuxeo-filter stamps its template
+    into its OWN PARENT, as a sibling of itself, so it is nuxeo-search-form that ends up being a
+    child of iron-pages#drawer-pages and therefore the node its attr-for-selected="name" sees.
+    Putting name on the filter would select an element that renders nothing and hide the form.
+-->
 <nuxeo-slot-content name="blobdiffsDrawerPage" slot="DRAWER_PAGES">
   <template>
-    <nuxeo-blobdiff-drawer name="blobdiffs" user="[[user]]"></nuxeo-blobdiff-drawer>
-  </template>
-</nuxeo-slot-content>
-
-<!-- Main content area: full-width listing -->
-<nuxeo-slot-content name="blobdiffsPage" slot="PAGES">
-  <template>
-    <nuxeo-blobdiff-search-page name="blobdiffs" user="[[user]]"></nuxeo-blobdiff-search-page>
+    <nuxeo-filter user="[[user]]" expression="Nuxeo.BlobAudit.isAuditor(user)">
+      <template>
+        <nuxeo-search-form name="blobdiffs"
+                           search-name="blobdiffs"
+                           auto
+                           provider="BLOB_DIFFS_ADMIN"
+                           schemas="dublincore,blobdiff"
+                           enrichers="blobDiffSource"
+                           page-size="40"></nuxeo-search-form>
+      </template>
+    </nuxeo-filter>
   </template>
 </nuxeo-slot-content>
 

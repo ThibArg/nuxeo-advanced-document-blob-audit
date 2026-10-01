@@ -106,7 +106,7 @@
         this.$.retryOp.execute()
           .then(function () {
             this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
-            Nuxeo.BlobAudit.openPage();
+            Nuxeo.BlobAudit.openSearch();
           }.bind(this))
           .catch(function (err) {
             this.fire('notify', { message: this.i18n('label.blobaudit.retry.failed') + ' ' + (err && err.message || '') });
@@ -114,10 +114,10 @@
       },
       _delete: function () {
         this.$.deleteDialog.open([this.document]).then(function (deleted) {
-          if (deleted) { Nuxeo.BlobAudit.openPage(); }
+          if (deleted) { Nuxeo.BlobAudit.openSearch(); }
         });
       },
-      _backToList: function () { Nuxeo.BlobAudit.openPage(); }
+      _backToList: function () { Nuxeo.BlobAudit.openSearch(); }
     });
   </script>
 </dom-module>

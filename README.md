@@ -210,9 +210,11 @@ The synchronous side must stay cheap, and the asynchronous side must be safe to 
 
 | Name | Backend | Use |
 |---|---|---|
-| `BLOB_DIFFS_ADMIN` | `SearchService` → **the configured search client** | Web UI page and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
+| `BLOB_DIFFS_ADMIN` | `SearchService` → **the configured search client** | Web UI search and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
 | `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL), always the repository | Diffs of one document, synchronous and read-your-writes |
-| `BLOB_DIFFS_OLDER_THAN` | Core (NXQL), always the repository | Retention scripts |
+
+> [!IMPORTANT]
+> The filter keys sent by the UI keep their **`bdsearch:` prefix** — `bdsearch:sourceId`, not `sourceId`. A prefixed key is resolved deterministically through the schema prefix registry; a bare key is resolved by iterating the schemas of the search document, where a generic name such as `user` can collide with another schema. Note also that the search document type is declared with `<searchDocumentType>`, a **sibling** of `<whereClause>` — `whereClause@docType` is not part of the descriptor and XMap drops it silently.
 
 > [!NOTE]
 > `BLOB_DIFFS_ADMIN` relies on `SearchServicePageProvider`, which lives in `nuxeo-platform-query-api`, **not** in the Elasticsearch bundle — so its component always registers. Adding a `<require>` on `org.nuxeo.elasticsearch.ElasticSearchComponent` would be harmful rather than missing: it would keep the whole contribution — `BLOB_DIFFS_FOR_DOCUMENT` included — pending on any instance without a search engine, and in the tests. What does need a search engine is the *execution*: `SearchService` is resolved at query time. See "Search Engine Prerequisite" below for what happens without one.
@@ -221,13 +223,20 @@ The synchronous side must stay cheap, and the asynchronous side must be safe to 
 
 Available to members of `administrators` and of the auditors group only.
 
-- **Main drawer entry "Content changes audit"**: full-width listing of every `BlobDiff`, including the exact version transition, with filters (date range, source document via `nuxeo-document-suggestion`, user, truncated only) and facets (status, format, field, user). Actions: open, go to the source, filter on the source, download the diff, retry (errors only), **permanent deletion** of the selection, and **purge** before a date (optionally for one status).
-- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save.
+- **"Content changes audit" search**, reached from its own drawer entry. It is a *named search*, built exactly like the platform ones: the **search form sits in the drawer on the left**, the **results fill the main area on the right**. Filters: date range, source document (`nuxeo-document-suggestion`), user, truncated only. Facets: status, format, field, user. Clicking the drawer icon opens the form and brings the results to the front in one go.
+
+  The results table is a standard `nuxeo-results`, so it comes with the platform sort selector, the selection toolbar, CSV export, and **per-user column preferences** (show/hide, resize, reorder) persisted in local storage. Row actions: open, go to the source, filter on the source, download the diff, retry (errors only). Selection action: **permanent deletion**. Toolbar action: **purge** before a date, optionally for one status.
+
+  Saved searches work as they do everywhere else: an auditor can store a set of filters from the drawer header and share it.
+- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search with the source pre-filtered.
 - **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
 
 Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.
 
 Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the server checks of the operations.
+
+> [!NOTE]
+> A user who is **not** an auditor and navigates to `#!/search/blobdiffs` by hand gets an empty results pane rather than an explicit refusal: the drawer form is filtered out, so Web UI has no search to bind and stamps nothing. The server-side checks are what actually deny access.
 
 ### Server Side
 
@@ -274,10 +283,16 @@ web/nuxeo.war/ui/
 ├── i18n/
 │   ├── messages.json
 │   └── messages-fr.json
+├── search/blobdiffs/                             (resolved at runtime by filename, see below)
+│   ├── nuxeo-blobdiffs-search-form.html          (left pane, stamped in the drawer)
+│   └── nuxeo-blobdiffs-search-results.html       (right pane, stamped in the main area)
 └── nuxeo-advanced-document-blob-audit/
-    ├── nuxeo-advanced-document-blob-audit.html   (slots: DRAWER_ITEMS/PAGES, PAGES, DOCUMENT_VIEWS_*)
-    └── elements/                                 (search page, drawer, tab, viewer, dialogs, badges)
+    ├── nuxeo-advanced-document-blob-audit.html   (slots: DRAWER_ITEMS, DRAWER_PAGES, DOCUMENT_VIEWS_*)
+    └── elements/                                 (tab, viewer, dialogs, badges, source link)
 ```
+
+> [!IMPORTANT]
+> The two files under `search/blobdiffs/` are **not** imported by the bundle. Web UI resolves them at runtime from a hardcoded convention — `<hrefBase><searchName>/nuxeo-<searchName>-search-form.html`, lowercased, `hrefBase` falling back to `/ui/search/` on a server — and `nuxeo-layout` derives the custom element name from the file name. The folder name, the two file names and the two `dom-module` ids must therefore stay in lockstep with `search-name="blobdiffs"`. Get one wrong and the pane renders *"Failed to find search layout for blobdiffs"* (or silently nothing), with no other diagnostic.
 
 ## Configuration
 
@@ -333,12 +348,12 @@ When either cap is reached, the counters `bdiff:added`, `bdiff:removed` and `bdi
 
 ### Search Engine Prerequisite
 
-The **Content changes audit** page and the document history tab are backed by `BLOB_DIFFS_ADMIN`, which goes through the LTS 2025 `SearchService`. Where the query lands depends on the deployed search client:
+The **Content changes audit** search and the document history tab are backed by `BLOB_DIFFS_ADMIN`, which goes through the LTS 2025 `SearchService`. Where the query lands depends on the deployed search client:
 
 - with the OpenSearch (or Elasticsearch) search-client package installed, the query **and its four aggregates** — status, MIME type, xpath, user — run on the engine;
 - on a bare instance, the default client is `repository` (`nuxeo.search.client.default.name`), which does not support the `AGGREGATE` capability. The listing still works, but the facet panel comes back **silently empty**: the platform reports a `SearchLimitation` on the response rather than raising, and the page provider does not surface it.
 
-A search engine is therefore a practical prerequisite for the faceted page. No mapping or configuration template has to be deployed for it: the default index mapping maps every string property to a `keyword` through a dynamic template, so `bdiff:*` is queryable and aggregatable as soon as the documents are indexed.
+A search engine is therefore a practical prerequisite for the facet panel of the search form. No mapping or configuration template has to be deployed for it: the default index mapping maps every string property to a `keyword` through a dynamic template, so `bdiff:*` is queryable and aggregatable as soon as the documents are indexed.
 
 ### Repository Indexes
 
@@ -487,10 +502,14 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **Bounded by `maxLines`**, like the text: past that many images the inventory stops and the diff is flagged `truncated`.
 - Image extraction failure silently falls back to the text-only result (logged as WARN). A format with no contributed image extractor simply gets no inventory.
 
+### Web UI
+- **Navigating directly from one `BlobDiff` to another leaves the page showing the previous diff.** The URL, the browser title and the Web UI header all update, but the content card does not; a page reload shows the right one. Reachable from the drawer queue and from any diff-to-diff link. Under investigation — the document never reaches the plugin's view layout, so the cause is upstream of this plugin. Browsing to a diff from anywhere else is unaffected.
+- **Opening a `BlobDiff` logs a 404** for `nuxeo-blobdiff-edit-layout.html`: Web UI offers an Edit action and a diff deliberately has no edit layout. Cosmetic.
+
 ### Security and Operations
 - **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
 - **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule it yourself for automatic retention, following the three-step asynchronous sequence described above.
-- **A search engine is a practical prerequisite** for the Web UI listing and tab (`BLOB_DIFFS_ADMIN`). Without one the listing still works, but the facet panel comes back silently empty — see "Search Engine Prerequisite" above.
+- **A search engine is a practical prerequisite** for the Web UI search and tab (`BLOB_DIFFS_ADMIN`). Without one the results still come back, but the facet panel of the search form is silently empty — see "Search Engine Prerequisite" above.
 - **Retry** only works for diffs created from 1.2 on (binary keys stored), and as long as the binaries are still in the blob store (the binaries garbage collector may have removed an unreferenced old version).
 - **Web UI access** is based on the auditors group name exposed in `Nuxeo.UI.config`: overriding `<auditorsGroup>` without the configuration property desynchronises the UI (the server stays correct).
 - `blobContentModified` must be declared both in the audit route and in the `eventTypes` vocabulary, or entries are lost / hidden.

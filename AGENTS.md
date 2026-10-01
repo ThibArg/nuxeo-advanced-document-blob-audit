@@ -41,7 +41,8 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
     `SuggestDirectoryEntries` reads to localize vocabulary labels, so the `eventTypes` label of
     `blobContentModified` must live here. Nothing reads a `nuxeo.war/server-side-i18n/` folder.
   - `src/main/resources/web/nuxeo.war/` — Polymer elements under
-    `ui/nuxeo-advanced-document-blob-audit/elements/`, layouts under `ui/document/blobdiff/`,
+    `ui/nuxeo-advanced-document-blob-audit/elements/`, the two halves of the `blobdiffs` named
+    search under `ui/search/blobdiffs/`, layouts under `ui/document/blobdiff/`,
     **client** i18n in `ui/i18n/messages*.json`, read by Web UI only.
     The two i18n sets have different roles and different consumers: they are **not** copies of one
     another. A key may exist in both (`label.blobaudit.event.blobContentModified` does), but adding
@@ -136,6 +137,49 @@ platform's 51 were gone.
 logged rather than propagated, because a vocabulary row must never break startup. The same rule
 applies to `eventCategories`, `nature`, `subject` and every other platform vocabulary.
 Coverage: `TestAuditEventTypeRegistration`.
+
+**The audit search is a *named search*, and its two halves are wired by string, not by nesting.**
+There is no element in Web UI that renders "form left, results right" — the illusion is produced by
+the application shell. The form is a `nuxeo-search-form` contributed to `DRAWER_PAGES`; the results
+are the single, hardcoded `<nuxeo-search-page name="search">` of `nuxeo-app`. `nuxeo-app`
+`_updateSearch()` matches them with `this.$$("[search-name='" + this.searchName + "']")` against its
+own shadow root. Four things follow, each a silent failure if broken:
+
+- **`search-name` must be a literal attribute.** `searchName` is not `reflectToAttribute` on
+  `nuxeo-search-form`, so `search-name="[[x]]"` sets the property and leaves no attribute; the
+  selector matches nothing and the results pane stays empty for ever, with no error.
+- **`name` goes on the inner element, never on the `nuxeo-filter`.** `nuxeo-filter._render()`
+  stamps into `dom(this).parentNode` — as a *sibling* of itself — so it is the stamped
+  `nuxeo-search-form` that becomes a child of `iron-pages#drawer-pages` and carries the key its
+  `attr-for-selected="name"` reads. `name` on the filter would select an element that renders
+  nothing. Same shape as every platform contribution to `DOCUMENT_VIEWS_PAGES`.
+- **The layout file names are a hardcoded convention, not a registration.**
+  `nuxeo-search-form-layout#_formHref` builds `<hrefBase><searchName>/nuxeo-<searchName>-search-form.html`
+  lowercased, and `nuxeo-layout._stamp` derives the tag name from the file name. `hrefBase` is
+  `undefined` on a server (it is only set by the dev `index.html`), so it falls back to
+  `/ui/search/`. Folder, file names, `dom-module` ids and `search-name` must stay in lockstep.
+  The results layout must additionally **contain a `<nuxeo-results>`** — `_grabResults` walks the
+  tree for that literal tag and drives it through `fetch()`/`reset()`.
+- **Never set a height on the data table.** `nuxeo-results` sizes its views through
+  `--nuxeo-results-view-height`. The `calc(100vh - 190px)` of the old standalone page is exactly
+  what made it misalign with the rest of the application.
+
+`route="search:blobdiffs"` on the drawer icon is a deliberate departure: the platform searches omit
+it, so clicking their icon only opens the drawer (`_toggleDrawer` performs no navigation) and the
+main area keeps showing the previous page until a filter changes. For an audit entry point that is
+one click too many. `nuxeo-menu-icon` resolves `route` into a plain `<a href>`, as the Home icon does.
+
+**The named-parameter keys keep their `bdsearch:` prefix, and the search doctype is declared with
+`<searchDocumentType>`.** `WhereClauseDescriptor` declares only `@escaper`, `predicate` and
+`fixedPart` — a `whereClause@docType` attribute is dropped by XMap in silence, which is what this
+contribution used to do. Without the real element, `PageProviderHelper` falls back to
+`SimpleDocumentModel.empty()`, and since the predicates carry a `schema`,
+`NXQLQueryBuilder#getRawValue` reads `null` from it **without throwing** — so the named-parameters
+fallback never runs and every filter is dropped quietly. That fallback model nevertheless worked for
+the prefixed keys the UI sends, because it is built with `anySchema=true` and resolves a prefix
+through the schema registry; it would *not* have worked for bare field names. Both are now valid,
+but keep the prefix: a bare key is matched by iterating the schemas of the search document, where a
+generic name such as `user` can collide. No test covers this — `BLOB_DIFFS_ADMIN` has none.
 
 **The `eventTypes` label is resolved server side, not by Web UI.** `nuxeo-audit-search` asks for
 `localize=true` without `dbl10n`, so `SuggestDirectoryEntries` translates the label against the
@@ -246,8 +290,9 @@ A full architecture review was run on the plugin. The architecture was judged so
 improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`,
 a later correctness audit its own, numbered `COR-nn`, a security audit its own, numbered
 `SEC-nn` / `BLD-nn`, and a scalability audit its own, numbered `RES-nn`; those that turn into work
-get the next free number in this same list.
-**Items 1 to 11, 13, 15 to 20 and 21 to 23 are done** (regression coverage:
+get the next free number in this same list. Product requests and bugs found in testing are
+numbered the same way.
+**Items 1 to 11, 13, 15 to 20, 21 to 23 and 25 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -320,6 +365,11 @@ get the next free number in this same list.
     No automated coverage — this repository has no JS test infrastructure (no runner, no
     `*.test.js`). Verified by reading the Web UI and Polymer sources; behavioural check is manual
     (open the page as an auditor, confirm a search request leaves in the network tab).
+
+    **Superseded by item 25**: `nuxeo-blobdiff-search-page.html` no longer exists, so the fixed
+    binding went with it. The rule of thumb above still holds and is the reason the new results
+    layout passes `nx-provider="[[nxProvider]]"` — the element injected by
+    `nuxeo-search-results-layout` — rather than any id.
 
 17. *(correctness audit, finding `COR-01`)* `BlobDiffService#extract` returned `null` for two
     unrelated situations: "no extractor is registered for this mime type" and "the extractor was
@@ -527,14 +577,146 @@ get the next free number in this same list.
     Coverage: `TestTextDifferBounding`. Four of its seven cases were checked to fail against the
     unpatched code, with the measurements above.
 
+25. *(UI rework, product request)* The audit had a **bespoke drawer panel and a bespoke full-width
+    page**. The drawer panel rendered nothing but a description and a button, and forwarded to the
+    page as soon as it became visible; the page re-implemented a search screen by hand — a 280 px
+    filter column, a hand-rolled `nuxeo-page-provider`, and a `nuxeo-data-table` pinned at
+    `calc(100vh - 190px)`, which is what made it misalign with every other screen. An uncommitted
+    attempt to improve it had left a `<nuxeo-card>` interleaved with the `<div class="filters">`
+    it was meant to wrap.
+
+    Replaced by a **named search**, the platform shape: `nuxeo-search-form` in `DRAWER_PAGES`,
+    results in the single hardcoded `nuxeo-search-page`, and the two layout halves under
+    `web/nuxeo.war/ui/search/blobdiffs/`. See the invariant above for the four string-level
+    couplings this relies on; they are all silent failures.
+
+    What it bought, none of it written by us: platform sizing, the sort selector, the selection
+    toolbar, CSV export, saved searches, and per-user column preferences (show/hide, resize,
+    reorder) persisted in local storage. The `PAGES` slot contribution,
+    `nuxeo-blobdiff-search-page.html` and `nuxeo-blobdiff-drawer.html` are gone.
+
+    Three points settled during the work rather than inferred:
+
+    - **`only-queue` does not hide saved searches, and the half-state is worse than either
+      extreme.** It hides the dropdown in the drawer, but `nuxeo-app` hardcodes
+      `show-saved-search-actions` on `nuxeo-search-page`, and `_showSaveAs()` needs only
+      `_isSearchFormVisible && _dirty` — both true as soon as a filter is touched with the drawer
+      open. A "Save search as…" button would therefore appear while the dropdown that reloads it
+      was hidden. Saved searches are kept in full (product decision).
+    - **`Nuxeo.BlobAudit.openSearch(params)` crosses a shadow root on purpose.** The drawer form is
+      a sibling of the results in the shell, not an ancestor, so the two actions that seed a filter
+      (the per-row "filter on this source" and the document tab's "Open in the audit") have no
+      binding to write to. `nuxeo-app` keeps the form in a plain property it resolves with the same
+      attribute selector; there is no public API. One documented hop, in one place.
+    - **A non-auditor deep-linking to `#!/search/blobdiffs` now sees a blank pane**, not the old
+      explicit refusal: the drawer form is filtered out, so `searchName` never reaches the results
+      layout and nothing is stamped. Accepted — the ACL of `/change-diff` and the operation checks
+      are the real guard, and the old message was cosmetic too.
+
+    Carried a latent server-side fix with it: `<whereClause docType="BlobDiffSearch">` was inert
+    (see the invariant). It happened to work only because the UI sends prefixed keys; it is now
+    declared properly with `<searchDocumentType>`.
+
+    No automated coverage — no JS test infrastructure, and `BLOB_DIFFS_ADMIN` has no Java test
+    either. Manual checks, in order: drawer icon auditor-only → one click opens the drawer *and*
+    the results → a request leaves for `/search/pp/BLOB_DIFFS_ADMIN/execute` → **each filter
+    genuinely narrows the result set** (never verified before this item) → facet selection narrows
+    it (needs a search engine) → Reset → row actions, selection delete, purge → column settings
+    survive a reload → the document tab's "Open in the audit" lands pre-filtered → a cold load of
+    `#!/search/blobdiffs` (the `_searchOnLoad` path).
+
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
 | Session | Items | Effort | Notes |
 |---|---|---|---|
-| next | 24 | S | Optional. The index of item 21 already solves the scalability problem |
+| next | 26 | M | **Open bug**, diagnosed to one link in the chain, not yet fixed |
+| next | 27 | S | Cosmetic, `BlobDiff` has no edit layout |
+| — | 24 | S | Optional. The index of item 21 already solves the scalability problem |
 | — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
+
+
+### 26. A `BlobDiff` page does not refresh when navigating to another `BlobDiff` — OPEN
+
+Navigate from one `BlobDiff` to another — from the drawer queue of `nuxeo-search-form`, or from any
+link — and the **URL, the browser title and the Web UI header all update, but the whole
+`nuxeo-blobdiff-view-layout` card stays on the previous diff**. A reload fixes it. Found while
+testing item 25; it is **not** caused by item 25, the queue merely makes it easy to hit.
+
+What is established, so it does not get re-derived:
+
+- **Not the platform.** The identical flow on the platform's *default* and *assets* searches —
+  queue view, click one document then another — refreshes correctly. So the
+  `navigateTo` → `page()` → `app.load` → `currentDocument` chain is sound.
+- **Not a stale deployment.** That was a separate problem, since fixed: `deployment-fragment.xml`
+  `<unzip>` only ever *merges* into `nuxeo.war`, so the files deleted by item 25 lingered in a
+  bind-mounted `ui/` folder. Clearing it fixed a much broader navigation breakage.
+- **Not `route="search:blobdiffs"`.** Suspected first because no platform `DRAWER_ITEMS` icon
+  carries a `route`, and page.js runs with `click: false`; ruled out by testing.
+- **Our element is never touched.** Temporary instrumentation (`attached`, `detached`,
+  `_documentChanged` on the layout; `attached`, `detached`, `_load` on `nuxeo-blobdiff-viewer`)
+  logged a full, correct sequence on the *first* open and then **absolutely nothing** on the
+  second — no `DETACHED`, no `ATTACHED`, no `_DOCUMENTCHANGED`, no `_LOAD`.
+
+That last point is the whole finding: `document` never reaches our layout, so the break is
+**upstream of this plugin**, somewhere in
+
+```
+app.currentDocument -> nuxeo-browser.document -> viewsContext (computed: _viewsContext(document))
+  -> nuxeo-slot DOCUMENT_VIEWS_PAGES -> nuxeo-document-view.document
+  -> nuxeo-document-layout.document -> _loadLayout -> nuxeo-layout -> our element
+```
+
+Every link reads as sound — `viewsContext` is a computed object so it is new each time, and
+`nuxeo-slot._forwardHostProp` does `instance.set('document', value)` — yet one of them fails for
+this doctype and not for `File`.
+
+**Leading suspicion, untested:** several `DOCUMENT_VIEWS_PAGES` contributions share `name="view"`
+(`nuxeo-document-view`, plus the picture/video/collection variants, each behind a `nuxeo-filter` on
+a facet). If more than one is stamped for a `BlobDiff`, `iron-pages` would display one instance
+while the model updates another. Counting the stamped `nuxeo-document-view` elements is the first
+thing to check.
+
+**Resume here:** reproduce, then run the probe below in the console and find the first `*_doc` that
+still reports the *old* uid — that is the broken link.
+
+```js
+(() => {
+  const deep = (root, sel, acc = []) => {
+    if (!root || !root.querySelectorAll) return acc;
+    root.querySelectorAll(sel).forEach((e) => acc.push(e));
+    root.querySelectorAll('*').forEach((e) => e.shadowRoot && deep(e.shadowRoot, sel, acc));
+    return acc;
+  };
+  const app = document.querySelector('nuxeo-app');
+  const S = app.shadowRoot, u = (d) => (d && d.uid) || null;
+  const br = deep(S, '#browser')[0], dv = deep(S, 'nuxeo-document-view'),
+        dl = deep(S, 'nuxeo-document-layout'), vl = deep(S, 'nuxeo-blobdiff-view-layout');
+  console.log({
+    app_currentDocument: u(app.currentDocument),
+    browser_document: u(br && br.document),
+    documentView_n: dv.length, documentView_doc: u(dv[0] && dv[0].document),
+    documentLayout_n: dl.length, documentLayout_doc: u(dl[0] && dl[0].document),
+    documentLayout_href: dl[0] && dl[0]._href,
+    viewLayout_n: vl.length, viewLayout_doc: u(vl[0] && vl[0].document),
+  });
+})();
+```
+
+Worth removing regardless of the cause: `nuxeo-blobdiff-view-layout` is the only view layout here
+or in the platform that does I/O in a `document` observer (`this.$.doc.get()` feeding `_full`,
+because Web UI does not request `blobDiffSource` on the current document). Contributing
+`blobDiffSource` to `org.nuxeo.web.ui.enrichers.document` would delete that second request and the
+inner `<nuxeo-document>` entirely.
+
+
+### 27. Hide the Edit action on `BlobDiff` — OPEN
+
+Opening a `BlobDiff` logs a 404 for `document/blobdiff/nuxeo-blobdiff-edit-layout.html`: Web UI
+offers the Edit action and there is no edit layout, by design — a diff is a record, never edited.
+Filter the action out for the type rather than adding an empty layout, which is what
+`nuxeo-blobdiff-metadata-layout.html` had to do for a different reason.
 
 
 ### 24. Replace the idempotency query with a path lookup — OPTIONAL

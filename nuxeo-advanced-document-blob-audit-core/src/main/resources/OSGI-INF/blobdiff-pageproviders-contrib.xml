@@ -32,7 +32,19 @@
                          class="org.nuxeo.ecm.platform.query.nxql.SearchServicePageProvider">
       <trackUsage>false</trackUsage>
       <property name="coreSession">#{documentManager}</property>
-      <whereClause docType="BlobDiffSearch">
+      <!--
+        searchDocumentType, NOT whereClause@docType: WhereClauseDescriptor declares only @escaper,
+        predicate and fixedPart, so XMap drops any docType attribute in silence. Without this
+        element PageProviderHelper falls back to SimpleDocumentModel.empty(), and because the
+        predicates below carry a schema, NXQLQueryBuilder#getRawValue reads null from it *without
+        throwing* - so the named-parameters fallback never runs and every filter is dropped
+        quietly. That fallback model happens to work for the bdsearch: prefixed keys the Web UI
+        sends, because it is built with anySchema=true and resolves a prefix through the schema
+        registry; it would not work for bare field names. Declaring the real search doctype makes
+        both forms valid and removes the trap.
+      -->
+      <searchDocumentType>BlobDiffSearch</searchDocumentType>
+      <whereClause>
         <fixedPart>
           ecm:primaryType = 'BlobDiff' AND ecm:isVersion = 0 AND ecm:isTrashed = 0
         </fixedPart>
@@ -50,6 +62,17 @@
           <field schema="blobdiffsearch" name="truncated" />
         </predicate>
       </whereClause>
+      <!--
+        Three distinct names per aggregate, do not conflate them:
+          @id         key of the bucket list in the JSON response, read by the search form as
+                      aggregations.bdiff_<x>_agg;
+          @parameter  the indexed field actually aggregated on;
+          field/@name where the *selection* is read back from the search document, so the key the
+                      client sends to filter on it - bdsearch:<x>_agg here.
+        Keeping @id different from field/@name is harmless on the /execute path used by the UI,
+        but note it would break a /search/pp/{name}/bulk submission, which keys selections on @id.
+        The field must stay an nxs:stringList, and its value is sent as a JSON array.
+      -->
       <aggregates>
         <aggregate id="bdiff_status_agg" type="terms" parameter="bdiff:status">
           <field schema="blobdiffsearch" name="status_agg" />

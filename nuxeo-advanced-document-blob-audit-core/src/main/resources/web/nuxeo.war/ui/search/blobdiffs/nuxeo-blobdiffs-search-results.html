@@ -1,0 +1,249 @@
+<!--
+  Results layout of the "Content changes audit", rendered in the main content area by
+  nuxeo-search-page -> nuxeo-results-view -> nuxeo-search-results-layout.
+
+  Like the search form, this file is resolved at runtime by filename convention
+  (_resultsHref: <hrefBase><searchName>/nuxeo-<searchName>-search-results.html) and is never
+  imported by the plugin bundle. Two hard requirements:
+    - the dom-module id must equal the file basename, nuxeo-layout builds the tag name from it;
+    - the template must contain a <nuxeo-results>, which nuxeo-search-results-layout finds by
+      walking the tree for that literal tag and then drives through fetch()/reset().
+
+  The elements used below that belong to this plugin (nuxeo-blobdiff-source-link,
+  nuxeo-blobdiff-status, and the two dialogs) are registered by the bundle at application start,
+  so they are defined long before this layout is stamped.
+
+  No height is set on the data table on purpose: nuxeo-results sizes its views itself through
+  --nuxeo-results-view-height. Hardcoding a calc(100vh - ...) here is what made the previous
+  standalone page misalign with the rest of the application.
+-->
+<dom-module id="nuxeo-blobdiffs-search-results">
+  <template>
+    <style include="nuxeo-blobdiff-styles nuxeo-styles iron-flex iron-flex-alignment">
+      :host {
+        display: block;
+      }
+      .cell-actions {
+        display: flex;
+      }
+      /* The selection toolbar is dark, so its actions cannot inherit the page button colours. */
+      .selection-action {
+        color: var(--nuxeo-selection-toolbar-text, #fff);
+      }
+    </style>
+
+    <nuxeo-operation id="retryOp" op="BlobDiff.Retry"></nuxeo-operation>
+
+    <nuxeo-results id="results"
+                   name="blobdiffs"
+                   nx-provider="[[nxProvider]]"
+                   display-mode="table"
+                   selected-items="{{selectedItems}}"
+                   action-context="{{actionContext}}"
+                   sort-options="[[sortOptions]]"
+                   display-sort>
+
+      <!--
+        Both slots are overridden rather than left to their defaults, but the platform slot is
+        re-declared inside each so the standard actions (CSV export...) are preserved instead of
+        being silently dropped by the override.
+      -->
+      <div slot="actions" class="horizontal layout center">
+        <nuxeo-slot name="RESULTS_ACTIONS" model="[[actionContext]]"></nuxeo-slot>
+        <paper-icon-button id="purgeButton" icon="icons:delete-sweep" on-tap="_openPurge">
+        </paper-icon-button>
+        <nuxeo-tooltip for="purgeButton">[[i18n('label.blobaudit.purge.title')]]</nuxeo-tooltip>
+      </div>
+
+      <div slot="selectionActions" class="horizontal layout center">
+        <paper-button noink class="selection-action" on-tap="_deleteSelection">
+          <iron-icon icon="icons:delete-forever"></iron-icon>&nbsp;[[i18n('label.blobaudit.delete.title')]]
+        </paper-button>
+      </div>
+
+      <nuxeo-data-table name="table"
+                        icon="nuxeo:view-list"
+                        settings-enabled
+                        column-resize-enabled
+                        column-reorder-enabled
+                        selection-enabled
+                        empty-label="[[i18n('label.blobaudit.empty')]]"
+                        caption-text="[[i18n('label.blobaudit.table.caption')]]">
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.date')]]" field="bdiff:date"
+                                 sort-by="bdiff:date" flex="12">
+          <template>
+            <a href$="[[urlFor(item)]]">[[formatDateTime(item.properties.bdiff:date)]]</a>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.user')]]" field="bdiff:user"
+                                 sort-by="bdiff:user" flex="10">
+          <template>
+            <nuxeo-user-tag user="[[item.properties.bdiff:user]]"></nuxeo-user-tag>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.source')]]" field="bdiff:sourceId"
+                                 flex="18">
+          <template>
+            <nuxeo-blobdiff-source-link source="[[item.contextParameters.blobDiffSource]]"
+                                        source-id="[[item.properties.bdiff:sourceId]]">
+            </nuxeo-blobdiff-source-link>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.xpath')]]" field="bdiff:xpath"
+                                 sort-by="bdiff:xpath" flex="8">
+          <template>[[item.properties.bdiff:xpath]]</template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.versions')]]"
+                                 field="bdiff:newVersionLabel" flex="10">
+          <template>
+            <span title$="[[_versionIds(item.properties.bdiff:previousVersionId, item.properties.bdiff:newVersionId)]]">
+              [[_versionPair(item.properties.bdiff:previousVersionLabel, item.properties.bdiff:newVersionLabel)]]
+            </span>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.file')]]" field="bdiff:newFilename"
+                                 flex="12">
+          <template>
+            <span title$="[[item.properties.bdiff:mimeType]]">[[item.properties.bdiff:newFilename]]</span>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.summary')]]" field="bdiff:summary"
+                                 flex="18">
+          <template>[[item.properties.bdiff:summary]]</template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="[[i18n('label.blobaudit.diff.status')]]" field="bdiff:status"
+                                 sort-by="bdiff:status" flex="12">
+          <template>
+            <nuxeo-blobdiff-status document="[[item]]"></nuxeo-blobdiff-status>
+          </template>
+        </nuxeo-data-table-column>
+
+        <nuxeo-data-table-column name="" flex="10">
+          <template>
+            <div class="cell-actions">
+              <paper-icon-button icon="icons:filter-list"
+                                 title$="[[i18n('label.blobaudit.action.filterSource')]]"
+                                 on-tap="_filterOnSource"></paper-icon-button>
+              <template is="dom-if" if="[[item.properties.bdiff:diff.data]]">
+                <a href$="[[item.properties.bdiff:diff.data]]" download tabindex="-1">
+                  <paper-icon-button icon="icons:file-download"
+                                     title$="[[i18n('label.blobaudit.diff.download')]]">
+                  </paper-icon-button>
+                </a>
+              </template>
+              <template is="dom-if" if="[[_canRetry(item)]]">
+                <paper-icon-button icon="icons:refresh"
+                                   title$="[[i18n('label.blobaudit.action.retry')]]"
+                                   on-tap="_retry"></paper-icon-button>
+              </template>
+            </div>
+          </template>
+        </nuxeo-data-table-column>
+
+      </nuxeo-data-table>
+    </nuxeo-results>
+
+    <nuxeo-blobdiff-delete-dialog id="deleteDialog"></nuxeo-blobdiff-delete-dialog>
+    <nuxeo-blobdiff-purge-dialog id="purgeDialog"></nuxeo-blobdiff-purge-dialog>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiffs-search-results',
+      // Nuxeo.LayoutBehavior transitively brings Routing, Filters, Format and I18n.
+      behaviors: [Nuxeo.LayoutBehavior],
+      properties: {
+        /** The nuxeo-page-provider element, injected by nuxeo-search-results-layout. */
+        nxProvider: Object,
+        selectedItems: {
+          type: Array,
+          value: function () { return []; }
+        },
+        actionContext: Object,
+        sortOptions: {
+          type: Array,
+          value: function () { return []; }
+        }
+      },
+
+      attached: function () {
+        this.sortOptions = [
+          { field: 'bdiff:date', label: this.i18n('label.blobaudit.diff.date'), order: 'desc', selected: true },
+          { field: 'bdiff:user', label: this.i18n('label.blobaudit.diff.user'), order: 'asc' },
+          { field: 'bdiff:status', label: this.i18n('label.blobaudit.diff.status'), order: 'asc' },
+          { field: 'bdiff:xpath', label: this.i18n('label.blobaudit.diff.xpath'), order: 'asc' }
+        ];
+      },
+
+      _versionPair: function (previousLabel, newLabel) {
+        return (previousLabel || '?') + ' → ' + (newLabel || '?');
+      },
+
+      _versionIds: function (previousId, newId) {
+        return [previousId, newId].filter(Boolean).join(' → ');
+      },
+
+      _canRetry: function (item) {
+        var p = item && item.properties;
+        return !!p && p['bdiff:status'] === 'error' && !!p['bdiff:oldBlobKey'] && !!p['bdiff:newBlobKey'];
+      },
+
+      _refresh: function () {
+        var results = this.$.results;
+        if (results) {
+          results.fetch();
+        }
+      },
+
+      /*
+        The filter lives in the drawer form, which is a sibling of this element in the application
+        shell rather than an ancestor, so there is no binding to write to. openSearch() does the
+        lookup once, for both callers.
+      */
+      _filterOnSource: function (e) {
+        Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': e.model.item.properties['bdiff:sourceId'] });
+      },
+
+      _retry: function (e) {
+        this.$.retryOp.input = e.model.item.uid;
+        this.$.retryOp.execute()
+          .then(function () {
+            this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
+            this.async(this._refresh, 1500);
+          }.bind(this))
+          .catch(function (err) {
+            this.fire('notify', {
+              message: this.i18n('label.blobaudit.retry.failed') + ' ' + ((err && err.message) || '')
+            });
+          }.bind(this));
+      },
+
+      _deleteSelection: function () {
+        this.$.deleteDialog.open(this.selectedItems).then(function (deleted) {
+          if (deleted) {
+            var results = this.$.results;
+            if (results && results.clearSelection) {
+              results.clearSelection();
+            }
+            this._refresh();
+          }
+        }.bind(this));
+      },
+
+      _openPurge: function () {
+        this.$.purgeDialog.open().then(function (purged) {
+          if (purged) {
+            this._refresh();
+          }
+        }.bind(this));
+      }
+    });
+  </script>
+</dom-module>

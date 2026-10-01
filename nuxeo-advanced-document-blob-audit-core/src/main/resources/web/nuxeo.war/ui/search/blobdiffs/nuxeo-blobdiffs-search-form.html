@@ -1,0 +1,123 @@
+<!--
+  Search form of the "Content changes audit", rendered in the main drawer by the
+  <nuxeo-search-form search-name="blobdiffs"> contributed to DRAWER_PAGES.
+
+  This file is NOT imported by the plugin bundle. nuxeo-search-form-layout resolves it at runtime
+  from a hardcoded convention (_formHref): <hrefBase><searchName>/nuxeo-<searchName>-search-form.html,
+  lowercased, where hrefBase falls back to /ui/search/ on a real server. The dom-module id must
+  equal the file basename, because nuxeo-layout derives the tag name from it. Renaming either the
+  folder or the file silently yields "Failed to find search layout for blobdiffs".
+
+  Every parameter key keeps its bdsearch: prefix. That is not cosmetic: a prefixed key resolves
+  deterministically through the schema prefix registry, whereas a bare key is looked up by
+  iterating the schemas of the search document, where a generic name such as "user" could collide.
+-->
+<dom-module id="nuxeo-blobdiffs-search-form">
+  <template>
+    <style include="nuxeo-styles">
+      :host {
+        display: block;
+      }
+      nuxeo-date-picker,
+      nuxeo-document-suggestion,
+      nuxeo-user-suggestion,
+      nuxeo-checkbox-aggregation {
+        display: block;
+        margin-bottom: 12px;
+      }
+      paper-checkbox {
+        display: block;
+        margin-bottom: 16px;
+      }
+      h2 {
+        font-size: 1rem;
+        font-weight: 500;
+        margin: 0 0 16px;
+      }
+    </style>
+
+    <!--
+      The platform search forms carry no title: theirs is "the" search, identified by the drawer
+      icon alone. This one is a plugin search among several, and the main area heading is
+      hardcoded to "Search Results" by nuxeo-app, so the drawer is the only place left to say
+      which audit the filters belong to.
+    -->
+    <h2>[[i18n('label.blobaudit.page.title')]]</h2>
+
+    <nuxeo-date-picker label="[[i18n('label.blobaudit.filters.from')]]"
+                       value="{{params.bdsearch:date_min}}">
+    </nuxeo-date-picker>
+
+    <nuxeo-date-picker label="[[i18n('label.blobaudit.filters.to')]]"
+                       value="{{params.bdsearch:date_max}}">
+    </nuxeo-date-picker>
+
+    <nuxeo-document-suggestion label="[[i18n('label.blobaudit.filters.source')]]"
+                               value="{{params.bdsearch:sourceId}}"
+                               min-chars="1"
+                               placeholder="[[i18n('label.blobaudit.filters.sourcePlaceholder')]]">
+    </nuxeo-document-suggestion>
+
+    <nuxeo-user-suggestion label="[[i18n('label.blobaudit.filters.user')]]"
+                           value="{{params.bdsearch:user}}"
+                           search-type="USER_TYPE">
+    </nuxeo-user-suggestion>
+
+    <paper-checkbox checked="{{params.bdsearch:truncated}}">
+      [[i18n('label.blobaudit.filters.truncatedOnly')]]
+    </paper-checkbox>
+
+    <!--
+      The four facets come back empty on an instance without a search engine: the default search
+      client is "repository", which does not support the AGGREGATE capability and reports the
+      mismatch as a SearchLimitation that nothing surfaces. See the README, "Search Engine
+      Prerequisite". The aggregation ids below are the <aggregate id="..."> of BLOB_DIFFS_ADMIN,
+      while the value keys are its <field name="..."> - the two differ on purpose, see the
+      page provider contribution.
+    -->
+    <nuxeo-checkbox-aggregation label="[[i18n('label.blobaudit.diff.status')]]"
+                                data="[[aggregations.bdiff_status_agg]]"
+                                value="{{params.bdsearch:status_agg}}">
+    </nuxeo-checkbox-aggregation>
+
+    <nuxeo-checkbox-aggregation label="[[i18n('label.blobaudit.filters.format')]]"
+                                data="[[aggregations.bdiff_mimetype_agg]]"
+                                value="{{params.bdsearch:mimetype_agg}}">
+    </nuxeo-checkbox-aggregation>
+
+    <nuxeo-checkbox-aggregation label="[[i18n('label.blobaudit.diff.xpath')]]"
+                                data="[[aggregations.bdiff_xpath_agg]]"
+                                value="{{params.bdsearch:xpath_agg}}">
+    </nuxeo-checkbox-aggregation>
+
+    <nuxeo-checkbox-aggregation label="[[i18n('label.blobaudit.diff.user')]]"
+                                data="[[aggregations.bdiff_user_agg]]"
+                                value="{{params.bdsearch:user_agg}}">
+    </nuxeo-checkbox-aggregation>
+  </template>
+  <script>
+    Polymer({
+      is: 'nuxeo-blobdiffs-search-form',
+      behaviors: [Nuxeo.LayoutBehavior, Nuxeo.I18nBehavior],
+      properties: {
+        /** Named parameters sent to BLOB_DIFFS_ADMIN. Two-way bound by nuxeo-search-form-layout. */
+        params: {
+          type: Object,
+          value: function () { return {}; },
+          notify: true
+        },
+        /** Aggregates returned by the provider, written back by nuxeo-search-form. */
+        aggregations: {
+          type: Object,
+          value: function () { return {}; },
+          notify: true
+        }
+      },
+
+      /** Called by nuxeo-search-form when the user taps Reset. */
+      clear: function () {
+        this.set('params', {});
+      }
+    });
+  </script>
+</dom-module>

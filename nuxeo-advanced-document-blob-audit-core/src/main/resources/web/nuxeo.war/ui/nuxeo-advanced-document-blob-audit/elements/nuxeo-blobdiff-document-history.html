@@ -56,9 +56,7 @@
         }
       },
       _openAll: function () {
-        Nuxeo.BlobAudit.openPage();
-        var page = document.querySelector('nuxeo-blobdiff-search-page');
-        if (page) { page.sourceId = this.document.uid; }
+        Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': this.document.uid });
       }
     });
   </script>

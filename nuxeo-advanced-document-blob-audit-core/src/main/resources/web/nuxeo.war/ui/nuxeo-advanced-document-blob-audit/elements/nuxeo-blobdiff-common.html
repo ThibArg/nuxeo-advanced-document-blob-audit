@@ -3,7 +3,8 @@
   (function () {
     window.Nuxeo = window.Nuxeo || {};
     Nuxeo.BlobAudit = {
-      PAGE: 'blobdiffs',
+      /** searchName of the audit search. Drives the route, the drawer form and the layout folder. */
+      SEARCH: 'blobdiffs',
 
       /** Group configured server side (org.nuxeo.web.ui.blobaudit.auditorsGroup). */
       auditorsGroup: function () {
@@ -34,12 +35,40 @@
         return schemas.indexOf('file') >= 0 || schemas.indexOf('files') >= 0;
       },
 
-      /** Shows the listing page in the main area. */
-      openPage: function () {
+      /**
+       * The <nuxeo-search-form> of the audit search, or null.
+       *
+       * It lives in nuxeo-app's shadow DOM, stamped into iron-pages#drawer-pages by the
+       * DRAWER_PAGES slot, and nothing exposes it: nuxeo-app keeps it in a plain property
+       * (searchForm) that it resolves with the very same attribute selector. Reaching it from a
+       * results row or from a document tab therefore means crossing one shadow root by hand.
+       * Kept in a single place rather than repeated at each call site.
+       */
+      searchForm: function () {
         var app = document.querySelector('nuxeo-app');
-        if (app) {
-          app.page = this.PAGE;
+        var root = app && app.shadowRoot;
+        return (root && root.querySelector("[search-name='" + this.SEARCH + "']")) || null;
+      },
+
+      /**
+       * Shows the audit search, optionally seeding filters first.
+       *
+       * @param params optional map of named parameters, bdsearch: prefixed, e.g.
+       *               { 'bdsearch:sourceId': uid }
+       */
+      openSearch: function (params) {
+        var app = document.querySelector('nuxeo-app');
+        if (!app) {
+          return;
         }
+        var form = this.searchForm();
+        // The form is stamped at startup, but stay defensive: a missing form must still navigate.
+        if (form && params) {
+          Object.keys(params).forEach(function (key) {
+            form.set('params.' + key, params[key]);
+          });
+        }
+        app.navigateTo('search', this.SEARCH);
       },
 
       statusClass: function (status) {
