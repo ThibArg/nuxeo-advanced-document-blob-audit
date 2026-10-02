@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <component name="org.nuxeo.audit.advanced.blob.doctype">
 
+  <!-- Make sure the default definitions (core schemas, core types) are loaded first -->
+  <require>org.nuxeo.ecm.core.CoreExtensions</require>
+
   <extension target="org.nuxeo.ecm.core.schema.TypeService" point="schema">
     <schema name="blobdiff" prefix="bdiff" src="schemas/blobdiff.xsd" />
     <schema name="blobdiffsearch" prefix="bdsearch" src="schemas/blobdiffsearch.xsd" />
@@ -46,6 +49,16 @@
       <schema name="blobdiffsearch" />
       <facet name="HiddenInNavigation" />
     </doctype>
+  </extension>
+
+  <!-- Icons and all about each document type -->
+  <extension target="org.nuxeo.ecm.platform.types.TypeService" point="types">
+    <type id="BlobDiff">
+      <label>Blob Diff</label>
+      <icon>/img/blobdiff.png</icon>
+      <bigIcon>/img/blobdiff.png</bigIcon>
+      <description></description>
+    </type>
   </extension>
 
 </component>
