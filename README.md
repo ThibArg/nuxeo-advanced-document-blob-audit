@@ -1,12 +1,5 @@
 # nuxeo-advanced-document-blob-audit
 
-> [!IMPORTANT]
-> This is **Work in Progress**. For now, using GitHub and this repo as backup.
-> 
-> **Do not use it as is**, it's not working (yet)
-> 
-> Once ready it will forked to Nuxeo Presales Github Sandboxes.
-
 Audit **what actually changed inside a file**: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents and PDFs paragraph by paragraph, and text formats line by line.
 
 A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
