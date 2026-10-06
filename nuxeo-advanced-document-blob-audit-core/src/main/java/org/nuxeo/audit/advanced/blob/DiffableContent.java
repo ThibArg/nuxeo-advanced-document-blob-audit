@@ -24,7 +24,7 @@ import java.util.List;
  * This is the single contract every format must implement: adding Word, PDF, ODT or CSV support
  * means writing an extractor that returns this structure, and nothing else.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public record DiffableContent(List<ContentLine> lines, boolean keyed, boolean truncated) {
 

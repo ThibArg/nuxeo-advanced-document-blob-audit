@@ -36,7 +36,7 @@ import org.nuxeo.ecm.core.api.impl.DocumentModelListImpl;
  * Runs with the caller's session, so the ACL of {@code /change-diff} is enforced on top of the
  * auditor check.
  *
- * @since 1.2
+ * @since 2025.1
  */
 @Operation(id = BlobDiffDeleteOp.ID, category = "Audit", label = "BlobDiff: Delete permanently",
         description = "Permanently deletes the input BlobDiff documents. Reserved to administrators and auditors.")

@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
+import org.nuxeo.runtime.api.Framework;
 
 /**
  * Fixture builders shared by the tests.
@@ -44,7 +46,7 @@ import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
  * data stays readable and reviewable in the source, which matters a lot when an assertion on a cell
  * count starts failing.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobAuditTestHelper {
 
@@ -57,6 +59,20 @@ public class BlobAuditTestHelper {
         // utility class
     }
 
+    /**
+     * Temporary files handed out by {@link #onDisk(Blob)}, deleted by {@link #deleteTempFiles()}.
+     * <p>
+     * Not {@code deleteOnExit()}: the Nuxeo guidelines rule it out - deletion only happens on a
+     * normal JVM exit, the files live far longer than needed, and nothing checks what is being
+     * deleted. {@code Framework.trackFile} is the prescribed replacement, but it resolves
+     * {@code EventService} and therefore needs a running runtime, which the pure-JUnit extractor
+     * tests do not have. Deterministic cleanup in an {@code @After} is what is left, and it is
+     * stricter than either.
+     *
+     * @since 2025.1
+     */
+    protected static final List<File> TEMP_FILES = Collections.synchronizedList(new ArrayList<>());
+
     public static Blob blob(byte[] bytes, String mimeType, String filename) throws IOException {
         Blob blob = new ByteArrayBlob(bytes);
         blob.setMimeType(mimeType);
@@ -65,7 +81,8 @@ public class BlobAuditTestHelper {
     }
 
     public static Blob textBlob(String content, String mimeType, String filename) throws IOException {
-        Blob blob = new ByteArrayBlob(content.getBytes(StandardCharsets.UTF_8), mimeType, StandardCharsets.UTF_8.name());
+        Blob blob = new ByteArrayBlob(content.getBytes(StandardCharsets.UTF_8), mimeType,
+                StandardCharsets.UTF_8.name());
         blob.setFilename(filename);
         return blob;
     }
@@ -77,16 +94,34 @@ public class BlobAuditTestHelper {
      * and fall back to the stream otherwise. Every other fixture builder here produces an in-memory
      * blob, so the file branch, which is the one that actually runs in production behind
      * {@code MaterializedBlob}, would never be exercised without this.
+     * <p>
+     * The file goes to the Nuxeo temporary directory through {@link Framework#createTempFile}, not
+     * to {@code java.io.tmpdir} as resolved at JVM start. Call {@link #deleteTempFiles()} from an
+     * {@code @After} to release it.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     public static Blob onDisk(Blob source) throws IOException {
-        File file = Files.createTempFile("blobaudit-test-", "-" + source.getFilename()).toFile();
-        file.deleteOnExit();
+        File file = Framework.createTempFile("blobaudit-test-", "-" + source.getFilename());
+        TEMP_FILES.add(file);
         try (InputStream in = source.getStream()) {
             Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
         }
         return new FileBlob(file, source.getMimeType(), source.getEncoding(), source.getFilename(), null);
+    }
+
+    /**
+     * Deletes every temporary file handed out by {@link #onDisk(Blob)} so far.
+     *
+     * @since 2025.1
+     */
+    public static void deleteTempFiles() throws IOException {
+        synchronized (TEMP_FILES) {
+            for (File file : TEMP_FILES) {
+                Files.deleteIfExists(file.toPath());
+            }
+            TEMP_FILES.clear();
+        }
     }
 
     /**

@@ -16,11 +16,13 @@
 package org.nuxeo.audit.advanced.blob.extractor;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.openxml4j.opc.PackageAccess;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -54,7 +56,7 @@ import org.nuxeo.ecm.core.api.Blob;
  * Legacy binary {@code .ppt} needs poi-scratchpad (HSLF) and is left to the generic
  * {@link ConverterTextExtractor} ({@code any2text}).
  *
- * @since 1.1
+ * @since 2025.1
  */
 public class PresentationExtractor implements BlobTextExtractor {
 
@@ -84,13 +86,15 @@ public class PresentationExtractor implements BlobTextExtractor {
      * by the unit tests.
      */
     @Override
-    public DiffableContent extract(Blob blob, int maxLines) throws Exception {
+    public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         Collector collector = new Collector(maxLines);
         File file = blob.getFile();
         if (file != null) {
             try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ);
                     XMLSlideShow show = new XMLSlideShow(pkg)) {
                 collect(show, collector);
+            } catch (InvalidFormatException e) {
+                throw new IOException("Not a readable OOXML presentation: " + blob.getFilename(), e);
             }
         } else {
             try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {

@@ -46,7 +46,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * Each test is guarded by an assumption: {@code any2text} depends on the convert bundles and, for
  * some formats, on external tools. A missing converter must skip the test, not fail the build.
  *
- * @since 1.0
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

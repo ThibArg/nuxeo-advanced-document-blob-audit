@@ -218,6 +218,29 @@ monotone, and `added` / `removed` / `changed` keep counting past the budget so t
 Any change to `diffKeyed` or `diffPositional` must preserve all three properties.
 Coverage: `TestTextDifferBounding`.
 
+**`BlobTextExtractor.extract` declares `throws IOException`, and must not be widened back.** It
+declared `throws Exception` until item 28, which forced `catch (Exception)` on all three call sites
+— the shape the Nuxeo "Catching Exceptions" page rules out, because it also catches
+`InterruptedException`. The one that mattered is `BlobDiffWork#resolveBlob`: it runs on a
+WorkManager thread that *is* interrupted at shutdown, and it swallowed the cancel to file a bogus
+`error` diff. An extractor that needs to report a non-I/O failure throws a `NuxeoException`.
+`ImageInventoryExtractor` wraps the only other checked exception it could raise,
+`NoSuchAlgorithmException` on `"SHA-256"` — guaranteed by the JCA, so an environment fault, not
+something eleven signatures should carry.
+
+**The image budget is uniform across the four formats, and dropping an image never renumbers.**
+`maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The two
+OOXML office paths reach the bytes through `POIXMLDocumentPart#getPackagePart()` rather than
+`PictureData#getData()`, which materialises the whole inflated image — POI caps that at 100 MB, so
+it was a budget inconsistency and not the unbounded allocation SEC-02 was, but it is gone either
+way. There is deliberately **no common helper** over `digestOoxmlPicture` and `digestBytes`:
+`XSLFPictureData` implements `sl.usermodel.PictureData` and the spreadsheet one
+`ss.usermodel.PictureData`, two unrelated interfaces. In all four collectors the key counter — the
+XLSX anchor-less ordinal, the PPTX `#2` occurrence suffix, the PDF positional ordinal — is advanced
+**before** the drop check, so a dropped image on one side cannot shift every following key.
+Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
+`#testDroppingAPictureDoesNotRenumberTheFollowingOnes`.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -241,7 +264,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 212 tests (23 test classes)
+mvn -o install                                     # full build, 216 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -292,7 +315,7 @@ a later correctness audit its own, numbered `COR-nn`, a security audit its own, 
 `SEC-nn` / `BLD-nn`, and a scalability audit its own, numbered `RES-nn`; those that turn into work
 get the next free number in this same list. Product requests and bugs found in testing are
 numbered the same way.
-**Items 1 to 11, 13, 15 to 20, 21 to 23 and 25 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25 and 28 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -479,6 +502,10 @@ numbered the same way.
     `exceedsPixelBudget` ignores the component count, so it under-estimates a RGB image threefold;
     that is the safe direction for a pre-check. `digestStream` is the guard that always applies.
 
+    **Correction (item 28): this covered two formats of the four, not all of them.** The sentence
+    above said "both fixed by the same streaming digest"; that was true of DOCX and PDF only. The
+    XLSX and PPTX paths went on calling `PictureData#getData()` until item 28. See there.
+
     On the PDF path the ordinal advances even for a dropped image: keys there are positional, so
     renumbering one side would make every following image look changed. `collectPdfResources` grew
     a `boolean[] dropped` out-parameter because its return value already means "the `maxLines`
@@ -625,6 +652,79 @@ numbered the same way.
     survive a reload → the document tab's "Open in the audit" lands pre-filtered → a cold load of
     `#!/search/blobdiffs` (the `_searchOnLoad` path).
 
+28. *(compliance pass against the Nuxeo guidelines)* Audit of the whole plugin against the "Java
+    Conventions" of the LTS 2025 `AGENTS.md` plus the four `doc.nuxeo.com/corg` pages (java code
+    style, secure coding, catching exceptions, temporary files). Most of it came back clean — no
+    `javax.*`, no SLF4J, no wildcard imports, **import ordering correct in all 34 main files**, no
+    `final` params, constants `ALL_CAPS`, NXQL always through `NXQL.escapeString`, no XML parsing,
+    zip entry names never used to build a path. What was not:
+
+    - **The 32 MB image budget applied to two formats of four.** `ImageInventoryExtractor` dropped
+      an over-sized image on the DOCX and PDF paths and called `PictureData#getData()` on the XLSX
+      and PPTX ones. **Be exact about this, item 20 was not**: POI caps `getData()` at its own
+      `MAX_IMAGE_SIZE`, measured at **100 MB** in 5.5.1, so it was never the unbounded allocation
+      SEC-02 was — it was three times this extractor's budget, and it made the budget mean two
+      different things depending on the container. Both paths now go through `digestStream` via
+      `POIXMLDocumentPart#getPackagePart()`. The binary `.xls`/`.ppt` case has no package part and
+      its bytes are already in the workbook model, so it only gets a length check.
+
+      There is deliberately **no single entry point** over the two: `XSLFPictureData` implements
+      `sl.usermodel.PictureData` and the spreadsheet one `ss.usermodel.PictureData` — unrelated
+      interfaces — and widening the parameter to `Object` to hide that would buy nothing.
+      Dropping an image must **not renumber** the ones after it, on either path: the XLSX ordinal
+      and the PPTX `#2` occurrence counter are both advanced before the drop check, exactly as
+      `collectPdfResources` already did.
+
+    - **`BlobTextExtractor.extract` declared `throws Exception`.** That is the shape the Nuxeo
+      "Catching Exceptions" page names, and it forced `catch (Exception)` on all three call sites —
+      including `BlobDiffWork#resolveBlob`, which runs on a WorkManager thread that *is* interrupted
+      at shutdown and filed a bogus `error` diff instead of letting the cancel through. Narrowed to
+      `throws IOException`, which removed 17 propagating signatures and all three broad catches.
+      Safe because the plugin is unreleased. `PlainTextExtractor` already declared the narrow form.
+
+    - **`BlobDiffComponent#resolve` caught too *narrowly*.** `extractor.init(...)` is inside the
+      `try` and throws unchecked — `ConverterTextExtractor` does `Integer.parseInt` on a contributed
+      `minLineLength` — so a typo in an XML contribution escaped `catch (ReflectiveOperationException)`
+      and failed component startup, which is exactly what the surrounding log-and-skip exists to
+      prevent. Now `ReflectiveOperationException | RuntimeException`.
+
+    - **Temporary files in the tests.** Four sites used `File/Files.createTempFile` with no explicit
+      parent (so `java.io.tmpdir` as resolved at JVM start, which the guideline calls out as "a
+      common failure case" for tests) plus `deleteOnExit()`, which it rules out. Now
+      `Framework.createTempFile` — which falls back safely when `Environment.getDefault()` is null,
+      so it works in the pure-JUnit tests too — and deterministic `@After` cleanup.
+      **`Framework.trackFile` is not usable here**: it resolves `EventService` and NPEs without a
+      runtime.
+
+    - **`normalizeImageAnalysisLevel()` wrote back.** A query method assigning to a non-`volatile`
+      field of the descriptor instance the whole runtime shares, called from `start()` *and* from
+      `diffLocal()` on the `blobDiff` worker threads. The write was idempotent so the outcome was
+      benign, but it was a data race on a registry object and it made the "configured differs from
+      normalized" warning in `start()` a one-shot. Now pure.
+
+    - Smaller: `MaterializedBlob` dropped its `CloseableFile` without closing it when `FileBlob`
+      construction threw, leaking the temp file for good (`CloseableFile` has no GC fallback);
+      `ZipInputStream` wrapped `blob.getStream()` inside a try-with-resources header, where the two
+      other sites in the same file already used the two-resource form; `PDDocument` was built in an
+      argument position and closed by the callee's first statement; the PDF stream fallback still
+      did `readAllBytes()` while its Javadoc said otherwise (now `RandomAccessReadBuffer`);
+      `ConverterTextExtractor` used `Blob#getString()`, which turns a blank or unknown declared
+      encoding into an `UnsupportedEncodingException` and files the whole diff as `error` — the
+      `charsetOf` logic that exists for precisely that was not applied to it, and is now shared
+      through `io/BlobCharsets`; two `DateTimeFormatter`s set the zone and left the **locale**
+      implicit while feeding a repository **path** and an **NXQL `DATE` literal**; `BlobDiff.Purge`
+      returned HTTP 500 for a concurrent purge instead of 409.
+
+    - Cosmetic, done because it was mechanical: every `@since` is now `2025.1` (the plugin is
+      unreleased, so the `1.0`/`1.1`/`1.2`/`2025.2`/`2025.3`/`2025.4` spread recorded nothing real),
+      and all 61 Java files carry the full Apache 2.0 header — six did not.
+
+    Coverage: `TestImageInventoryExtractor#testAnOverSizedSpreadsheetImageIsDroppedInsteadOfBuffered`,
+    `#testAnOverSizedPresentationImageIsDroppedInsteadOfBuffered`,
+    `#testDroppingAPictureDoesNotRenumberTheFollowingOnes` and
+    `TestBlobDiffConfigDescriptor#testNormalizingDoesNotMutateTheSharedDescriptor`. All four were
+    checked to fail against the unpatched code. 212 tests → 216.
+
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
 
@@ -632,6 +732,7 @@ numbered the same way.
 |---|---|---|---|
 | next | 26 | M | **Open bug**, diagnosed to one link in the chain, not yet fixed |
 | next | 27 | S | Cosmetic, `BlobDiff` has no edit layout |
+| — | 29 | M | Deferred half of the item 28 compliance pass, cosmetic only |
 | — | 24 | S | Optional. The index of item 21 already solves the scalability problem |
 | — | 14 | — | **Closed**, see below |
 | — | 12 | — | **Dropped**, see below |
@@ -712,11 +813,43 @@ inner `<nuxeo-document>` entirely.
 
 
 ### 27. Hide the Edit action on `BlobDiff` — OPEN
-
 Opening a `BlobDiff` logs a 404 for `document/blobdiff/nuxeo-blobdiff-edit-layout.html`: Web UI
 offers the Edit action and there is no edit layout, by design — a diff is a record, never edited.
 Filter the action out for the type rather than adding an empty layout, which is what
 `nuxeo-blobdiff-metadata-layout.html` had to do for a different reason.
+
+
+### 29. Javadoc phrasing and `var` — the deferred half of item 28 — OPEN, COSMETIC
+
+Item 28 fixed everything with a behavioural consequence and deliberately left two purely cosmetic
+families alone, because together they touch all 34 main files and would have buried the substantive
+diff. Neither changes a single line of logic.
+
+- **Javadoc first sentences.** The Nuxeo style wants a 3rd-person verb phrase ending in a period
+  ("Returns the id of…"). The plugin mostly uses bare predicates and noun phrases
+  (`{@code true} if …`, `Id of … , or {@code null}`). Counted: **38 methods, 22 fields**. There are
+  also 27 *type*-level noun phrases — **leave those**: a noun phrase on a type is the dominant style
+  in the platform itself, so the rule is scoped to methods and fields here.
+  One real tag defect to fix with them: `ImageInventoryExtractor`'s `@param dropped` is three
+  sentences and ends with a period, where `@param` must be an uncapitalised fragment with no period.
+  Fifteen members have tag-only Javadoc with no description sentence, and five public members have
+  none at all — `TextDiffer#diff(DiffableContent, DiffableContent)`, the most-called method of the
+  class, is one of them.
+
+- **`var`.** The LTS 2025 `AGENTS.md` lists local variable type inference under "Modern Java
+  Features (USE THEM)". The plugin uses it **once** in 5 000 lines
+  (`BlobDiffPurgeAbortOp:58`). About 40 sites would take it naturally — those whose right-hand side
+  is a `new ConcreteType(...)`, a cast, or `Framework.getService(T.class)`. Diamond declarations
+  (`List<X> x = new ArrayList<>()`) are *not* in that count: `var` buys nothing there.
+  One switch-expression candidate exists, `BlobModificationListener#commentSuffix` (:424-435), a
+  three-armed `if`-ladder over `String` constants — `case null, default ->` is final in Java 21.
+  `.collect(Collectors.toList())`: **zero occurrences, nothing to do.** Text blocks: no site worth
+  converting, and specifically **not** the five `@Operation(description = "…" + "…")` values, which
+  are single sentences split for line width — a text block would inject literal newlines into the
+  operation registry.
+
+Do these in one mechanical pass, on their own commit, or not at all. There is no test that can
+observe either.
 
 
 ### 24. Replace the idempotency query with a path lookup — OPTIONAL

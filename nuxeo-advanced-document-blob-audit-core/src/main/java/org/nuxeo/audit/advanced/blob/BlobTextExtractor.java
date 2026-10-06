@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import java.io.IOException;
 import java.util.Map;
 
 import org.nuxeo.ecm.core.api.Blob;
@@ -27,18 +28,24 @@ import org.nuxeo.ecm.core.api.Blob;
  * {@code org.nuxeo.audit.advanced.blob.BlobDiffComponent} and selected by mime type, with an
  * ordering that lets a specialised extractor take precedence over a generic one.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public interface BlobTextExtractor {
 
     /**
      * Extracts the comparable content of the given blob.
+     * <p>
+     * <b>Declares {@code IOException}, deliberately not {@code Exception}.</b> It used to declare
+     * the latter, which forced every caller into a {@code catch (Exception)} - the shape the Nuxeo
+     * guidelines call out, because it also catches {@code InterruptedException} and swallows the
+     * cooperative-cancellation signal of the {@code blobDiff} worker threads. An implementation
+     * that needs to report a non-I/O failure should throw a {@link org.nuxeo.ecm.core.api.NuxeoException}.
      *
      * @param blob the blob to read, never {@code null}
      * @param maxLines the maximum number of {@link ContentLine} to produce; implementations must
      *            stop past this limit and flag the result as truncated
      */
-    DiffableContent extract(Blob blob, int maxLines) throws Exception;
+    DiffableContent extract(Blob blob, int maxLines) throws IOException;
 
     /** Optional initialisation hook, called once with the contributed descriptor properties. */
     default void init(Map<String, String> properties) {

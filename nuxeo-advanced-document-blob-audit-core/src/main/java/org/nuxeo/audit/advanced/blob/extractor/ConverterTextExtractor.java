@@ -15,13 +15,17 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.io.IOUtils;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.io.BlobCharsets;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
 import org.nuxeo.ecm.core.api.blobholder.SimpleBlobHolder;
@@ -36,7 +40,7 @@ import org.nuxeo.runtime.api.Framework;
  * Output is positional and paragraph-oriented. Layout, styles and tables are lost - this is a
  * textual diff, not a Word "track changes" equivalent, and a scanned PDF yields nothing without OCR.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class ConverterTextExtractor implements BlobTextExtractor {
 
@@ -57,14 +61,14 @@ public class ConverterTextExtractor implements BlobTextExtractor {
     }
 
     @Override
-    public DiffableContent extract(Blob blob, int maxLines) throws Exception {
+    public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         ConversionService conversionService = Framework.getService(ConversionService.class);
         BlobHolder result = conversionService.convert(converter, new SimpleBlobHolder(blob), null);
         Blob textBlob = result == null ? null : result.getBlob();
         if (textBlob == null) {
             return DiffableContent.positional(List.of(), false);
         }
-        String text = textBlob.getString();
+        String text = read(textBlob);
         List<ContentLine> lines = new ArrayList<>();
         boolean truncated = false;
         for (String raw : text.split("\\R")) {
@@ -79,5 +83,23 @@ public class ConverterTextExtractor implements BlobTextExtractor {
             lines.add(ContentLine.of(value));
         }
         return DiffableContent.positional(lines, truncated);
+    }
+
+    /**
+     * Decodes the converter output with an explicitly resolved charset.
+     * <p>
+     * Deliberately not {@code textBlob.getString()}: that builds an
+     * {@code InputStreamReader(stream, String)} from {@code getEncoding()} and only guards against
+     * {@code null}. A <b>blank</b> or unknown encoding - and {@code converter} is a contributed
+     * property, so the output blob is not necessarily produced by {@code any2text} - becomes an
+     * {@code UnsupportedEncodingException}, and the whole diff is filed as {@code error} for a
+     * reason that has nothing to do with the content.
+     *
+     * @since 2025.1
+     */
+    protected String read(Blob textBlob) throws IOException {
+        try (InputStream in = textBlob.getStream()) {
+            return IOUtils.toString(in, BlobCharsets.of(textBlob));
+        }
     }
 }

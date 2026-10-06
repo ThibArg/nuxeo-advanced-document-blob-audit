@@ -54,7 +54,7 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
  * from the absence of a change. The contract asserted here is "exactly one audit entry carrying a
  * {@code skipReason}, and zero {@code BlobDiff}".
  *
- * @since 2025.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

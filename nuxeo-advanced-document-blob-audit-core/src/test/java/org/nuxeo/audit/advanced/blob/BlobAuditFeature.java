@@ -25,7 +25,7 @@ import org.nuxeo.runtime.test.runner.RunnerFeature;
  * Wraps the platform in-memory audit backend and deploys this bundle. The feature ships disabled in
  * production, so the test config contribution turns it on.
  *
- * @since 1.0
+ * @since 2025.1
  */
 @Features({ org.nuxeo.audit.test.AuditFeature.class , org.nuxeo.ecm.core.test.CoreFeature.class})
 @Deploy("org.nuxeo.ecm.platform.query.api")

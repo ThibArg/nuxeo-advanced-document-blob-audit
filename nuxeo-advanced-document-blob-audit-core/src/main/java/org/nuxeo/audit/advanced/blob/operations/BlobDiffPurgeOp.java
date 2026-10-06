@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob.operations;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Calendar;
+import java.util.Locale;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -59,7 +60,7 @@ import org.nuxeo.runtime.api.Framework;
  * to the ACL of {@code /change-diff}, like every other operation of this plugin. This operation is
  * also the <b>only</b> supported way in: the bulk action itself is not {@code httpEnabled}.
  *
- * @since 1.2
+ * @since 2025.1
  */
 @Operation(id = BlobDiffPurgeOp.ID, category = "Audit", label = "BlobDiff: Purge",
         description = "Schedules the permanent deletion of BlobDiff documents older than a date. "
@@ -76,9 +77,13 @@ public class BlobDiffPurgeOp {
      * uses to build the dated containers. Formatting it in the JVM default zone would shift the
      * boundary by a day, and two nodes of a cluster in different zones would not purge the same
      * set for a single "before" parameter.
+     * <p>
+     * {@link Locale#ROOT} for the same class of reason: {@code ofPattern(String)} inherits
+     * {@code Locale.getDefault(FORMAT)} and its {@code DecimalStyle}, so a locale with a non-Latin
+     * numbering system would render non-ASCII digits straight into an NXQL {@code DATE} literal.
      */
-    protected static final DateTimeFormatter BOUNDARY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-                                                                                .withZone(ZoneOffset.UTC);
+    protected static final DateTimeFormatter BOUNDARY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd",
+            Locale.ROOT).withZone(ZoneOffset.UTC);
 
     @Context
     protected CoreSession session;
@@ -105,7 +110,9 @@ public class BlobDiffPurgeOp {
             // writes nothing to the repository, so there is no work to undo if it does not commit.
             commandId = Framework.getService(BulkService.class).submit(command);
         } catch (ConcurrentUpdateException e) {
-            throw new NuxeoException("A BlobDiff purge is already running on this repository", e);
+            // 409, not the default 500: a purge already running is a legitimate, transient refusal
+            // the caller can act on, like every other refusal this plugin reports.
+            throw new NuxeoException("A BlobDiff purge is already running on this repository", e, 409);
         }
         log.info("BlobDiff purge scheduled by {}: command {} (before {}, status {})", user, commandId,
                 before.getTime(), status);

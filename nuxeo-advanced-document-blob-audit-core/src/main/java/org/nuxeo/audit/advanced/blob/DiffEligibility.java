@@ -23,7 +23,7 @@ package org.nuxeo.audit.advanced.blob;
  * indistinguishable from the absence of a change. Only {@link #NOT_APPLICABLE} stays fully silent,
  * because it means the feature was never meant to look at that property in the first place.
  *
- * @since 2025.2
+ * @since 2025.1
  */
 public enum DiffEligibility {
 

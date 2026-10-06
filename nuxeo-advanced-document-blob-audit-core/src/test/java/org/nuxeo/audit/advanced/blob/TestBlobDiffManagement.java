@@ -65,7 +65,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * Step 2 server side: binary keys persisted on BlobDiff, Delete / Purge / Retry operations and the
  * {@code blobDiffSource} enricher used by Web UI.
  *
- * @since 1.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

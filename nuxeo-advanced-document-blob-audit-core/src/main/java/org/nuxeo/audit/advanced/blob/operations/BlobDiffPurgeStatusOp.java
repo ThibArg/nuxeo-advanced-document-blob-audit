@@ -36,7 +36,7 @@ import org.nuxeo.runtime.api.Framework;
  * An unknown or expired command id yields {@code state: UNKNOWN} rather than an error: that is also
  * what a still-uncommitted {@code submitTransactional} returns.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @Operation(id = BlobDiffPurgeStatusOp.ID, category = "Audit", label = "BlobDiff: Purge Status",
         description = "Returns the progress of a purge scheduled by BlobDiff.Purge. "

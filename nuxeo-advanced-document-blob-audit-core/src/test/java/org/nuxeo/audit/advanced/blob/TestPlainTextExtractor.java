@@ -34,7 +34,7 @@ import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
  * source files. The simplest and most faithful of the three extractors, since nothing is lost in
  * translation.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TestPlainTextExtractor {
 

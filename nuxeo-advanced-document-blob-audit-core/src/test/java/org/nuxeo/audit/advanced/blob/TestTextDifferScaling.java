@@ -32,7 +32,7 @@ import org.junit.Test;
  * paragraphs. A textbook LCS table would allocate ~92 MB for that single comparison, leaving no
  * headroom before an OutOfMemoryError under concurrent works.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TestTextDifferScaling {
 

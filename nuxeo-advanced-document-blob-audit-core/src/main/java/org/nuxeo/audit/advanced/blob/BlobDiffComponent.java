@@ -39,6 +39,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_TRUNCATED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_USER;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
@@ -49,6 +50,7 @@ import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.LogManager;
@@ -73,7 +75,7 @@ import org.nuxeo.runtime.model.DefaultComponent;
  * Registry of {@link BlobTextExtractor} implementations plus the {@link BlobDiffService}
  * implementation.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobDiffComponent extends DefaultComponent implements BlobDiffService {
 
@@ -86,7 +88,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      * purpose: both an image extractor and a text extractor run on the same blob, so they cannot
      * compete for the same mime type in a single, order-based selection.
      *
-     * @since 2025.3
+     * @since 2025.1
      */
     public static final String XP_IMAGE_EXTRACTORS = "imageExtractors";
 
@@ -125,7 +127,11 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                 BlobTextExtractor extractor = descriptor.getKlass().getDeclaredConstructor().newInstance();
                 extractor.init(descriptor.getProperties());
                 resolved.add(new ResolvedExtractor(descriptor, extractor));
-            } catch (ReflectiveOperationException e) {
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                // RuntimeException included on purpose: init() parses contributed properties -
+                // ConverterTextExtractor does Integer.parseInt on minLineLength - so a typo in an
+                // XML contribution used to escape here and fail the whole component start, which
+                // is exactly what logging and skipping this one extractor is meant to prevent.
                 log.error("Cannot instantiate blob diff extractor: {}", descriptor.getId(), e);
             }
         }
@@ -168,7 +174,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return findExtractor(extractors, mimeType);
     }
 
-    /** @since 2025.3 */
+    /** @since 2025.1 */
     protected BlobTextExtractor findImageExtractor(String mimeType) {
         return findExtractor(imageExtractors, mimeType);
     }
@@ -204,7 +210,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
         try {
             return extractor.extract(blob, getConfig().getMaxLines());
-        } catch (Exception e) { // NOSONAR - checked exceptions of the extractor SPI
+        } catch (IOException e) {
             throw new NuxeoException("Blob content extraction failed for mime type " + blob.getMimeType(), e);
         }
     }
@@ -244,7 +250,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             DiffResult imageResult = differ.diff(extractImages(imageExtractor, oldBlob, maxLines),
                     extractImages(imageExtractor, newBlob, maxLines));
             return differ.merge(textResult, imageResult);
-        } catch (Exception e) { // NOSONAR - the image inventory must never lose the text diff
+        } catch (IOException | RuntimeException e) {
             // Deliberately asymmetric with extract(): a failing *text* extraction raises, because
             // there is nothing left to record, while a failing image inventory only costs a
             // section of the report. Do not "harmonize" the two.
@@ -254,7 +260,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /** A missing side (first version, blob added or removed) has an empty inventory, not none. */
-    protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws Exception {
+    protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws IOException {
         return blob == null ? DiffableContent.keyed(List.of(), false) : extractor.extract(blob, maxLines);
     }
 
@@ -276,15 +282,20 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     protected static final ReentrantLock CONTAINER_LOCK = new ReentrantLock();
 
     /**
-     * Dated path of a container, always in UTC.
+     * Dated path of a container, always in UTC and always in {@link Locale#ROOT}.
      * <p>
      * The previous implementation built three {@code SimpleDateFormat} per call in the JVM default
      * time zone. Two nodes of the same cluster in different zones would then write the diffs of a
      * single instant into two different dated folders, and a purge "before yyyy-MM-dd" would not
      * mean the same thing depending on which node answered.
+     * <p>
+     * The locale matters for the same reason the zone does, and was the half of it left implicit:
+     * {@code ofPattern(String)} takes {@code Locale.getDefault(FORMAT)} and with it a
+     * {@code DecimalStyle}, so under a locale with a non-Latin numbering system the year, month and
+     * day would render as non-ASCII digits - inside a repository <b>path</b>.
      */
-    protected static final DateTimeFormatter CONTAINER_PATH_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd")
-                                                                                      .withZone(ZoneOffset.UTC);
+    protected static final DateTimeFormatter CONTAINER_PATH_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd",
+            Locale.ROOT).withZone(ZoneOffset.UTC);
 
     @Override
     public DocumentModel getOrCreateContainer(CoreSession session, Date date) {

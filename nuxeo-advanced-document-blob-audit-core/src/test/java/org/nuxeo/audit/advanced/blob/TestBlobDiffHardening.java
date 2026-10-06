@@ -47,7 +47,7 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
  * Hardening of the asynchronous pipeline: fulltext exclusion, dedicated work queue, deterministic
  * work id, idempotent work and bounded version lookup.
  *
- * @since 2025.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

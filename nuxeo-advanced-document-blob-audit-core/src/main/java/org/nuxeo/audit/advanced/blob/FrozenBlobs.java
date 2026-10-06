@@ -23,7 +23,7 @@ import org.nuxeo.ecm.core.blob.ManagedBlob;
  * document so that a diff in {@code error} can be replayed later ({@code BlobDiff.Retry}), even when
  * the binaries could not be read at the time.
  *
- * @since 1.2
+ * @since 2025.1
  */
 public record FrozenBlobs(String oldProviderId, String oldKey, String oldMimeType, long oldLength,
         String newProviderId, String newKey, String newMimeType, long newLength) {

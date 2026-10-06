@@ -52,7 +52,7 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
  * Runtime tests for {@link BlobDiffService}: extractor selection, guardrails, container layout and
  * security, and persistence of the {@code BlobDiff} document.
  *
- * @since 1.0
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

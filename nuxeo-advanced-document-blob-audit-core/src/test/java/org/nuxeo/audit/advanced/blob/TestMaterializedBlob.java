@@ -26,14 +26,18 @@ import java.io.File;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
+import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.RuntimeFeature;
@@ -43,13 +47,29 @@ import org.nuxeo.runtime.test.runner.RuntimeFeature;
  * <p>
  * Needs the runtime, because materialising goes through {@code Framework.createTempFile}.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(RuntimeFeature.class)
 public class TestMaterializedBlob {
 
     protected static final byte[] CONTENT = "hello".getBytes(StandardCharsets.UTF_8);
+
+    /**
+     * Temporary files built by the tests, deleted after each one.
+     * <p>
+     * Not {@code deleteOnExit()}: the Nuxeo guidelines rule it out, and these tests assert on
+     * {@code file.exists()}, so the deletion has to happen after the assertions anyway.
+     */
+    protected final List<File> tempFiles = new ArrayList<>();
+
+    @After
+    public void deleteTempFiles() throws Exception {
+        for (File file : tempFiles) {
+            Files.deleteIfExists(file.toPath());
+        }
+        tempFiles.clear();
+    }
 
     protected Blob remoteLike(String filename) {
         Blob blob = new ByteArrayBlob(CONTENT, "text/plain", StandardCharsets.UTF_8.name());
@@ -99,8 +119,8 @@ public class TestMaterializedBlob {
      */
     @Test
     public void testAlreadyLocalBlobIsAPassThroughAndItsFileSurvives() throws Exception {
-        File file = File.createTempFile("blobdiff-test-", ".txt");
-        file.deleteOnExit();
+        File file = Framework.createTempFile("blobdiff-test-", ".txt");
+        tempFiles.add(file);
         Files.write(file.toPath(), CONTENT);
         Blob source = new FileBlob(file, "text/plain");
 
@@ -113,8 +133,8 @@ public class TestMaterializedBlob {
 
     @Test
     public void testAlreadyLocalBlobIsNotRead() throws Exception {
-        File file = File.createTempFile("blobdiff-test-", ".txt");
-        file.deleteOnExit();
+        File file = Framework.createTempFile("blobdiff-test-", ".txt");
+        tempFiles.add(file);
         Files.write(file.toPath(), CONTENT);
         AtomicInteger reads = new AtomicInteger();
         Blob source = new FileBlob(file, "text/plain") {

@@ -1,4 +1,18 @@
-/* (C) Copyright 2026 Nuxeo SA and others. Licensed under Apache License 2.0. */
+/*
+ * (C) Copyright 2026 Nuxeo SA (http://nuxeo.com/) and others.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
@@ -9,6 +23,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
@@ -20,17 +36,39 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.CreationHelper;
+import org.apache.poi.sl.usermodel.PictureData.PictureType;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.Document;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.junit.After;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
+import org.nuxeo.runtime.api.Framework;
 
 public class TestImageInventoryExtractor {
 
     protected static final int MAX_LINES = 1000;
+
+    /**
+     * Temporary PDFs built by {@link #pdf(String, byte[]...)}, deleted after each test.
+     * <p>
+     * Not {@code deleteOnExit()}, which the Nuxeo guidelines rule out, and not
+     * {@code Framework.trackFile} either: that resolves {@code EventService} and needs a running
+     * runtime, which this pure-JUnit test does not have.
+     */
+    protected final List<File> tempFiles = new ArrayList<>();
+
+    @After
+    public void deleteTempFiles() throws Exception {
+        for (File file : tempFiles) {
+            Files.deleteIfExists(file.toPath());
+        }
+        tempFiles.clear();
+    }
 
     protected static final byte[] PNG = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
@@ -67,8 +105,8 @@ public class TestImageInventoryExtractor {
                     content.drawImage(object, 10, 10, 50, 50);
                 }
             }
-            File file = File.createTempFile("blobdiff-test-", ".pdf");
-            file.deleteOnExit();
+            File file = Framework.createTempFile("blobdiff-test-", ".pdf");
+            tempFiles.add(file);
             document.save(file);
             return new FileBlob(file, "application/pdf", null, filename, null);
         }
@@ -90,7 +128,8 @@ public class TestImageInventoryExtractor {
             CreationHelper helper = workbook.getCreationHelper();
             ClientAnchor anchor = helper.createClientAnchor();
             anchor.setCol1(1); anchor.setRow1(3); anchor.setCol2(5); anchor.setRow2(17);
-            sheet.createDrawingPatriarch().createPicture(anchor, workbook.addPicture(PNG, XSSFWorkbook.PICTURE_TYPE_PNG));
+            sheet.createDrawingPatriarch()
+                 .createPicture(anchor, workbook.addPicture(PNG, XSSFWorkbook.PICTURE_TYPE_PNG));
             workbook.write(out);
             blob = BlobAuditTestHelper.blob(out.toByteArray(), BlobAuditTestHelper.XLSX_MIME, "image.xlsx");
         }
@@ -101,8 +140,10 @@ public class TestImageInventoryExtractor {
 
     @Test
     public void testKeyedDiffReportsReplacement() throws Exception {
-        DiffableContent before = DiffableContent.keyed(List.of(ContentLine.of("word:image:image1.png", "sha256:a")), false);
-        DiffableContent after = DiffableContent.keyed(List.of(ContentLine.of("word:image:image1.png", "sha256:b")), false);
+        DiffableContent before = DiffableContent.keyed(
+                List.of(ContentLine.of("word:image:image1.png", "sha256:a")), false);
+        DiffableContent after = DiffableContent.keyed(
+                List.of(ContentLine.of("word:image:image1.png", "sha256:b")), false);
         DiffResult result = new TextDiffer().diff(before, after);
         assertEquals(1, result.changed());
     }
@@ -240,5 +281,99 @@ public class TestImageInventoryExtractor {
 
         assertEquals("an image over the budget must be dropped", 0, content.size());
         assertTrue("dropping an image must be reported as a truncation", content.truncated());
+    }
+
+    /**
+     * The same budget, on the two formats it was never applied to.
+     * <p>
+     * The DOCX and PDF paths dropped an entry past {@link ImageInventoryExtractor#maxImageBytes()};
+     * the XLSX and PPTX ones called {@code PictureData#getData()}, which materialises the whole
+     * inflated image. POI caps that at its own {@code MAX_IMAGE_SIZE} - 100 MB in 5.5.1 - so it was
+     * never the unbounded allocation SEC-02 was, but it was three times this extractor's budget and
+     * it made the budget mean two different things depending on the container.
+     * <p>
+     * The fixture keeps the same shape at a scale a test can afford: 64 KB against a 1 KB cap.
+     */
+    @Test
+    public void testAnOverSizedSpreadsheetImageIsDroppedInsteadOfBuffered() throws Exception {
+        Blob blob = xlsxWithPictures("bomb.xlsx", new byte[64 * 1024], PNG);
+
+        assertEquals("the fixture must hold two pictures at default settings", 2,
+                extractor.extract(blob, MAX_LINES).size());
+
+        DiffableContent content = new CappedExtractor(1024).extract(blob, MAX_LINES);
+
+        assertEquals("the over-sized picture must be dropped and the normal one kept", 1, content.size());
+        assertTrue("dropping a picture must be reported as a truncation", content.truncated());
+    }
+
+    /** @see #testAnOverSizedSpreadsheetImageIsDroppedInsteadOfBuffered */
+    @Test
+    public void testAnOverSizedPresentationImageIsDroppedInsteadOfBuffered() throws Exception {
+        Blob blob = pptxWithPictures("bomb.pptx", new byte[64 * 1024], PNG);
+
+        assertEquals("the fixture must hold two pictures at default settings", 2,
+                extractor.extract(blob, MAX_LINES).size());
+
+        DiffableContent content = new CappedExtractor(1024).extract(blob, MAX_LINES);
+
+        assertEquals("the over-sized picture must be dropped and the normal one kept", 1, content.size());
+        assertTrue("dropping a picture must be reported as a truncation", content.truncated());
+    }
+
+    /**
+     * A dropped picture must not renumber the ones after it: the PPTX key carries a {@code #2}
+     * occurrence counter, and the XLSX key an ordinal when the shape has no anchor. Shifting either
+     * would make every following placement look changed on one side of a diff.
+     */
+    @Test
+    public void testDroppingAPictureDoesNotRenumberTheFollowingOnes() throws Exception {
+        Blob blob = pptxWithPictures("mixed.pptx", new byte[64 * 1024], PNG);
+
+        List<String> full = new CappedExtractor(128 * 1024).extract(blob, MAX_LINES)
+                                                           .lines()
+                                                           .stream()
+                                                           .map(ContentLine::key)
+                                                           .toList();
+        List<String> capped = new CappedExtractor(1024).extract(blob, MAX_LINES)
+                                                       .lines()
+                                                       .stream()
+                                                       .map(ContentLine::key)
+                                                       .toList();
+
+        assertEquals(2, full.size());
+        assertEquals("the surviving key must be identical to the one it has when nothing is dropped",
+                List.of(full.get(1)), capped);
+    }
+
+    protected Blob xlsxWithPictures(String filename, byte[]... images) throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Budget");
+            CreationHelper helper = workbook.getCreationHelper();
+            var drawing = sheet.createDrawingPatriarch();
+            int row = 0;
+            for (byte[] image : images) {
+                ClientAnchor anchor = helper.createClientAnchor();
+                anchor.setCol1(0);
+                anchor.setRow1(row);
+                anchor.setCol2(2);
+                anchor.setRow2(row + 4);
+                row += 5;
+                drawing.createPicture(anchor, workbook.addPicture(image, XSSFWorkbook.PICTURE_TYPE_PNG));
+            }
+            workbook.write(out);
+            return BlobAuditTestHelper.blob(out.toByteArray(), BlobAuditTestHelper.XLSX_MIME, filename);
+        }
+    }
+
+    protected Blob pptxWithPictures(String filename, byte[]... images) throws Exception {
+        try (XMLSlideShow show = new XMLSlideShow(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            XSLFSlide slide = show.createSlide();
+            for (byte[] image : images) {
+                slide.createPicture(show.addPicture(image, PictureType.PNG));
+            }
+            show.write(out);
+            return BlobAuditTestHelper.blob(out.toByteArray(), BlobAuditTestHelper.PPTX_MIME, filename);
+        }
     }
 }

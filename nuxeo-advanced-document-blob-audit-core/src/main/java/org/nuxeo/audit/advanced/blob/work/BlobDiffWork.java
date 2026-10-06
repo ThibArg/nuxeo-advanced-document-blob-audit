@@ -24,6 +24,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.WORK_CATEGORY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 
+import java.io.IOException;
 import java.util.Date;
 
 import org.apache.logging.log4j.LogManager;
@@ -50,7 +51,7 @@ import org.nuxeo.runtime.api.Framework;
  * rereads the blob property from the current document, because a later save could otherwise make a
  * queued v1 -> v2 work compare v1 -> v3.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobDiffWork extends AbstractWork {
 
@@ -136,7 +137,7 @@ public class BlobDiffWork extends AbstractWork {
         this.versions = versions == null ? VersionContext.NONE : versions;
     }
 
-    /** @since 1.2 */
+    /** @since 2025.1 */
     public BlobDiffWork withReplaceDiffId(String diffId) {
         this.replaceDiffId = diffId;
         return this;
@@ -154,7 +155,7 @@ public class BlobDiffWork extends AbstractWork {
      * is just as stable: the same two binaries always produce the same diff. The correlation id is
      * only a last-resort fallback when neither is available.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     protected static String workId(String repositoryName, String docId, String xpath, String oldDigest,
             String newDigest, String correlationId, VersionContext versions) {
@@ -174,7 +175,7 @@ public class BlobDiffWork extends AbstractWork {
      * unavailable, a concurrent update on the dated container. Retrying is safe because
      * {@link #existingDiffId()} makes the work idempotent.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     @Override
     public int getRetryCount() {
@@ -197,7 +198,7 @@ public class BlobDiffWork extends AbstractWork {
      * The diff being replaced by {@code BlobDiff.Retry} is excluded on purpose: it carries the same
      * correlation id by design, and is precisely what this run must supersede.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     protected String existingDiffId() {
         if (correlationId == null) {
@@ -331,7 +332,7 @@ public class BlobDiffWork extends AbstractWork {
      * {@code diffCorrelationId}, so a {@code BlobDiff} has to exist for it either way.
      *
      * @return {@code STATUS_SKIPPED_SIZE}, {@code STATUS_SKIPPED_TYPE}, or {@code null} to diff
-     * @since 2025.4
+     * @since 2025.1
      */
     protected String ineligibleStatus(BlobDiffService service, String docType, Blob oldBlob, Blob newBlob) {
         return DiffEligibility.combine(service.getEligibility(docType, xpath, oldBlob),
@@ -357,7 +358,11 @@ public class BlobDiffWork extends AbstractWork {
             info.digest = digest;
             info.length = length < 0 ? null : Long.valueOf(length);
             return provider.readBlob(info);
-        } catch (Exception e) { // NOSONAR - a missing frozen binary must not fail the work
+        } catch (IOException | RuntimeException e) {
+            // Narrow on purpose: readBlob declares IOException and nothing else. Catching Exception
+            // here also caught InterruptedException, on a WorkManager thread that is interrupted at
+            // shutdown - the work then filed a bogus "error" diff instead of letting the cancel
+            // through.
             log.warn("Cannot resolve {} blob {} from provider {}", side, key, providerId, e);
             return null;
         }

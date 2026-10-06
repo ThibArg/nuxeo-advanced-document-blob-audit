@@ -23,7 +23,7 @@ package org.nuxeo.audit.advanced.blob;
  * {@code null} the unit is positional (a plain text line, a Word paragraph) and the differ falls
  * back to a sequence alignment.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public record ContentLine(String key, String value) {
 

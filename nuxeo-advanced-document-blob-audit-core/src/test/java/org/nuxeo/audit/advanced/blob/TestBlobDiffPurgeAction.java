@@ -63,7 +63,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * Covers item 11: the retention purge runs on the Bulk Action Framework instead of looping inside
  * an Automation operation bound to the HTTP transaction.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features({ BlobAuditFeature.class, CoreBulkFeature.class })

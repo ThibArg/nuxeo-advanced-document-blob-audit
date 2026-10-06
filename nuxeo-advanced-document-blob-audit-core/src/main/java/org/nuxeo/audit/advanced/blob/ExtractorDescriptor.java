@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.nuxeo.common.xmap.annotation.XNode;
@@ -29,7 +30,7 @@ import org.nuxeo.runtime.model.Descriptor;
 /**
  * Registration of a {@link BlobTextExtractor} for a set of mime types.
  *
- * @since 1.0
+ * @since 2025.1
  */
 @XObject("extractor")
 public class ExtractorDescriptor implements Descriptor {
@@ -83,7 +84,7 @@ public class ExtractorDescriptor implements Descriptor {
         if (mimeType == null) {
             return mimeTypes.contains("*");
         }
-        String normalized = mimeType.toLowerCase();
+        String normalized = mimeType.toLowerCase(Locale.ROOT);
         int idx = normalized.indexOf(';');
         if (idx > 0) {
             normalized = normalized.substring(0, idx).trim();

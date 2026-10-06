@@ -29,7 +29,7 @@ import org.nuxeo.runtime.api.Framework;
  * {@code /change-diff} already enforces (scheduling a work, bulk purge). Reading and deleting are
  * enforced by the ACL itself.
  *
- * @since 1.2
+ * @since 2025.1
  */
 public final class BlobDiffAccess {
 

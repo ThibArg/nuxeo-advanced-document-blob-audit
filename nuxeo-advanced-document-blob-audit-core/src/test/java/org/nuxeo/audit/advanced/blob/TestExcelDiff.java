@@ -34,7 +34,7 @@ import org.nuxeo.ecm.core.api.Blob;
  * This is the highest-value scenario of the plugin, and the only one producing a genuinely
  * structured diff ({@code Sheet1!B2 : 100 -> 120}) rather than a textual approximation.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TestExcelDiff {
 

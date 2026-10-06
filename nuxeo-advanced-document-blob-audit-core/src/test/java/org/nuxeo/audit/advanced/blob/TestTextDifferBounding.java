@@ -37,7 +37,7 @@ import org.junit.Test;
  * No Nuxeo runtime: {@link TextDiffer} has no platform dependency, which is what lets these cases
  * assert the exact bound rather than approximate it. See item 23 in {@code AGENTS.md}.
  *
- * @since 2025.4
+ * @since 2025.1
  */
 public class TestTextDifferBounding {
 

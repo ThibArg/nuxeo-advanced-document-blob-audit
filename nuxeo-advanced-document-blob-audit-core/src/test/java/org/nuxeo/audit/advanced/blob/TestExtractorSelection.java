@@ -28,7 +28,7 @@ import org.junit.Test;
  * Getting this wrong is silent: a mistyped mime type simply means no extractor is found and the
  * change is logged without a diff, with no error anywhere.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TestExtractorSelection {
 

@@ -34,7 +34,7 @@ import org.nuxeo.runtime.transaction.TransactionHelper;
 /**
  * Registers {@link BlobDiffRepositoryInit} and the {@code blobContentModified} audit event type.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobDiffInitComponent extends DefaultComponent {
 
@@ -58,7 +58,7 @@ public class BlobDiffInitComponent extends DefaultComponent {
      * effective descriptor from the template for every contribution carrying {@code extends}. A
      * greenfield instance would end up with this single row and lose the platform's 51.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     protected void registerAuditEventType() {
         DirectoryService ds = Framework.getService(DirectoryService.class);

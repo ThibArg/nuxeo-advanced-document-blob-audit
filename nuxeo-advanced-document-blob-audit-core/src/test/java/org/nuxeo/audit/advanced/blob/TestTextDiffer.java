@@ -27,7 +27,7 @@ import org.junit.Test;
  * Unit tests for the diff engine. No Nuxeo runtime involved: {@link TextDiffer} is deliberately
  * free of any platform dependency so it can be tested and reasoned about in isolation.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TestTextDiffer {
 

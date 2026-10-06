@@ -1,6 +1,17 @@
 /*
  * (C) Copyright 2026 Nuxeo SA (http://nuxeo.com/) and others.
- * Licensed under the Apache License, Version 2.0.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.nuxeo.audit.advanced.blob;
 
@@ -114,7 +125,7 @@ public class BlobModificationListener implements EventListener {
      * <i>fresh, empty</i> option map, so context data set on the document is <b>not</b> propagated on
      * that path. Use {@link #runDisabled(Runnable)} when you check in explicitly.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static final String DISABLE_BLOB_DIFF_LISTENER = "disableBlobDiffListener";
 
@@ -132,7 +143,7 @@ public class BlobModificationListener implements EventListener {
      * can never leave the listener disabled for the rest of the thread - which, on a pooled request
      * thread, would silently stop auditing the whole instance.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static void runDisabled(Runnable runnable) {
         runDisabled(() -> {
@@ -144,7 +155,7 @@ public class BlobModificationListener implements EventListener {
     /**
      * Value-returning variant of {@link #runDisabled(Runnable)}.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static <T> T runDisabled(Supplier<T> supplier) {
         Boolean previous = DISABLED.get();
@@ -163,7 +174,7 @@ public class BlobModificationListener implements EventListener {
     /**
      * {@code true} when the thread-scoped switch is currently on.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static boolean isDisabledForThread() {
         return Boolean.TRUE.equals(DISABLED.get());

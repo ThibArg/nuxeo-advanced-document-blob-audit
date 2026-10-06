@@ -68,16 +68,16 @@ import java.util.Set;
  * <p>
  * No third-party diff library is required.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class TextDiffer {
 
     public static final int DEFAULT_MAX_DIFF_ENTRIES = 5000;
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     public static final int DEFAULT_MAX_DIFF_CHARS = 4 * 1024 * 1024;
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     public static final int DEFAULT_MAX_VALUE_LENGTH = 4096;
 
     /** Suffix appended to an elided value, before the character count. */
@@ -85,10 +85,10 @@ public class TextDiffer {
 
     protected final int maxEntries;
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     protected final int maxChars;
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     protected final int maxValueLength;
 
     public TextDiffer() {
@@ -103,7 +103,7 @@ public class TextDiffer {
      * @param maxEntries how many entries may be written to the diff body
      * @param maxChars hard cap on the length of the produced unified diff
      * @param maxValueLength a single extracted unit longer than this is elided in the diff body
-     * @since 2025.4
+     * @since 2025.1
      */
     public TextDiffer(int maxEntries, int maxChars, int maxValueLength) {
         this.maxEntries = maxEntries;
@@ -124,7 +124,7 @@ public class TextDiffer {
      * reports the modification; only the rendering is uninformative. Resolving it - a digest, or
      * the offset of the first difference - was judged not worth the complexity for a rare case.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     protected String elide(String value) {
         return value == null || value.length() <= maxValueLength ? value
@@ -146,7 +146,7 @@ public class TextDiffer {
      * complete line, so the tail is never a half-rendered entry, and it flags the result as
      * truncated.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     public DiffResult merge(DiffResult text, DiffResult images) {
         String unified = text.unified();

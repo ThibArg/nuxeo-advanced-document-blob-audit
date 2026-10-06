@@ -75,7 +75,7 @@ import org.nuxeo.runtime.transaction.TransactionHelper;
  * be visible to the auditors group only, <b>checked from a real non-privileged session</b>, not
  * merely by inspecting the ACL.
  *
- * @since 1.1
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)
@@ -130,7 +130,7 @@ public class TestBlobDiffLocationAndSecurity {
         return page;
     }
 
-    /** jdoe edits a text file end to end; returns the source document id. 
+    /** jdoe edits a text file end to end; returns the source document id.
      * @throws IOException */
     protected String jdoeEditsAFile(String name) throws IOException {
         grantEverythingToJdoeOnRoot();
@@ -280,7 +280,9 @@ public class TestBlobDiffLocationAndSecurity {
                 start.await();
                 String[] path = new String[1];
                 TransactionHelper.runInTransaction(() -> CoreInstance.doPrivileged(repo,
-                        (CoreSession s) -> { path[0] = blobDiffService.getOrCreateContainer(s, date).getPathAsString(); }));
+                        (CoreSession s) -> {
+                            path[0] = blobDiffService.getOrCreateContainer(s, date).getPathAsString();
+                        }));
                 return path[0];
             }));
         }

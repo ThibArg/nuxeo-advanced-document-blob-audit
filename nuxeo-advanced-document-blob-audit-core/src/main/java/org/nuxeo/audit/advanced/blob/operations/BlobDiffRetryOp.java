@@ -62,7 +62,7 @@ import org.nuxeo.runtime.api.Framework;
  * keeps the original user, date and correlation id (so the audit entry still points to it) and
  * replaces the failed one once created.
  *
- * @since 1.2
+ * @since 2025.1
  */
 @Operation(id = BlobDiffRetryOp.ID, category = "Audit", label = "BlobDiff: Retry",
         description = "Schedules again the computation of a BlobDiff in error."
@@ -136,7 +136,7 @@ public class BlobDiffRetryOp {
      * The path is the provenance: the plugin creates diffs nowhere else, and {@code /change-diff} is
      * ACL-restricted to the auditors group, so a document sitting there was put there by the plugin.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     protected void checkProvenance(DocumentModel diff) {
         String path = diff == null ? null : diff.getPathAsString();

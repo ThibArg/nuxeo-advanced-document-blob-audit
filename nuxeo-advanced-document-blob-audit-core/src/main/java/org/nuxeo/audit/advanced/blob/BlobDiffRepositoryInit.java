@@ -23,7 +23,7 @@ import org.nuxeo.runtime.api.Framework;
  * Creates the restricted diff container once, at repository initialisation, rather than lazily from
  * the listener. Guarantees the ACL is in place before the first diff is ever written.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobDiffRepositoryInit extends RepositoryInitializationHandler {
 

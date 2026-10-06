@@ -35,7 +35,7 @@ import org.nuxeo.runtime.api.Framework;
  * This is harmless - a purge is idempotent, running it again finishes the job - but the UI says so
  * before asking for confirmation.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @Operation(id = BlobDiffPurgeAbortOp.ID, category = "Audit", label = "BlobDiff: Abort Purge",
         description = "Stops a running purge. Already deleted diffs are not restored. "

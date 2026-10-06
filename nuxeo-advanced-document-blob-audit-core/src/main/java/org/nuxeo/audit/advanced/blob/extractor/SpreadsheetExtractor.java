@@ -16,6 +16,7 @@
 package org.nuxeo.audit.advanced.blob.extractor;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +47,7 @@ import org.nuxeo.ecm.core.api.Blob;
  * extraction order and to sheet reordering, but not to row shifts. Fixing that would require a row
  * alignment pass before comparing cells.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class SpreadsheetExtractor implements BlobTextExtractor {
 
@@ -70,7 +71,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
      * case where materialisation failed.
      */
     @Override
-    public DiffableContent extract(Blob blob, int maxLines) throws Exception {
+    public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         List<ContentLine> lines = new ArrayList<>();
         boolean truncated;
         File file = blob.getFile();

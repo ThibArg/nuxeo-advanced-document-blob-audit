@@ -44,7 +44,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * Covers item 10: the binaries are materialised once for the whole diff, and the image inventory
  * goes through the {@code imageExtractors} extension point instead of being hardcoded.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

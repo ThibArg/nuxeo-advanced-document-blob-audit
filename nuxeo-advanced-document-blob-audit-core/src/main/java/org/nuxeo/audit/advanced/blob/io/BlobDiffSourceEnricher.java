@@ -44,7 +44,7 @@ import com.fasterxml.jackson.core.JsonGenerator;
  * A {@code documentResolver} on {@code bdiff:sourceId} was deliberately not used: reference
  * validation would forbid recording an error diff for a source that no longer exists.
  *
- * @since 1.2
+ * @since 2025.1
  */
 @Setup(mode = SINGLETON, priority = REFERENCE)
 public class BlobDiffSourceEnricher extends AbstractJsonEnricher<DocumentModel> {

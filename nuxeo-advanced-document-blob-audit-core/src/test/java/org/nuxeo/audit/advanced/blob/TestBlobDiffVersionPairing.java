@@ -47,7 +47,7 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
  * Session D: the version pair comes from the check-in events themselves (item 9), and the blob
  * xpaths from the document type rather than from a full property walk (item 8).
  *
- * @since 2025.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

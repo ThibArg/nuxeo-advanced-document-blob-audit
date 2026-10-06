@@ -20,7 +20,7 @@ import java.io.Serializable;
 /**
  * Identity of the two versions compared by a BlobDiff.
  *
- * @since 2025.2
+ * @since 2025.1
  */
 public record VersionContext(String previousVersionId, String previousVersionLabel,
         String newVersionId, String newVersionLabel, String versionSeriesId) implements Serializable {

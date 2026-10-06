@@ -25,7 +25,7 @@ import org.nuxeo.ecm.core.api.NuxeoException;
 /**
  * Entry point of the blob diff feature.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public interface BlobDiffService {
 
@@ -38,7 +38,7 @@ public interface BlobDiffService {
      * {@link #isDiffable}, which collapses "out of scope" and "changed but not diffable" into the
      * same {@code false}.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     DiffEligibility getEligibility(String docType, String xpath, Blob blob);
 
@@ -88,7 +88,7 @@ public interface BlobDiffService {
      * Full variant: also persists the storage identity of both binaries, which is what makes a diff
      * in {@code error} replayable.
      *
-     * @since 1.2
+     * @since 2025.1
      */
     DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
             String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,

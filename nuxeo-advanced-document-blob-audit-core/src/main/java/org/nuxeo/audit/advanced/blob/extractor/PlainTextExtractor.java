@@ -20,16 +20,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.io.BlobCharsets;
 import org.nuxeo.ecm.core.api.Blob;
 
 /**
@@ -38,11 +36,9 @@ import org.nuxeo.ecm.core.api.Blob;
  * <p>
  * The cheapest and most faithful of the three extractors, since nothing is lost in translation.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class PlainTextExtractor implements BlobTextExtractor {
-
-    private static final Logger log = LogManager.getLogger(PlainTextExtractor.class);
 
     protected boolean trimLines = true;
 
@@ -84,26 +80,18 @@ public class PlainTextExtractor implements BlobTextExtractor {
     /**
      * Charset declared on the blob, falling back to UTF-8.
      * <p>
-     * {@code blob.getEncoding()} is whatever was stored with the binary: it can be empty, or a name
-     * no JVM knows. Passing it straight to {@code InputStreamReader} threw
+     * Delegates to {@link BlobCharsets#of(Blob)}, which is shared with
+     * {@link ConverterTextExtractor}: {@code blob.getEncoding()} can be empty, or a name no JVM
+     * knows. Passing it straight to {@code InputStreamReader} threw
      * {@code UnsupportedEncodingException} (an {@code IOException}, so the extraction failed and
      * the whole diff was reported in error) or {@code IllegalCharsetNameException} (unchecked, so
      * it escaped the extractor entirely). A bad encoding declaration must degrade to a readable
      * diff, not lose the audit.
+     * <p>
+     * Kept as an instance method so a subclass can still impose its own charset policy.
      */
     protected Charset charsetOf(Blob blob) {
-        String encoding = blob.getEncoding();
-        if (encoding == null || encoding.isBlank()) {
-            return StandardCharsets.UTF_8;
-        }
-        try {
-            return Charset.forName(encoding.trim());
-        } catch (IllegalArgumentException e) {
-            // covers both IllegalCharsetNameException and UnsupportedCharsetException
-            log.warn("Blob {} declares an unusable encoding '{}', falling back to UTF-8", blob.getFilename(),
-                    encoding);
-            return StandardCharsets.UTF_8;
-        }
+        return BlobCharsets.of(blob);
     }
 
     /**

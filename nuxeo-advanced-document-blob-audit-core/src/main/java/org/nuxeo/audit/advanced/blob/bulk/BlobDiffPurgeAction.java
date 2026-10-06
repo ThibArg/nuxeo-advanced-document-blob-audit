@@ -51,7 +51,7 @@ import org.nuxeo.runtime.stream.StreamProcessorTopology;
  * off while routing the UI through {@code Bulk.RunAction} would reserve the purge to
  * administrators, which takes the feature away from the auditors it was built for.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 public class BlobDiffPurgeAction implements StreamProcessorTopology {
 

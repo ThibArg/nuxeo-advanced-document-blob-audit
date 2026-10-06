@@ -18,7 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 /**
  * Outcome of a comparison between two {@link DiffableContent}.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public record DiffResult(int added, int removed, int changed, boolean truncated, String unified) {
 

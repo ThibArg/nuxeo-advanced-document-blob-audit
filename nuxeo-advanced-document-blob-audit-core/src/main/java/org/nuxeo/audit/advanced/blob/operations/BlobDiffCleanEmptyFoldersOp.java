@@ -42,7 +42,7 @@ import org.nuxeo.ecm.core.api.PathRef;
  * still uses {@code getChildrenIterator} rather than {@code getChildren}, so that a container
  * polluted by concurrent-creation duplicates cannot materialise a large list either.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 @Operation(id = BlobDiffCleanEmptyFoldersOp.ID, category = "Audit", label = "BlobDiff: Clean Empty Folders",
         description = "Removes the dated folders left empty under /change-diff. "

@@ -18,7 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 /**
  * Shared constants.
  *
- * @since 1.0
+ * @since 2025.1
  */
 public class BlobAuditConstants {
 
@@ -123,7 +123,7 @@ public class BlobAuditConstants {
      * Platform vocabulary listing the audit event ids. Fed by {@code nuxeo-platform-audit-core}; the
      * plugin only adds its own row to it, at runtime.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static final String EVENT_TYPES_DIRECTORY = "eventTypes";
 
@@ -131,7 +131,7 @@ public class BlobAuditConstants {
      * Label of the {@link #EVENT_BLOB_MODIFIED} row. Resolved server side against the
      * {@code messages} bundle, not by Web UI, hence the properties files in {@code OSGI-INF/l10n}.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static final String LABEL_EVENT_BLOB_MODIFIED = "label.blobaudit.event.blobContentModified";
 
@@ -154,7 +154,7 @@ public class BlobAuditConstants {
      * {@link #STATUS_SKIPPED_SIZE} or {@link #STATUS_SKIPPED_TYPE}; absent on the nominal path,
      * where {@link #EXT_CORRELATION_ID} is set instead. The two are mutually exclusive.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static final String EXT_SKIP_REASON = "skipReason";
 
@@ -170,7 +170,7 @@ public class BlobAuditConstants {
      * re-read by the asynchronous work. Reported like the other skips; never a {@code bdiff:status},
      * since no {@code BlobDiff} is created. In practice this means an unusual blob provider setup.
      *
-     * @since 2025.2
+     * @since 2025.1
      */
     public static final String STATUS_SKIPPED_NOT_MANAGED = "skippedNotManaged";
 

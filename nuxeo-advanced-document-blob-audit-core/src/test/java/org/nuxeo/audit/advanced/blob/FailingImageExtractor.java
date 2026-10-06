@@ -28,7 +28,7 @@ import org.nuxeo.ecm.core.api.Blob;
  * is the asymmetry introduced by COR-01: a failing <i>text</i> extraction raises, a failing image
  * inventory only costs the image section of the report.
  *
- * @since 2025.4
+ * @since 2025.1
  */
 public class FailingImageExtractor implements BlobTextExtractor {
 

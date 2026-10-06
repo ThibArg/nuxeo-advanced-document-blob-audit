@@ -24,7 +24,7 @@ import org.nuxeo.ecm.core.bulk.message.BulkStatus;
  * JSON rendering of a {@link BulkStatus}, shared by {@code BlobDiff.PurgeStatus} and
  * {@code BlobDiff.PurgeAbort} so that the purge dialog gets the same payload either way.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 public class BlobDiffPurgeStatusJson {
 

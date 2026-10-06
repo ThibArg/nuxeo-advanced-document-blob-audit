@@ -52,7 +52,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * {@code createEntry} throw, and the throw is swallowed on purpose so that a vocabulary row never
  * breaks startup.
  *
- * @since 2025.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)

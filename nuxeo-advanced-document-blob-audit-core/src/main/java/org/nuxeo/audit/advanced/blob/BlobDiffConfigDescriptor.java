@@ -29,7 +29,7 @@ import org.nuxeo.runtime.services.config.ConfigurationService;
  * Global configuration. Everything is opt-in and bounded on purpose: diffing binaries is expensive
  * and copies business content outside of the source document.
  *
- * @since 1.0
+ * @since 2025.1
  */
 @XObject("config")
 public class BlobDiffConfigDescriptor implements Descriptor {
@@ -66,7 +66,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * together are what keeps the diff body - built in a {@code StringBuilder}, copied by
      * {@code toString()}, copied again into a blob - proportional to something known in advance.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     @XNode("maxDiffChars")
     protected int maxDiffChars = TextDiffer.DEFAULT_MAX_DIFF_CHARS;
@@ -74,7 +74,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     /**
      * A single extracted unit longer than this is elided in the diff body.
      *
-     * @since 2025.4
+     * @since 2025.1
      */
     @XNode("maxValueLength")
     protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
@@ -128,12 +128,12 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return maxDiffEntries;
     }
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     public int getMaxDiffChars() {
         return maxDiffChars;
     }
 
-    /** @since 2025.4 */
+    /** @since 2025.1 */
     public int getMaxValueLength() {
         return maxValueLength;
     }
@@ -142,11 +142,19 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return imageAnalysisLevel;
     }
 
-    /** Clamps the configured image analysis level to the range supported by this version. */
+    /**
+     * Clamps the configured image analysis level to the range supported by this version.
+     * <p>
+     * <b>Pure.</b> It used to assign the clamped value back to {@link #imageAnalysisLevel}, which
+     * made a query method write a non-{@code volatile} field of the descriptor instance the whole
+     * runtime shares through {@code getDescriptor(XP_CONFIG, ...)} - and it is called both from
+     * {@code BlobDiffComponent#start} and from {@code diffLocal}, i.e. concurrently from the
+     * {@code blobDiff} worker threads, with no happens-before edge. The write was idempotent so the
+     * outcome was benign, but it was a data race on a registry object, and it silently made the
+     * "configured value differs from the normalized one" warning in {@code start()} a one-shot.
+     */
     public int normalizeImageAnalysisLevel() {
-        imageAnalysisLevel = Math.max(MIN_IMAGE_ANALYSIS_LEVEL,
-                Math.min(MAX_IMAGE_ANALYSIS_LEVEL, imageAnalysisLevel));
-        return imageAnalysisLevel;
+        return Math.max(MIN_IMAGE_ANALYSIS_LEVEL, Math.min(MAX_IMAGE_ANALYSIS_LEVEL, imageAnalysisLevel));
     }
 
     public List<String> getDocTypes() {

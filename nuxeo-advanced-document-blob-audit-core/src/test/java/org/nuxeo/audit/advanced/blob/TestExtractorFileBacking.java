@@ -29,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.apache.poi.xslf.usermodel.XSLFTextBox;
+import org.junit.After;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
 import org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor;
@@ -49,11 +50,17 @@ import org.nuxeo.ecm.core.api.Blob;
  * memory saving itself is not unit-testable in any dependable way; it is covered by the manual
  * check recorded in item 22 of {@code AGENTS.md}.
  *
- * @since 2025.4
+ * @since 2025.1
  */
 public class TestExtractorFileBacking {
 
     protected static final int MAX_LINES = 10000;
+
+    /** Releases the files handed out by {@code onDisk()}, which no longer uses {@code deleteOnExit}. */
+    @After
+    public void deleteTempFiles() throws Exception {
+        BlobAuditTestHelper.deleteTempFiles();
+    }
 
     protected final SpreadsheetExtractor spreadsheet = new SpreadsheetExtractor();
 

@@ -40,7 +40,7 @@ import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
  * <b>Failure is not fatal.</b> If the copy fails, the source blob is returned as is: a diff read
  * the slow way is better than no diff at all.
  *
- * @since 2025.3
+ * @since 2025.1
  */
 public class MaterializedBlob implements AutoCloseable {
 
@@ -65,8 +65,9 @@ public class MaterializedBlob implements AutoCloseable {
             // Already local, or nothing to do: never take ownership of a blob store file.
             return new MaterializedBlob(source, null);
         }
+        CloseableFile closeable = null;
         try {
-            CloseableFile closeable = source.getCloseableFile();
+            closeable = source.getCloseableFile();
             // Metadata must be carried over: extractors are selected on the mime type, and
             // ConverterTextExtractor hands the blob to the ConversionService, which does the same.
             Blob local = new FileBlob(closeable.getFile(), source.getMimeType(), source.getEncoding(),
@@ -76,9 +77,27 @@ public class MaterializedBlob implements AutoCloseable {
             // RuntimeException included on purpose: getCloseableFile() goes through
             // Framework.createTempFile, which needs a running Nuxeo runtime. The fallback is
             // functionally identical, only slower.
+            //
+            // The temp file must be released on the way out. If getCloseableFile() succeeded and it
+            // is the FileBlob construction that threw, dropping the reference would leak the file
+            // for good: CloseableFile has no finaliser and no GC fallback, close() is the only
+            // thing that deletes it.
+            closeQuietly(closeable, source);
             log.warn("Cannot materialise blob {} locally, reading it from the source instead",
                     source.getFilename(), e);
             return new MaterializedBlob(source, null);
+        }
+    }
+
+    /** @since 2025.1 */
+    protected static void closeQuietly(CloseableFile closeable, Blob source) {
+        if (closeable == null) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (IOException e) { // NOSONAR - already on a failure path
+            log.warn("Cannot delete the abandoned temporary copy of blob {}", source.getFilename(), e);
         }
     }
 

@@ -44,7 +44,7 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
 /**
  * Dynamic disabling of {@link BlobModificationListener}, per operation and per thread.
  *
- * @since 2025.2
+ * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)
