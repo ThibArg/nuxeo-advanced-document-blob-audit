@@ -329,6 +329,26 @@ public class TestBlobDiffPurgeAction {
         assertEquals(0, status.get("deleted").asInt());
     }
 
+    /**
+     * SEC-03 (code review 2026-10): {@code BulkService} checks neither the action nor the owner of a
+     * command id, so these operations let any auditor read and abort any bulk command of the
+     * instance. A command that is not a purge now looks exactly like an unknown one, and is left alone.
+     */
+    @Test
+    public void testOnlyPurgeCommandsCanBeReadOrAborted() throws Exception {
+        String foreign = bulkService.submit(new org.nuxeo.ecm.core.bulk.message.BulkCommand.Builder(
+                "setProperties", "SELECT * FROM File WHERE ecm:name = 'nothing'", "Administrator").repository(
+                        session.getRepositoryName()).param("dc:description", "x").build());
+
+        JsonNode status = run(session, BlobDiffPurgeStatusOp.ID, null, Map.of("commandId", foreign));
+        JsonNode aborted = run(session, BlobDiffPurgeAbortOp.ID, null, Map.of("commandId", foreign));
+
+        assertEquals("UNKNOWN", status.get("state").asText());
+        assertEquals("UNKNOWN", aborted.get("state").asText());
+        assertTrue(bulkService.await(foreign, TIMEOUT));
+        assertEquals("COMPLETED", bulkService.getStatus(foreign).getState().name());
+    }
+
     /* ==================== access control ==================== */
 
     @Test

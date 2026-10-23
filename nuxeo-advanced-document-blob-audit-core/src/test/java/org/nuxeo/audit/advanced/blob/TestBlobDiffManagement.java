@@ -278,6 +278,35 @@ public class TestBlobDiffManagement {
         assertFalse(session.exists(failed.getRef()));
     }
 
+    /**
+     * SEC-02 (code review 2026-10): the idempotency guard of the work matched a {@code BlobDiff}
+     * anywhere, on a correlation id the audit entry publishes. A copy forged outside the container
+     * made the retry delete the genuine error diff and record nothing in its place.
+     */
+    @Test
+    public void testAForgedDiffOutsideTheContainerDoesNotSuppressTheRetry() throws Exception {
+        DocumentModel v1 = file("guarded-v1", textBlob("alpha\nbeta", "text/plain", "notes.txt"));
+        DocumentModel v2 = file("guarded-v2", textBlob("alpha\nBETA", "text/plain", "notes.txt"));
+        ManagedBlob b1 = storedBlob(v1);
+        ManagedBlob b2 = storedBlob(v2);
+        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
+                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        DocumentModel decoy = session.createDocumentModel("/", "decoy", BlobAuditConstants.DIFF_DOCTYPE);
+        decoy.setPropertyValue(BlobAuditConstants.XP_CORRELATION_ID,
+                failed.getPropertyValue(BlobAuditConstants.XP_CORRELATION_ID));
+        BlobAuditTestHelper.createUnguarded(session, decoy);
+        session.save();
+        txFeature.nextTransaction();
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(v2.getId());
+        assertEquals("the retry must still record its diff", 1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
     @Test
     public void testRetryRequiresAnErrorDiffWithKeys() throws Exception {
         DocumentModel source = file("no-retry", textBlob("x", "text/plain", "x.txt"));

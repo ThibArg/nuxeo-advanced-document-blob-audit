@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob.work;
 
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
@@ -197,6 +198,9 @@ public class BlobDiffWork extends AbstractWork {
      * <p>
      * The diff being replaced by {@code BlobDiff.Retry} is excluded on purpose: it carries the same
      * correlation id by design, and is precisely what this run must supersede.
+     * <p>
+     * Only {@code /change-diff} counts. The correlation id is published in the audit entry, so a
+     * {@code BlobDiff} carrying it elsewhere could have been forged to suppress this very diff.
      *
      * @since 2025.1
      */
@@ -205,7 +209,8 @@ public class BlobDiffWork extends AbstractWork {
             return null;
         }
         String nxql = "SELECT * FROM " + DIFF_DOCTYPE + " WHERE " + XP_CORRELATION_ID + " = "
-                + NXQL.escapeString(correlationId);
+                + NXQL.escapeString(correlationId) + " AND ecm:path STARTSWITH "
+                + NXQL.escapeString("/" + CONTAINER_NAME) + " AND ecm:isProxy = 0 AND ecm:isVersion = 0";
         for (DocumentModel diff : session.query(nxql, null, 2, 0, false)) {
             if (!diff.getId().equals(replaceDiffId)) {
                 return diff.getId();

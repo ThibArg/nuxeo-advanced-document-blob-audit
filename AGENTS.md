@@ -124,6 +124,11 @@ auditors it exists for. The computation also refuses to remove anything that is 
 so even an administrator submitting the action by hand with an arbitrary query cannot turn it into
 a generic delete. Coverage: `TestBlobDiffPurgeAction`.
 
+**`BlobDiff.PurgeStatus` and `BlobDiff.PurgeAbort` only see `blobDiffPurge` commands** (item 33).
+`BulkService#getStatus` and `#abort` check neither the action nor the owner of a command id, so
+both go through `BlobDiffPurgeAction.purgeStatus`, which answers any other id as `UNKNOWN`, and the
+abort is never forwarded for it. Any auditor may still stop any purge, by design.
+
 **`BlobDiff.Purge` uses `submit()`, not `submitTransactional()`.** The latter defers the real
 submission — and with it the exclusivity check and the parameter validation — to
 `beforeCompletion`, so a second concurrent purge surfaces as a commit failure instead of a readable
@@ -202,7 +207,7 @@ not share a backend:
 
 | Site | Mechanism | Destination |
 |---|---|---|
-| `BlobDiffWork#existingDiffId:208` | `session.query` | repository, always |
+| `BlobDiffWork#existingDiffId:214` | `session.query` | repository, always |
 | `BlobModificationListener#previousVersionRefFallback:283` | `session.query` | repository, always |
 | `BLOB_DIFFS_FOR_DOCUMENT` | `<coreQueryPageProvider>` | repository, always |
 | `BLOB_DIFFS_ADMIN` | `SearchServicePageProvider` → `SearchService` | **the configured search client** |
@@ -283,7 +288,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 224 tests (23 test classes)
+mvn -o install                                     # full build, 226 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -336,7 +341,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 32 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 33 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -792,7 +797,7 @@ cited here as "code review 2026-10".
     event. The `ecm:isProxy = 0` filters keep it out of the audit lists, and publishing needs Read on
     the diff, which only auditors hold. The guard also removes the root cause of review findings
     `SEC-02` (idempotency query trusting a forged diff) and `SEC-04` (enricher trash oracle) for
-    new documents; both still need their own path filter for the legacy case.
+    new documents; both still need their own path filter for the legacy case (`SEC-02`: item 33).
 
     Coverage: `TestBlobDiffLocationAndSecurity#testNobodyCanCreateABlobDiffOutsideTheContainer`,
     `#testDiffsCannotLeaveTheContainer` and `#testAuditListIgnoresABlobDiffOutsideTheContainer`,
@@ -823,6 +828,27 @@ cited here as "code review 2026-10".
     (8 references per level over 10 levels; timed out at 10 s unpatched, 8 ms patched) and
     `#testAPdfFormSharedByTwoPagesIsInventoriedOnEach` (replay keeps the per-page keys). 221 tests →
     224.
+
+33. *(code review 2026-10, findings `SEC-02` and `SEC-03`, S2)* Two privileged reads trusted an
+    identifier from outside the plugin.
+
+    `BlobDiffWork#existingDiffId` matched a `BlobDiff` anywhere in the repository on
+    `bdiff:correlationId` — a value published in the `diffCorrelationId` extended info of the audit
+    entry, readable by the author of the change. A copy forged outside the container suppressed the
+    real diff: on the nominal path if it won the race against the queue, and on the retry path with
+    no race at all, the retry deleting the genuine `error` diff and recording nothing. Item 31 stops
+    new forgeries; the query now also requires `ecm:path STARTSWITH '/change-diff'`, not a proxy,
+    not a version, for the ones that predate it.
+
+    `BlobDiff.PurgeStatus` and `BlobDiff.PurgeAbort` handed any command id to `BulkService`, which
+    checks neither its action nor its owner — unlike the platform's own `/bulk/{id}` endpoint
+    (`BulkActionFrameworkObject#checkStatus`). Any auditor could read the counters of, and abort,
+    any bulk command of the instance. A command that is not a `blobDiffPurge` now looks exactly like
+    an unknown one, so the answer is no oracle either.
+
+    Coverage: `TestBlobDiffManagement#testAForgedDiffOutsideTheContainerDoesNotSuppressTheRetry` and
+    `TestBlobDiffPurgeAction#testOnlyPurgeCommandsCanBeReadOrAborted`, both checked to fail against
+    the unpatched code. 224 tests → 226.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

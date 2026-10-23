@@ -238,8 +238,8 @@ Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the s
 |---|---|
 | `BlobDiff.Delete` | Permanently deletes the input BlobDiff documents (other types refused) |
 | `BlobDiff.Purge(before, status?)` | **Asynchronous.** Schedules the permanent deletion of diffs dated before a day on the Bulk Action Framework. Returns `{"commandId": "...", "state": "SCHEDULED"}` |
-| `BlobDiff.PurgeStatus(commandId)` | Progress of a purge: `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}` |
-| `BlobDiff.PurgeAbort(commandId)` | Stops a running purge. Already deleted diffs are not restored |
+| `BlobDiff.PurgeStatus(commandId)` | Progress of a purge: `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}`. Any id that is not a purge command answers `UNKNOWN` |
+| `BlobDiff.PurgeAbort(commandId)` | Stops a running purge. Already deleted diffs are not restored. Any other bulk command is left alone |
 | `BlobDiff.CleanEmptyFolders` | Removes the dated folders left empty under `/change-diff`. Returns `{"folders": n}` |
 | `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The new diff keeps user, date and correlation id, and replaces the failed one once created |
 | `blobDiffSource` enricher | `{uid, exists, trashed, readable, title, path, type}` of the source; title/path/type only when the current user can read it |

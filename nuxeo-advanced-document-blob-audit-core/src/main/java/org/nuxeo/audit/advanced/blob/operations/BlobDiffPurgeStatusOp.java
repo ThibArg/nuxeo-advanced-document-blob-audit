@@ -16,6 +16,7 @@
 package org.nuxeo.audit.advanced.blob.operations;
 
 import org.nuxeo.audit.advanced.blob.BlobDiffAccess;
+import org.nuxeo.audit.advanced.blob.bulk.BlobDiffPurgeAction;
 import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
 import org.nuxeo.ecm.automation.core.annotations.OperationMethod;
@@ -34,7 +35,8 @@ import org.nuxeo.runtime.api.Framework;
  * through {@code nuxeo-operation} like the rest of this plugin.
  * <p>
  * An unknown or expired command id yields {@code state: UNKNOWN} rather than an error: that is also
- * what a still-uncommitted {@code submitTransactional} returns.
+ * what a still-uncommitted {@code submitTransactional} returns. So does the id of any command that is
+ * not a purge.
  *
  * @since 2025.1
  */
@@ -54,7 +56,7 @@ public class BlobDiffPurgeStatusOp {
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
-        return Blobs.createJSONBlob(
-                BlobDiffPurgeStatusJson.of(Framework.getService(BulkService.class).getStatus(commandId)));
+        return Blobs.createJSONBlob(BlobDiffPurgeStatusJson.of(
+                BlobDiffPurgeAction.purgeStatus(Framework.getService(BulkService.class), commandId)));
     }
 }

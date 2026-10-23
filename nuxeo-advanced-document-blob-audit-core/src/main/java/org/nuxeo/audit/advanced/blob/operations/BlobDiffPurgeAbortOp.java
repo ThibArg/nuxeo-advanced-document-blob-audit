@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob.operations;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffAccess;
+import org.nuxeo.audit.advanced.blob.bulk.BlobDiffPurgeAction;
 import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
 import org.nuxeo.ecm.automation.core.annotations.OperationMethod;
@@ -26,6 +27,7 @@ import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.bulk.BulkService;
+import org.nuxeo.ecm.core.bulk.message.BulkStatus;
 import org.nuxeo.runtime.api.Framework;
 
 /**
@@ -34,6 +36,8 @@ import org.nuxeo.runtime.api.Framework;
  * Aborting leaves the purge <b>partially applied</b>: the diffs already removed are gone for good.
  * This is harmless - a purge is idempotent, running it again finishes the job - but the UI says so
  * before asking for confirmation.
+ * <p>
+ * The id of any command that is not a purge is answered as unknown, and left alone.
  *
  * @since 2025.1
  */
@@ -55,7 +59,14 @@ public class BlobDiffPurgeAbortOp {
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
-        var status = Framework.getService(BulkService.class).abort(commandId);
+        BulkService bulk = Framework.getService(BulkService.class);
+        BulkStatus status = BlobDiffPurgeAction.purgeStatus(bulk, commandId);
+        if (status.getState() == BulkStatus.State.UNKNOWN) {
+            log.warn("Not aborting {} for {}: unknown, or not a BlobDiff purge", commandId,
+                    session.getPrincipal().getName());
+            return Blobs.createJSONBlob(BlobDiffPurgeStatusJson.of(status));
+        }
+        status = bulk.abort(commandId);
         log.info("BlobDiff purge {} aborted by {}, {} diffs had already been deleted", commandId,
                 session.getPrincipal().getName(), status.getProcessed());
         return Blobs.createJSONBlob(BlobDiffPurgeStatusJson.of(status));

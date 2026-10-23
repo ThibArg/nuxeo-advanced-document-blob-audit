@@ -30,6 +30,7 @@ import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentNotFoundException;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
+import org.nuxeo.ecm.core.bulk.BulkService;
 import org.nuxeo.ecm.core.bulk.action.computation.AbstractBulkComputation;
 import org.nuxeo.ecm.core.bulk.message.BulkStatus;
 import org.nuxeo.lib.stream.computation.ComputationContext;
@@ -61,6 +62,19 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
 
     /** Key of the exact deletion count in {@link BulkStatus#getResult()}. */
     public static final String RESULT_DELETED = "deleted";
+
+    /**
+     * Status of a purge command, or {@code UNKNOWN} when the id belongs to any other action.
+     * <p>
+     * {@code BulkService} checks neither the action nor the owner of a command id, so without this
+     * the purge operations would let any auditor read and abort every bulk command of the instance.
+     *
+     * @since 2025.1
+     */
+    public static BulkStatus purgeStatus(BulkService bulk, String commandId) {
+        BulkStatus status = bulk.getStatus(commandId);
+        return ACTION_NAME.equals(status.getAction()) ? status : BulkStatus.unknownOf(commandId);
+    }
 
     @Override
     public Topology getTopology(Map<String, String> options) {
