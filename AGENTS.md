@@ -251,9 +251,14 @@ XLSX anchor-less ordinal, the PPTX `#2` occurrence suffix, the PDF positional or
 raw stream. Do not reintroduce `createInputStream()`, `getImage()` or even `getWidth()` on that
 path: PDFBox 3 decodes a whole stream into heap before returning its first byte, and `getWidth()`
 decodes a JPX image.
+**A PDF form XObject is walked once per document** (item 32): `PdfWalk` records its placements and
+replays them on every later reference, skips a form already on the current path, and stops at
+`MAX_FORM_DEPTH`. `maxLines` counts every placement, dropped ones included, so replays stay bounded
+too. Never recurse into `form.getResources()` without going through `collectPdfForm`.
 Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
-`#testDroppingAPictureDoesNotRenumberTheFollowingOnes` and
-`#testAPdfFlateBombIsDigestedWithoutBeingDecoded`.
+`#testDroppingAPictureDoesNotRenumberTheFollowingOnes`,
+`#testAPdfFlateBombIsDigestedWithoutBeingDecoded` and the three `#testAPdfForm*` /
+`#testABranchingPdfFormGraph*` cases.
 
 ## Conventions
 
@@ -278,7 +283,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 221 tests (23 test classes)
+mvn -o install                                     # full build, 224 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -331,7 +336,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28, 30 and 31 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 32 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -795,6 +800,29 @@ cited here as "code review 2026-10".
     `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer` now builds its fixture
     through `BlobAuditTestHelper.createUnguarded`. `BLOB_DIFFS_ADMIN` still has no test (review
     finding `BLD-04`). 218 tests → 221.
+
+32. *(code review 2026-10, finding `RES-02`, S1)* The PDF image inventory recursed into form
+    XObjects with no visited set and no depth bound. A form naming itself in its own resources ran
+    until `StackOverflowError` — an `Error`, caught neither by `diffLocal` nor by `BlobDiffWork` nor
+    by `AbstractWork.run`, so no `error` diff and no retry: the audit entry pointed at a correlation
+    id that never materialised. A form graph referencing the same form several times per level,
+    with no image to trip `maxLines`, multiplied the paths at each level and held a worker
+    indefinitely on a few kilobytes of PDF.
+
+    `collectPdfForm` now walks each form once per document through a `PdfWalk` (identity map of
+    recorded placements, identity set of the forms on the current path) and replays the record on
+    every later reference, with the same per-page ordinals, so keys are unchanged for well-formed
+    documents and a letterhead shared by every page is walked once. A form already on the path or
+    nested past `MAX_FORM_DEPTH` (16) is skipped and flags the inventory `truncated`. The
+    `boolean[] dropped` out-parameter of item 20 moved into `PdfWalk`, which also counts dropped
+    placements against `maxLines` so that replaying them stays bounded. No interruption check was
+    added: the walk is now linear in the size of the document, so there is no spin left to break.
+
+    Coverage: `TestImageInventoryExtractor#testAPdfFormThatContainsItselfIsWalkedOnce` (failed with
+    `StackOverflowError` against the unpatched code), `#testABranchingPdfFormGraphIsWalkedOncePerForm`
+    (8 references per level over 10 levels; timed out at 10 s unpatched, 8 ms patched) and
+    `#testAPdfFormSharedByTwoPagesIsInventoriedOnEach` (replay keeps the per-page keys). 221 tests →
+    224.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

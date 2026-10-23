@@ -28,6 +28,7 @@ import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.zip.DeflaterOutputStream;
@@ -39,7 +40,11 @@ import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.PDStream;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.CreationHelper;
@@ -114,11 +119,38 @@ public class TestImageInventoryExtractor {
                     content.drawImage(object, 10, 10, 50, 50);
                 }
             }
-            File file = Framework.createTempFile("blobdiff-test-", ".pdf");
-            tempFiles.add(file);
-            document.save(file);
-            return new FileBlob(file, "application/pdf", null, filename, null);
+            return save(document, filename);
         }
+    }
+
+    /** Saves the document as a file-backed PDF blob, deleted after the test. */
+    protected Blob save(PDDocument document, String filename) throws Exception {
+        File file = Framework.createTempFile("blobdiff-test-", ".pdf");
+        tempFiles.add(file);
+        document.save(file);
+        return new FileBlob(file, "application/pdf", null, filename, null);
+    }
+
+    /** Resources naming each XObject once, in order. */
+    protected static PDResources resources(PDXObject... xobjects) {
+        PDResources resources = new PDResources();
+        for (int i = 0; i < xobjects.length; i++) {
+            resources.put(COSName.getPDFName("X" + i), xobjects[i]);
+        }
+        return resources;
+    }
+
+    protected static PDFormXObject form(PDDocument document, PDXObject... xobjects) {
+        PDFormXObject form = new PDFormXObject(document);
+        form.setBBox(new PDRectangle(10, 10));
+        form.setResources(resources(xobjects));
+        return form;
+    }
+
+    protected static void addPage(PDDocument document, PDXObject... xobjects) {
+        PDPage page = new PDPage();
+        page.setResources(resources(xobjects));
+        document.addPage(page);
     }
 
     /** A one-page PDF holding a 1x1 grey image whose Flate stream inflates to {@code inflatedSize} zeros. */
@@ -145,10 +177,7 @@ public class TestImageInventoryExtractor {
             try (PDPageContentStream content = new PDPageContentStream(document, page)) {
                 content.drawImage(new PDImageXObject(new PDStream(stream), null), 10, 10, 50, 50);
             }
-            File file = Framework.createTempFile("blobdiff-test-", ".pdf");
-            tempFiles.add(file);
-            document.save(file);
-            return new FileBlob(file, "application/pdf", null, filename, null);
+            return save(document, filename);
         }
     }
 
@@ -269,6 +298,69 @@ public class TestImageInventoryExtractor {
         assertEquals("the image must be inventoried from its encoded bytes, not dropped", 1, content.size());
         assertFalse(content.truncated());
         assertTrue("extracting the inventory allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
+    }
+
+    /**
+     * RES-02 (code review 2026-10): a form XObject naming itself in its own resources recursed until
+     * {@code StackOverflowError}, an {@code Error} no work catches, so the diff vanished without a
+     * trace. The loop is now cut, the rest of the page still inventoried, and the inventory flagged
+     * partial.
+     */
+    @Test
+    public void testAPdfFormThatContainsItselfIsWalkedOnce() throws Exception {
+        Blob blob;
+        try (PDDocument document = new PDDocument()) {
+            PDFormXObject form = form(document);
+            form.getResources().put(COSName.getPDFName("Self"), form);
+            addPage(document, form, PDImageXObject.createFromByteArray(document, PNG, "img"));
+            blob = save(document, "loop.pdf");
+        }
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        assertEquals(1, content.size());
+        assertTrue("a cut loop leaves a partial inventory", content.truncated());
+    }
+
+    /**
+     * RES-02, second half: eight references to the same form at each of ten levels make 8^10 paths
+     * through a few kilobytes of PDF, and the walk held a worker for as long as it took. Each form is
+     * now walked once.
+     */
+    @Test(timeout = 10_000)
+    public void testABranchingPdfFormGraphIsWalkedOncePerForm() throws Exception {
+        Blob blob;
+        try (PDDocument document = new PDDocument()) {
+            PDFormXObject form = form(document);
+            for (int level = 0; level < 10; level++) {
+                form = form(document, Collections.nCopies(8, form).toArray(new PDXObject[0]));
+            }
+            addPage(document, form);
+            blob = save(document, "branching.pdf");
+        }
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        assertEquals(0, content.size());
+        assertFalse(content.truncated());
+    }
+
+    /** A form shared by every page - a letterhead, a background - is walked once and listed on each. */
+    @Test
+    public void testAPdfFormSharedByTwoPagesIsInventoriedOnEach() throws Exception {
+        Blob blob;
+        try (PDDocument document = new PDDocument()) {
+            PDFormXObject letterhead = form(document, PDImageXObject.createFromByteArray(document, PNG, "img"));
+            addPage(document, letterhead);
+            addPage(document, letterhead);
+            blob = save(document, "shared.pdf");
+        }
+
+        List<ContentLine> lines = extractor.extract(blob, MAX_LINES).lines();
+
+        assertEquals(List.of("pdf:page:1:image:1", "pdf:page:2:image:1"),
+                lines.stream().map(ContentLine::key).toList());
+        assertEquals(lines.get(0).value(), lines.get(1).value());
     }
 
     @Test

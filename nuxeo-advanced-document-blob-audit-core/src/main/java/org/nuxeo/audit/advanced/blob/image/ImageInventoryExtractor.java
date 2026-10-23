@@ -22,11 +22,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
@@ -122,6 +125,9 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * recurse for ever.
      */
     protected static final int MAX_COS_DEPTH = 4;
+
+    /** Nesting bound for PDF form XObjects, far past anything a real producer nests. */
+    protected static final int MAX_FORM_DEPTH = 16;
 
     /** Overridable so a test can lower the cap instead of building a real multi-gigabyte bomb. */
     protected long maxImageBytes() {
@@ -404,11 +410,11 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
     protected boolean collectPdf(PDDocument document, List<ContentLine> images, int maxLines, boolean[] dropped)
             throws IOException {
+        PdfWalk walk = new PdfWalk(images, maxLines, dropped);
         int pageNumber = 0;
         for (PDPage page : document.getPages()) {
             pageNumber++;
-            if (collectPdfResources(page.getResources(), "pdf:page:" + pageNumber, images, new int[] { 0 }, maxLines,
-                    dropped)) {
+            if (collectPdfResources(page.getResources(), "pdf:page:" + pageNumber, new int[] { 0 }, walk, 0, null)) {
                 return true;
             }
         }
@@ -416,38 +422,124 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     }
 
     /**
-     * @param dropped one-element out parameter, set when an image was skipped for being over
-     *            budget. Separate from the return value, which means "the {@code maxLines} budget is
-     *            exhausted, stop": an over-sized image must be skipped without ending the walk
+     * State of one PDF inventory walk.
+     * <p>
+     * A form XObject can contain itself, directly or not, and forms can be shared so that the number
+     * of paths through them doubles at each level. Walked naively, the first ends in a
+     * {@code StackOverflowError} - an {@code Error}, which no work catches - and the second spins for
+     * ever on a few kilobytes of PDF. Each form is therefore walked once per document, its placements
+     * recorded, and replayed afterwards; a form already on the current path is skipped, and nesting
+     * is bounded by {@link #MAX_FORM_DEPTH}.
+     *
+     * @since 2025.1
+     */
+    protected static class PdfWalk {
+
+        protected final List<ContentLine> images;
+
+        protected final int maxLines;
+
+        protected final boolean[] dropped;
+
+        /** Placements of each fully walked form, in order; {@code null} for an image over budget. */
+        protected final Map<COSBase, List<String>> forms = new IdentityHashMap<>();
+
+        protected final Set<COSBase> onPath = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        /** Counts dropped images too, so that replaying them is bounded by {@code maxLines} as well. */
+        protected int placements;
+
+        protected PdfWalk(List<ContentLine> images, int maxLines, boolean[] dropped) {
+            this.images = images;
+            this.maxLines = maxLines;
+            this.dropped = dropped;
+        }
+
+        protected boolean exhausted() {
+            return placements >= maxLines;
+        }
+
+        protected void place(String key, String digest, List<String> record) {
+            placements++;
+            if (digest == null) {
+                dropped[0] = true;
+            } else {
+                images.add(ContentLine.of(key, digest));
+            }
+            if (record != null) {
+                record.add(digest);
+            }
+        }
+    }
+
+    /**
+     * @param ordinal per-page counter; advanced even for a skipped image, because keys are positional
+     *            and renumbering one side would make every following image look changed
+     * @param record placements of the enclosing form, {@code null} at page level
      * @return {@code true} if the {@code maxLines} budget was exhausted
      */
-    protected boolean collectPdfResources(PDResources resources, String prefix, List<ContentLine> images,
-            int[] ordinal, int maxLines, boolean[] dropped) throws IOException {
-
+    protected boolean collectPdfResources(PDResources resources, String prefix, int[] ordinal, PdfWalk walk,
+            int depth, List<String> record) throws IOException {
         if (resources == null) {
             return false;
         }
         for (COSName name : resources.getXObjectNames()) {
             PDXObject object = resources.getXObject(name);
             if (object instanceof PDImageXObject image) {
-                if (images.size() >= maxLines) {
+                if (walk.exhausted()) {
                     return true;
                 }
-                // The ordinal advances even for a skipped image: keys are positional here, so
-                // renumbering one side would make every following image look changed.
                 String key = prefix + ":image:" + (++ordinal[0]);
                 String digest = digestPdfImage(image.getCOSObject());
                 if (digest == null) {
                     log.warn("Skipping {}: encoded stream over the {} byte inventory budget", key, maxImageBytes());
-                    dropped[0] = true;
-                    continue;
                 }
-                images.add(ContentLine.of(key, digest));
+                walk.place(key, digest, record);
             } else if (object instanceof PDFormXObject form
-                    && collectPdfResources(form.getResources(), prefix, images, ordinal, maxLines, dropped)) {
+                    && collectPdfForm(form, prefix, ordinal, walk, depth, record)) {
                 return true;
             }
         }
+        return false;
+    }
+
+    /**
+     * Walks a form the first time it is met, replays its recorded placements every following time.
+     *
+     * @return {@code true} if the {@code maxLines} budget was exhausted
+     * @since 2025.1
+     */
+    protected boolean collectPdfForm(PDFormXObject form, String prefix, int[] ordinal, PdfWalk walk, int depth,
+            List<String> record) throws IOException {
+        COSBase id = form.getCOSObject();
+        List<String> known = walk.forms.get(id);
+        if (known != null) {
+            for (String digest : known) {
+                if (walk.exhausted()) {
+                    return true;
+                }
+                walk.place(prefix + ":image:" + (++ordinal[0]), digest, record);
+            }
+            return false;
+        }
+        if (depth >= MAX_FORM_DEPTH || !walk.onPath.add(id)) {
+            log.warn("Skipping a form XObject of {} that contains itself or nests deeper than {}", prefix,
+                    MAX_FORM_DEPTH);
+            walk.dropped[0] = true;
+            return false;
+        }
+        List<String> own = new ArrayList<>();
+        try {
+            if (collectPdfResources(form.getResources(), prefix, ordinal, walk, depth + 1, own)) {
+                return true;
+            }
+        } finally {
+            walk.onPath.remove(id);
+            if (record != null) {
+                record.addAll(own);
+            }
+        }
+        walk.forms.put(id, own);
         return false;
     }
 
