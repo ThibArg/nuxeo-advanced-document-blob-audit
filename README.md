@@ -488,6 +488,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 
 ### Images (`imageAnalysisLevel=1`)
 - **Digest-based only.** Detects additions, removals and byte-level replacements; no OCR, no visual/pixel comparison. Re-encoding an identical-looking image is reported as a change.
+- **PDF images are never decoded.** They are identified by their encoded stream and its encoding parameters, so a PDF producer that re-compresses an unchanged image reports it as replaced.
 - **Resizing, moving or cropping** an image without changing its bytes is not detected (except Excel, where the anchor is part of the key).
 - **Position-sensitive keys.** PowerPoint keys include the slide number and PDF keys the page number and ordinal: inserting a slide/page before an image reports it as removed + added.
 - **Word** keys are media part names: the same image used in several places appears once.

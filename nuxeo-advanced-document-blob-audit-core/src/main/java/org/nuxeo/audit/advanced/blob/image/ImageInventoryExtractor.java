@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob.image;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -26,13 +27,20 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.StringJoiner;
+import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.io.RandomAccessRead;
 import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -85,7 +93,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     private static final Logger log = LogManager.getLogger(ImageInventoryExtractor.class);
 
     /**
-     * Upper bound on the <b>decompressed</b> size of a single embedded image, in bytes.
+     * Upper bound on the size of a single embedded image as stored, in bytes: the <b>inflated</b> media
+     * part for OOXML, the <b>encoded</b> stream for PDF, which is never decoded.
      * <p>
      * Nothing else bounded it. The only guard upstream is {@code BlobDiffComponent#getEligibility},
      * which compares {@code blob.getLength()} - the size of the container, deflated - to
@@ -107,6 +116,12 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * allowance, under the same name.
      */
     protected static final long GRACE_ENTRY_SIZE = 100L * 1024;
+
+    /**
+     * Nesting bound when rendering PDF filter parameters, so a self-referencing dictionary cannot
+     * recurse for ever.
+     */
+    protected static final int MAX_COS_DEPTH = 4;
 
     /** Overridable so a test can lower the cap instead of building a real multi-gigabyte bomb. */
     protected long maxImageBytes() {
@@ -200,7 +215,15 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * @since 2025.1
      */
     protected String digestStream(InputStream in) throws IOException {
-        MessageDigest digest = newDigest();
+        return digestStream(newDigest(), in);
+    }
+
+    /**
+     * Same as {@link #digestStream(InputStream)}, continuing a digest that may already hold a header.
+     *
+     * @since 2025.1
+     */
+    protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
         byte[] buffer = new byte[8192];
         long total = 0;
         int read;
@@ -413,21 +436,13 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                 // The ordinal advances even for a skipped image: keys are positional here, so
                 // renumbering one side would make every following image look changed.
                 String key = prefix + ":image:" + (++ordinal[0]);
-                if (exceedsPixelBudget(image)) {
-                    log.warn("Skipping {}: {}x{} at {} bits per component is over the inventory budget", key,
-                            image.getWidth(), image.getHeight(), image.getBitsPerComponent());
+                String digest = digestPdfImage(image.getCOSObject());
+                if (digest == null) {
+                    log.warn("Skipping {}: encoded stream over the {} byte inventory budget", key, maxImageBytes());
                     dropped[0] = true;
                     continue;
                 }
-                try (InputStream in = image.createInputStream()) {
-                    String digest = digestStream(in);
-                    if (digest == null) {
-                        log.warn("Skipping {}: decodes past the {} byte inventory budget", key, maxImageBytes());
-                        dropped[0] = true;
-                        continue;
-                    }
-                    images.add(ContentLine.of(key, digest));
-                }
+                images.add(ContentLine.of(key, digest));
             } else if (object instanceof PDFormXObject form
                     && collectPdfResources(form.getResources(), prefix, images, ordinal, maxLines, dropped)) {
                 return true;
@@ -437,26 +452,63 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     }
 
     /**
-     * Rejects an image on its declared geometry, before reading a byte of it.
+     * Identity of a PDF image: SHA-256 of its encoding parameters followed by its <b>encoded</b>
+     * bytes.
      * <p>
-     * {@code image.createInputStream()} hands back the <b>decoded</b> stream - PDFBox has already
-     * applied {@code FlateDecode} - so the previous {@code transferTo} into a
-     * {@code ByteArrayOutputStream} followed by {@code toByteArray()} held two full copies of it in
-     * heap, for an image whose size the PDF alone declares.
+     * Nothing is decoded, on purpose. PDFBox 3 runs every filter to completion into a heap buffer
+     * ({@code Filter#decode}) before {@code createInputStream()} returns its first byte, so no budget
+     * can apply to the decoded form: a few megabytes of {@code FlateDecode} declaring a 1x1 image
+     * inflated to gigabytes first, and {@code getWidth()} alone fully decodes a JPX image. The encoded
+     * bytes are bounded by the file, and they are what the OOXML paths digest too - the image as
+     * stored.
      * <p>
-     * The estimate ignores the number of colour components, so it <b>under</b>-estimates a RGB
-     * image threefold. That is the safe direction for a pre-check: what it lets through,
-     * {@link #digestStream} still stops.
+     * The parameters belong to the identity because the same bytes under another filter, predictor or
+     * geometry are another image.
+     *
+     * @return the digest, or {@code null} if the encoded stream is over {@link #maxImageBytes()}
+     * @since 2025.1
+     */
+    protected String digestPdfImage(COSStream stream) throws IOException {
+        String parameters = "Filter=" + canonical(stream.getDictionaryObject(COSName.FILTER), 0)
+                + ";DecodeParms=" + canonical(stream.getDictionaryObject(COSName.DECODE_PARMS, COSName.DP), 0)
+                + ";Width=" + stream.getInt(COSName.WIDTH) + ";Height=" + stream.getInt(COSName.HEIGHT)
+                + ";BitsPerComponent=" + stream.getInt(COSName.BITS_PER_COMPONENT) + "\n";
+        MessageDigest digest = newDigest();
+        digest.update(parameters.getBytes(StandardCharsets.UTF_8));
+        try (InputStream in = stream.createRawInputStream()) {
+            return digestStream(digest, in);
+        }
+    }
+
+    /**
+     * Stable text form of a filter or decode parameter value: dictionaries with sorted keys, arrays in
+     * order, indirect references followed up to {@link #MAX_COS_DEPTH}.
      *
      * @since 2025.1
      */
-    protected boolean exceedsPixelBudget(PDImageXObject image) {
-        int bitsPerComponent = Math.max(image.getBitsPerComponent(), 1);
-        // Expressed as a pixel count rather than a byte count, so an absurd declaration cannot
-        // overflow the multiplication it is compared against.
-        long maxPixels = maxImageBytes() * 8 / bitsPerComponent;
-        long pixels = (long) Math.max(image.getWidth(), 0) * Math.max(image.getHeight(), 0);
-        return pixels > maxPixels;
+    protected static String canonical(COSBase value, int depth) {
+        COSBase resolved = value instanceof COSObject object ? object.getObject() : value;
+        if (resolved == null || depth > MAX_COS_DEPTH) {
+            return "null";
+        }
+        if (resolved instanceof COSName name) {
+            return "/" + name.getName();
+        }
+        if (resolved instanceof COSArray array) {
+            StringJoiner items = new StringJoiner(",", "[", "]");
+            for (COSBase item : array) {
+                items.add(canonical(item, depth + 1));
+            }
+            return items.toString();
+        }
+        if (resolved instanceof COSDictionary dictionary) {
+            Map<String, String> entries = new TreeMap<>();
+            for (Map.Entry<COSName, COSBase> entry : dictionary.entrySet()) {
+                entries.put(entry.getKey().getName(), canonical(entry.getValue(), depth + 1));
+            }
+            return entries.toString();
+        }
+        return resolved.toString();
     }
 
     protected String digest(byte[] bytes) {

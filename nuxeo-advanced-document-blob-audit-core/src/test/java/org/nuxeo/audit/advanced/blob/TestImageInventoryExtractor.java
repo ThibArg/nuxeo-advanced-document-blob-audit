@@ -23,16 +23,23 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Random;
+import java.util.zip.DeflaterOutputStream;
 
 import javax.imageio.ImageIO;
 
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.CreationHelper;
@@ -48,6 +55,8 @@ import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.runtime.api.Framework;
+
+import com.sun.management.ThreadMXBean;
 
 public class TestImageInventoryExtractor {
 
@@ -104,6 +113,37 @@ public class TestImageInventoryExtractor {
                 try (PDPageContentStream content = new PDPageContentStream(document, page)) {
                     content.drawImage(object, 10, 10, 50, 50);
                 }
+            }
+            File file = Framework.createTempFile("blobdiff-test-", ".pdf");
+            tempFiles.add(file);
+            document.save(file);
+            return new FileBlob(file, "application/pdf", null, filename, null);
+        }
+    }
+
+    /** A one-page PDF holding a 1x1 grey image whose Flate stream inflates to {@code inflatedSize} zeros. */
+    protected Blob pdfWithFlateImage(String filename, long inflatedSize) throws Exception {
+        ByteArrayOutputStream deflated = new ByteArrayOutputStream();
+        try (DeflaterOutputStream out = new DeflaterOutputStream(deflated)) {
+            byte[] zeros = new byte[64 * 1024];
+            for (long written = 0; written < inflatedSize; written += zeros.length) {
+                out.write(zeros);
+            }
+        }
+        try (PDDocument document = new PDDocument()) {
+            COSStream stream = document.getDocument().createCOSStream();
+            try (OutputStream raw = stream.createRawOutputStream()) {
+                raw.write(deflated.toByteArray());
+            }
+            stream.setItem(COSName.FILTER, COSName.FLATE_DECODE);
+            stream.setInt(COSName.WIDTH, 1);
+            stream.setInt(COSName.HEIGHT, 1);
+            stream.setInt(COSName.BITS_PER_COMPONENT, 8);
+            stream.setItem(COSName.COLORSPACE, COSName.DEVICEGRAY);
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                content.drawImage(new PDImageXObject(new PDStream(stream), null), 10, 10, 50, 50);
             }
             File file = Framework.createTempFile("blobdiff-test-", ".pdf");
             tempFiles.add(file);
@@ -202,6 +242,35 @@ public class TestImageInventoryExtractor {
         assertEquals(1, result.changed());
     }
 
+    /** The encoding parameters are part of the digest: their rendering must not depend on the file. */
+    @Test
+    public void testTheSamePdfImageInTwoFilesIsNotReportedAsChanged() throws Exception {
+        DiffResult result = new TextDiffer().diff(extractor.extract(pdf("a.pdf", PNG), MAX_LINES),
+                extractor.extract(pdf("b.pdf", PNG), MAX_LINES));
+
+        assertTrue(result.isEmpty());
+    }
+
+    /**
+     * RES-01 (code review 2026-10): PDFBox decodes a whole image stream into heap before handing back
+     * its first byte, so the budget used to apply only after the allocation it was meant to prevent.
+     * A 1x1 image over 64 MB of Flate-compressed zeros was inflated whole, then dropped. It is now
+     * identified by its encoded bytes - about 64 KB - and never decoded.
+     */
+    @Test
+    public void testAPdfFlateBombIsDigestedWithoutBeingDecoded() throws Exception {
+        Blob blob = pdfWithFlateImage("bomb.pdf", 64L * 1024 * 1024);
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long before = threads.getCurrentThreadAllocatedBytes();
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        assertEquals("the image must be inventoried from its encoded bytes, not dropped", 1, content.size());
+        assertFalse(content.truncated());
+        assertTrue("extracting the inventory allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
+    }
+
     @Test
     public void testUnsupportedMimeTypeYieldsAnEmptyInventory() throws Exception {
         Blob blob = BlobAuditTestHelper.textBlob("hello", "text/plain", "f.txt");
@@ -229,12 +298,13 @@ public class TestImageInventoryExtractor {
         }
     }
 
-    /** A real, incompressible-enough PNG of the requested square size. */
+    /** A real PNG of the requested square size, filled with seeded noise so that it does not compress. */
     protected static byte[] png(int size) throws Exception {
+        Random random = new Random(size);
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
-                image.setRGB(x, y, (x * 31 + y * 17) & 0xFFFFFF);
+                image.setRGB(x, y, random.nextInt(0x1000000));
             }
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -268,7 +338,8 @@ public class TestImageInventoryExtractor {
      * SEC-04: {@code image.createInputStream()} hands back the stream PDFBox has already
      * <b>decoded</b>, and the previous {@code transferTo} into a {@code ByteArrayOutputStream}
      * followed by {@code toByteArray()} held two full copies of it in heap - for an image whose
-     * size the PDF alone declares.
+     * size the PDF alone declares. Since RES-01 the budget applies to the encoded stream, which the
+     * noise of the fixture keeps well above the lowered cap.
      */
     @Test
     public void testAnOverSizedPdfImageIsDroppedInsteadOfBuffered() throws Exception {

@@ -238,8 +238,13 @@ way. There is deliberately **no common helper** over `digestOoxmlPicture` and `d
 `ss.usermodel.PictureData`, two unrelated interfaces. In all four collectors the key counter — the
 XLSX anchor-less ordinal, the PPTX `#2` occurrence suffix, the PDF positional ordinal — is advanced
 **before** the drop check, so a dropped image on one side cannot shift every following key.
+**A PDF image is never decoded** (item 30): `digestPdfImage` hashes its encoding parameters and its
+raw stream. Do not reintroduce `createInputStream()`, `getImage()` or even `getWidth()` on that
+path: PDFBox 3 decodes a whole stream into heap before returning its first byte, and `getWidth()`
+decodes a JPX image.
 Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
-`#testDroppingAPictureDoesNotRenumberTheFollowingOnes`.
+`#testDroppingAPictureDoesNotRenumberTheFollowingOnes` and
+`#testAPdfFlateBombIsDigestedWithoutBeingDecoded`.
 
 ## Conventions
 
@@ -264,7 +269,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 216 tests (23 test classes)
+mvn -o install                                     # full build, 218 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -314,8 +319,10 @@ improvements were identified. A later front-end audit added its own findings, nu
 a later correctness audit its own, numbered `COR-nn`, a security audit its own, numbered
 `SEC-nn` / `BLD-nn`, and a scalability audit its own, numbered `RES-nn`; those that turn into work
 get the next free number in this same list. Product requests and bugs found in testing are
-numbered the same way.
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25 and 28 are done** (regression coverage:
+numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
+`COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
+cited here as "code review 2026-10".
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -505,6 +512,11 @@ numbered the same way.
     **Correction (item 28): this covered two formats of the four, not all of them.** The sentence
     above said "both fixed by the same streaming digest"; that was true of DOCX and PDF only. The
     XLSX and PPTX paths went on calling `PictureData#getData()` until item 28. See there.
+
+    **Correction (item 30): the PDF half was not fixed either.** `createInputStream()` does not hand
+    back a stream PDFBox *has* decoded so much as one it decodes whole into heap before returning,
+    so `digestStream` ran after the allocation, and `exceedsPixelBudget` read a geometry that does
+    not bound a Flate payload. See item 30.
 
     On the PDF path the ordinal advances even for a dropped image: keys there are positional, so
     renumbering one side would make every following image look changed. `collectPdfResources` grew
@@ -724,6 +736,32 @@ numbered the same way.
     `#testDroppingAPictureDoesNotRenumberTheFollowingOnes` and
     `TestBlobDiffConfigDescriptor#testNormalizingDoesNotMutateTheSharedDescriptor`. All four were
     checked to fail against the unpatched code. 212 tests → 216.
+
+30. *(code review 2026-10, finding `RES-01`, S0)* The PDF image inventory decoded every image whole
+    into heap before any budget applied. In PDFBox 3.0.7, `PDImageXObject#createInputStream` →
+    `COSStream#createInputStream` → `Filter#decode` runs each filter to completion into a heap
+    `RandomAccessReadWriteBuffer`, and `FlateFilter#decode` has no cap: the 32 MB cut of
+    `digestStream` came after the allocation. `exceedsPixelBudget` read the declared geometry, which
+    does not bound a Flate payload, and its own `getWidth()` fully decodes a JPX image. A PDF under
+    `maxBlobSize` with a 1x1 image over a 1000:1 Flate stream was an `OutOfMemoryError`, reachable
+    by any user with Write once `imageAnalysisLevel=1`.
+
+    Fixed by not decoding at all. `digestPdfImage` hashes `Filter`, `DecodeParms` (rendered by
+    `canonical`: sorted keys, indirect references followed to a bounded depth), `Width`, `Height`
+    and `BitsPerComponent`, then the raw stream from `createRawInputStream()`, through
+    `digestStream`. That is the identity the OOXML paths already use — the image as stored — and
+    what the README already stated ("re-encoding an identical-looking image is reported as a
+    change"). The visible difference: a producer that re-compresses an unchanged PDF image now
+    reports it. `exceedsPixelBudget` is gone; with nothing decoded it protected nothing, and it
+    dropped large photos for no reason.
+
+    Coverage: `TestImageInventoryExtractor#testAPdfFlateBombIsDigestedWithoutBeingDecoded` (64 MB
+    of Flate zeros behind a 1x1 image: the image must be kept, and the extraction must allocate
+    under 16 MB, measured with `ThreadMXBean#getCurrentThreadAllocatedBytes`; checked to fail
+    against the unpatched code) and `#testTheSamePdfImageInTwoFilesIsNotReportedAsChanged` (the
+    parameter rendering must not depend on the file). `png(int)` now draws seeded noise, so
+    `#testAnOverSizedPdfImageIsDroppedInsteadOfBuffered` crosses its lowered cap on encoded bytes.
+    216 tests → 218.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
