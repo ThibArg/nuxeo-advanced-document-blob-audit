@@ -35,8 +35,11 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreSession;
+import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
+import org.nuxeo.ecm.core.event.EventServiceAdmin;
 import org.nuxeo.runtime.api.Framework;
 
 /**
@@ -197,5 +200,21 @@ public class BlobAuditTestHelper {
             content.add(ContentLine.of(entry.getKey(), entry.getValue()));
         }
         return DiffableContent.keyed(content, false);
+    }
+
+    /**
+     * Creates a document with {@link BlobDiffLocationListener} turned off: what a {@code BlobDiff}
+     * forged before that guard existed looks like today.
+     *
+     * @since 2025.1
+     */
+    public static DocumentModel createUnguarded(CoreSession session, DocumentModel doc) {
+        EventServiceAdmin events = Framework.getService(EventServiceAdmin.class);
+        events.setListenerEnabledFlag(BlobDiffLocationListener.NAME, false);
+        try {
+            return session.createDocument(doc);
+        } finally {
+            events.setListenerEnabledFlag(BlobDiffLocationListener.NAME, true);
+        }
     }
 }

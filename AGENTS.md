@@ -103,6 +103,15 @@ The eligibility recheck in the work is *not* a substitute: the length it compare
 Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
 `#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
+**A `BlobDiff` lives under `/change-diff`, and nothing leaves it** (item 31). Two layers, keep
+both. `BlobDiffLocationListener` (synchronous, `aboutToCreate` / `aboutToMove` / `aboutToCopy`)
+refuses, for every principal including system, a `BlobDiff` destined anywhere else and any move or
+copy of something under the container to outside it. The page providers additionally filter on
+`ecm:path STARTSWITH '/change-diff' AND ecm:isProxy = 0`, because the listener cannot reach a
+document forged before it existed. Every new reader of `BlobDiff` documents needs the same path
+filter. Tests that need a forged fixture go through `BlobAuditTestHelper.createUnguarded`.
+Coverage: `TestBlobDiffLocationAndSecurity`, three `location guard` cases.
+
 **The `blobDiffPurge` bulk action must stay off the HTTP surface.** `httpEnabled` is left to its
 default `false`, which is what keeps it out of `Bulk.RunAction` and of the
 `/search/bulk/{action}` REST endpoint for anyone but an administrator. The only supported entry
@@ -269,7 +278,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 218 tests (23 test classes)
+mvn -o install                                     # full build, 221 tests (23 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -322,7 +331,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28, 30 and 31 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -762,6 +771,30 @@ cited here as "code review 2026-10".
     parameter rendering must not depend on the file). `png(int)` now draws seeded noise, so
     `#testAnOverSizedPdfImageIsDroppedInsteadOfBuffered` crosses its lowered cap on encoded bytes.
     216 tests → 218.
+
+31. *(code review 2026-10, finding `SEC-01`, S1)* Any user could forge a `BlobDiff` outside
+    `/change-diff`, and the audit UI listed it as genuine. The core does not enforce allowed
+    subtypes (item 18), and both page providers selected every `BlobDiff` by type alone:
+    administrators bypass ACLs, and a non-admin auditors group is reached by granting it Read on
+    one's own workspace. Moves had the mirror gap: the auditors group holds `Remove` on the
+    container, which is all `CoreSession#move` checks on the source side, so an auditor could move a
+    day folder of diffs into a workspace where the container ACL no longer applies.
+
+    `BlobDiffLocationListener` refuses those creations, moves and copies with a
+    `DocumentSecurityException` after `markBubbleException()`; both page providers now also filter
+    on the path and exclude proxies, which covers documents forged before the guard existed. Not
+    covered by the listener: a proxy published elsewhere, since `createProxy` fires no "about to"
+    event. The `ecm:isProxy = 0` filters keep it out of the audit lists, and publishing needs Read on
+    the diff, which only auditors hold. The guard also removes the root cause of review findings
+    `SEC-02` (idempotency query trusting a forged diff) and `SEC-04` (enricher trash oracle) for
+    new documents; both still need their own path filter for the legacy case.
+
+    Coverage: `TestBlobDiffLocationAndSecurity#testNobodyCanCreateABlobDiffOutsideTheContainer`,
+    `#testDiffsCannotLeaveTheContainer` and `#testAuditListIgnoresABlobDiffOutsideTheContainer`,
+    all three checked to fail with the two XML contributions reverted.
+    `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer` now builds its fixture
+    through `BlobAuditTestHelper.createUnguarded`. `BLOB_DIFFS_ADMIN` still has no test (review
+    finding `BLD-04`). 218 tests → 221.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

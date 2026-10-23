@@ -50,6 +50,7 @@ import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentModelList;
+import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.PathRef;
@@ -367,6 +368,79 @@ public class TestBlobDiffLocationAndSecurity {
         assertTrue(java.util.Arrays.stream(local.getACEs())
                                    .noneMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
                                            && ace.isGranted()));
+    }
+
+    /* --------------------------------------------------------- location guard */
+
+    /**
+     * SEC-01 (code review 2026-10): the core does not enforce allowed subtypes, so anyone with
+     * AddChildren somewhere could create a {@code BlobDiff} with fabricated content, attributed to
+     * anyone, and have it listed as genuine. Refused for every principal, administrators included.
+     */
+    @Test
+    public void testNobodyCanCreateABlobDiffOutsideTheContainer() throws Exception {
+        grantEverythingToJdoeOnRoot();
+        txFeature.nextTransaction();
+        try (CloseableCoreSession jdoe = coreFeature.openCoreSession("jdoe")) {
+            assertCreationRefused(jdoe);
+        }
+        assertCreationRefused(session);
+        assertFalse(session.exists(new PathRef("/forged")));
+    }
+
+    protected void assertCreationRefused(CoreSession s) {
+        DocumentModel forged = s.createDocumentModel("/", "forged", BlobAuditConstants.DIFF_DOCTYPE);
+        forged.setPropertyValue(BlobAuditConstants.XP_USER, "alice");
+        assertRefused(() -> s.createDocument(forged));
+    }
+
+    /**
+     * The auditors group holds Remove on the container, which is all a move needs: without the guard
+     * an auditor could take diffs out of it, into a space where its ACL no longer applies. Moving
+     * inside the container stays possible.
+     */
+    @Test
+    public void testDiffsCannotLeaveTheContainer() throws Exception {
+        DocumentModel source = createFile(session, "kept-in", textBlob("x", "text/plain", "x.txt"));
+        DocumentModel diff = blobDiffService.createDiffDocument(session, source, "file:content", null, null,
+                "jdoe", new Date(), null, BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        DocumentModel otherDay = blobDiffService.getOrCreateContainer(session, date(2031, Calendar.MARCH, 14));
+        session.save();
+        DocumentRef root = session.getRootDocument().getRef();
+        DocumentRef day = diff.getParentRef();
+
+        assertRefused(() -> session.move(diff.getRef(), root, null));
+        assertRefused(() -> session.copy(diff.getRef(), root, null));
+        assertRefused(() -> session.move(day, root, null));
+        assertRefused(() -> session.copy(day, root, null));
+
+        DocumentModel moved = session.move(diff.getRef(), otherDay.getRef(), null);
+        assertTrue(moved.getPathAsString().startsWith(otherDay.getPathAsString() + "/"));
+    }
+
+    /** A {@code BlobDiff} forged before the guard existed must not be listed: location, not type. */
+    @Test
+    public void testAuditListIgnoresABlobDiffOutsideTheContainer() throws Exception {
+        DocumentModel source = createFile(session, "listed", textBlob("x", "text/plain", "x.txt"));
+        blobDiffService.createDiffDocument(session, source, "file:content", null, null, "jdoe", new Date(), null,
+                BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        DocumentModel forged = session.createDocumentModel("/", "forged", BlobAuditConstants.DIFF_DOCTYPE);
+        forged.setPropertyValue(BlobAuditConstants.XP_SOURCE_ID, source.getId());
+        BlobAuditTestHelper.createUnguarded(session, forged);
+        session.save();
+
+        List<DocumentModel> listed = diffsForSource(session, source.getId());
+        assertEquals(1, listed.size());
+        assertTrue(listed.get(0).getPathAsString().startsWith(CONTAINER_PATH + "/"));
+    }
+
+    protected void assertRefused(Runnable action) {
+        try {
+            action.run();
+            fail("a BlobDiff must not exist outside " + CONTAINER_PATH);
+        } catch (DocumentSecurityException e) {
+            // expected
+        }
     }
 
     /* ------------------------------------------------------- deleted source */

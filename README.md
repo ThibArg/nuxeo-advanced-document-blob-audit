@@ -182,6 +182,7 @@ The diff is stored as a blob, not a string: it stays outside the SQL/Mongo recor
 - **Auditors group** is configurable, default `administrators`. Recommended: the configuration property `org.nuxeo.web.ui.blobaudit.auditorsGroup`, which is also exposed to Web UI (`Nuxeo.UI.config.blobaudit.auditorsGroup`) so the server and the UI share one setting. `<auditorsGroup>` in the `config` extension point still wins when set. Members of the `administrators` group always have access.
 - **Concurrency.** Dated folders are created in the caller's session under an in-JVM lock. A residual cross-node race can only produce a renamed dated sibling (e.g. `14.1727…`), which still lives under the restricted root and inherits its ACL.
 - **Deleted source.** If the source document no longer exists when `BlobDiffWork` runs, a `BlobDiff` with status `error` and summary `Source document no longer exists` is recorded, so the audit entry is never orphaned.
+- **Diffs never leave the container.** `BlobDiffLocationListener` refuses, for every user including administrators, the creation of a `BlobDiff` outside `/change-diff` and any move or copy of something under `/change-diff` to outside it (HTTP 403). The core does not enforce allowed subtypes, so without it any user could create a fabricated `BlobDiff` in their own workspace. Both page providers also only list documents under `/change-diff`, proxies excluded.
 
 Writes are performed with a **system session**: users modifying the file have no permission on this container.
 

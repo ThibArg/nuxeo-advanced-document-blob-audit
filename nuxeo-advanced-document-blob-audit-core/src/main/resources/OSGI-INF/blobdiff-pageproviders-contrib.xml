@@ -3,10 +3,15 @@
 
   <extension target="org.nuxeo.ecm.platform.query.api.PageProviderService" point="providers">
 
-    <!-- Rebuilds the "list of diffs for this document" view without storing anything on it -->
+    <!--
+      Rebuilds the "list of diffs for this document" view without storing anything on it. Both
+      providers only trust what sits under /change-diff: a BlobDiff elsewhere was not written by the
+      plugin (see BlobDiffLocationListener), and a proxy is a copy in another place.
+    -->
     <coreQueryPageProvider name="BLOB_DIFFS_FOR_DOCUMENT">
       <pattern>
-        SELECT * FROM BlobDiff WHERE bdiff:sourceId = ? AND ecm:isTrashed = 0
+        SELECT * FROM BlobDiff WHERE bdiff:sourceId = ? AND ecm:path STARTSWITH '/change-diff'
+        AND ecm:isProxy = 0 AND ecm:isTrashed = 0
         ORDER BY bdiff:date DESC
       </pattern>
       <parameter>0</parameter>
@@ -46,7 +51,8 @@
       <searchDocumentType>BlobDiffSearch</searchDocumentType>
       <whereClause>
         <fixedPart>
-          ecm:primaryType = 'BlobDiff' AND ecm:isVersion = 0 AND ecm:isTrashed = 0
+          ecm:primaryType = 'BlobDiff' AND ecm:path STARTSWITH '/change-diff' AND ecm:isProxy = 0
+          AND ecm:isVersion = 0 AND ecm:isTrashed = 0
         </fixedPart>
         <predicate parameter="bdiff:sourceId" operator="=">
           <field schema="blobdiffsearch" name="sourceId" />

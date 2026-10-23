@@ -307,7 +307,8 @@ public class TestBlobDiffManagement {
      * own space, point it at someone else's binary and have the platform extract it for them.
      * <p>
      * The path is what establishes provenance, and it is checked before a single property of the
-     * input is read.
+     * input is read. {@code BlobDiffLocationListener} now refuses such a creation outright; the
+     * fixture bypasses it to stand for a document forged before the guard existed.
      */
     @Test
     public void testRetryRefusesADiffCreatedOutsideTheContainer() throws Exception {
@@ -322,7 +323,7 @@ public class TestBlobDiffManagement {
         forged.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, target.getKey());
         forged.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_PROVIDER, target.getProviderId());
         forged.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY, target.getKey());
-        forged = session.createDocument(forged);
+        forged = BlobAuditTestHelper.createUnguarded(session, forged);
         session.save();
         assertFalse("the fixture must really sit outside the container",
                 forged.getPathAsString().startsWith("/" + BlobAuditConstants.CONTAINER_NAME + "/"));

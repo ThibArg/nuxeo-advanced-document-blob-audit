@@ -22,4 +22,18 @@
     </listener>
   </extension>
 
+  <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+    <documentation>
+      Synchronous guard keeping every BlobDiff under /change-diff, and everything under /change-diff
+      inside it. The core does not enforce allowed subtypes, so without it any user could create a
+      BlobDiff elsewhere with fabricated content. Never disable it on a live instance.
+    </documentation>
+    <listener name="blobDiffLocationListener" async="false" postCommit="false"
+              class="org.nuxeo.audit.advanced.blob.BlobDiffLocationListener">
+      <event>aboutToCreate</event>
+      <event>aboutToMove</event>
+      <event>aboutToCopy</event>
+    </listener>
+  </extension>
+
 </component>
