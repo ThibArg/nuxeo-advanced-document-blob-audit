@@ -479,7 +479,8 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 ### Excel
 - **Row/column insertions inflate the diff.** Keys are absolute cell references, so inserting a row shifts every cell below it (see `TestExcelDiff#testInsertingARowShiftsCellsAndInflatesTheDiff`).
 - **Renaming a sheet** invalidates all its keys: every cell is reported as removed then added.
-- Formulas are compared as formulas (default), not on their computed value.
+- Formulas are compared as formulas (default), not on their computed value. With `<property name="useFormulas">false</property>` they are compared on the value cached in the file.
+- `.xlsx` and `.xlsm` are read sheet by sheet and reading stops at `maxLines`, so a large workbook costs what is extracted, not its size. Legacy `.xls` is loaded whole.
 
 ### PowerPoint
 - **Only OOXML is analyzed in depth** (`.pptx`, `.pptm`, `.ppsx`, `.potx`). Legacy binary `.ppt` falls back to `any2text`: flat text, no slide structure, no image inventory.
@@ -529,6 +530,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestTextDiffer | No | Diff engine: keyed, positional, coalescing, truncation |
 | TestTextDifferScaling | No | Alignment optimality and memory budget |
 | TestExcelDiff | No | Complete Excel processing chain |
+| TestSpreadsheetStreaming | No | Streamed `.xlsx` reading: same values as POI's usermodel, shared formulas, bounded memory |
 | TestPlainTextExtractor | No | txt / json / xml / csv |
 | TestExtractorSelection | No | MIME type matching |
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |

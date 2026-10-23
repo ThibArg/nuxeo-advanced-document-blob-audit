@@ -265,6 +265,15 @@ Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
 `#testAPdfFlateBombIsDigestedWithoutBeingDecoded` and the three `#testAPdfForm*` /
 `#testABranchingPdfFormGraph*` cases.
 
+**XLSX text is streamed, never read through POI's usermodel** (item 34). `SpreadsheetExtractor`
+parses each sheet with SAX and stops at `maxLines`; the usermodel builds the XMLBeans tree of every
+sheet first. Its values must stay identical to what the usermodel path (`collect` / `formatCell`,
+kept for `.xls`) produces: `TestSpreadsheetStreaming` compares the two on a hand-written sheet. One
+deliberate exception: shared formulas are rebuilt with an in-place shift rather than POI's
+`SharedFormula`, which turns a reference to another sheet into a plain one. The parser comes from
+`XMLHelper.newXMLReader()` (no DTD, no external entity) — never build one by hand.
+Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`, `TestExtractorFileBacking`.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -288,7 +297,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 226 tests (23 test classes)
+mvn -o install                                     # full build, 230 tests (24 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -301,7 +310,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -341,7 +350,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 33 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 34 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -600,6 +609,10 @@ cited here as "code review 2026-10".
     actually reachable so the comparisons cannot pass vacuously. The memory saving itself is not
     dependably unit-testable; it is a manual check.
 
+    **Correction (item 34): the `File` variants did not bound the spreadsheet.** They spare
+    buffering the compressed package, nothing more: `XSSFWorkbook` still parses every sheet into an
+    XMLBeans tree when it is opened. See item 34.
+
 23. *(scalability audit, finding `RES-03`)* `maxDiffEntries` bounded how **many** differences were
     written, never how long they were, and nothing bounded a single extracted unit. An Excel cell
     accepts 32 767 characters and a Word paragraph is unbounded. Measured against the unpatched
@@ -849,6 +862,35 @@ cited here as "code review 2026-10".
     Coverage: `TestBlobDiffManagement#testAForgedDiffOutsideTheContainerDoesNotSuppressTheRetry` and
     `TestBlobDiffPurgeAction#testOnlyPurgeCommandsCanBeReadOrAborted`, both checked to fail against
     the unpatched code. 224 tests → 226.
+
+34. *(code review 2026-10, finding `RES-03`, S2, and `COR-05`, S3)* XLSX extraction loaded the whole
+    workbook through POI's usermodel, which parses every sheet into an XMLBeans tree when it opens
+    it: `maxLines` bounded what was kept, never what was built. Measured on 300 000 numeric cells:
+    410 MB allocated to extract the first 100.
+
+    `SpreadsheetExtractor` now streams OOXML workbooks: `XSSFReader`, `ReadOnlySharedStringsTable`
+    (phonetic runs excluded, like the usermodel), the styles table, and a SAX `SheetHandler` per
+    sheet that stops at `maxLines`. POI's own `XSSFSheetXMLHandler` was not usable: it does not
+    support shared formulas, which Excel writes for every fill-down. They are rebuilt like
+    `XSSFCell#getCellFormula` does, parsing the master formula against a workbook holding only the
+    sheet and defined names (built on first use), then shifting the references in place. That shift
+    also fixes a POI defect the plugin inherited: `SharedFormula` turns `Other!A1` into `A1`. Array
+    formulas, data tables, inline strings, booleans, errors and styled numbers (1904 dates
+    included) follow the usermodel. A formula that cannot be rebuilt (external link, table
+    reference) falls back to its cached value. Binary `.xls` keeps the usermodel.
+
+    `useFormulas=false` (`COR-05`) had no effect: `DataFormatter` renders a formula cell as its
+    formula text when it has no evaluator. The streaming path compares cached values, and the `.xls`
+    path now sets `setUseCachedValuesForFormulaCells`.
+
+    **Still open from `RES-03`**: the XLSX image inventory (`ImageInventoryExtractor#
+    extractSpreadsheet`, only with `imageAnalysisLevel=1`) and the PPTX extractors still go through
+    the usermodel.
+
+    Coverage: `TestSpreadsheetStreaming` — equivalence with the usermodel on a hand-written sheet,
+    the 3D shared formula, `useFormulas=false` on both formats, and the 300 000-cell allocation
+    bound (under 32 MB); the last three were checked to fail against the unpatched code. 226 tests
+    → 230.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
