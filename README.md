@@ -224,7 +224,7 @@ Available to members of `administrators` and of the auditors group only.
   The results table is a standard `nuxeo-results`, so it comes with the platform sort selector, the selection toolbar, CSV export, and **per-user column preferences** (show/hide, resize, reorder) persisted in local storage. Row actions: open, go to the source, filter on the source, download the diff, retry (errors and pending retries only). Selection action: **permanent deletion**. Toolbar action: **purge** before a date, optionally for one status.
 
   Saved searches work as they do everywhere else: an auditor can store a set of filters from the drawer header and share it.
-- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search with the source pre-filtered.
+- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search filtered on that document alone: the filters of an earlier audit search are dropped, so the search lists the same diffs as the tab.
 - **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
 
 Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.

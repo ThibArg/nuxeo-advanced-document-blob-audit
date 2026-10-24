@@ -56,7 +56,8 @@
         }
       },
       _openAll: function () {
-        Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': this.document.uid });
+        // Replace: the tab lists every diff of the document, the audit must show the same ones.
+        Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': this.document.uid }, true);
       },
       _versionPair: function (previousLabel, newLabel) {
         return (previousLabel || '?') + ' → ' + (newLabel || '?');

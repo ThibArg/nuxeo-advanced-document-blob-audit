@@ -450,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 51 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 52 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1304,6 +1304,18 @@ cited here as "code review 2026-10".
 
     No automated coverage. Manual checks: Esc and a click outside during a purge do nothing; after
     "Let it run in the background", reopening shows a fresh form.
+
+52. *(code review 2026-10, finding `WEB-04`, S3)* "Open in the content changes audit", on the
+    document tab, only set `bdsearch:sourceId` on the drawer form, which is stamped once and keeps
+    its filters for the session: dates, user, truncated and the facets of an earlier search still
+    applied, and the audit listed a subset of the diffs the tab showed, with nothing saying why.
+    `Nuxeo.BlobAudit.openSearch(params, replace)` now replaces the whole `params` object when
+    `replace` is set, which the tab does. The per-row "filter on this source" of the results keeps
+    adding to the current filters, on purpose: it narrows the search the auditor is looking at.
+
+    No automated coverage. Manual check: filter the audit on a user, open a document whose diffs
+    come from several users, click "Open in the content changes audit": the result count must
+    match the tab.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
