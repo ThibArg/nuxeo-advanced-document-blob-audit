@@ -331,14 +331,14 @@ Four options bound the work, at two different stages, and they are not interchan
 | `maxLines` | extraction | how many units are extracted from each side |
 | `maxDiffEntries` | reporting | how **many** differences are written to the diff body |
 | `maxDiffChars` | reporting | the total **length** of the diff body, in characters |
-| `maxValueLength` | reporting | the length of a **single** rendered unit, beyond which it is elided |
+| `maxValueLength` | extraction and reporting | the length of a **single** unit: a longer one keeps its beginning, its length and a digest of the whole |
 
-`maxDiffEntries` has never bounded anything but the count. An Excel cell accepts 32 767 characters and a Word paragraph is unbounded, so 5 000 entries of worst-case cells render to roughly 320 MB — accumulated in a single `StringBuilder`, copied by `toString()`, copied again into an in-memory blob, then encoded to bytes by the blob provider. `maxDiffChars` and `maxValueLength` are what make the stored diff proportional to something known in advance rather than to the content.
+`maxDiffEntries` has never bounded anything but the count. An Excel cell accepts 32 767 characters and a Word paragraph is unbounded, so 5 000 entries of worst-case cells render to roughly 320 MB — accumulated in a single `StringBuilder`, copied by `toString()`, copied again into an in-memory blob, then encoded to bytes by the blob provider. `maxDiffChars` and `maxValueLength` are what make the stored diff proportional to something known in advance rather than to the content. `maxValueLength` also applies when values are extracted, so what each side holds in memory is bounded by `maxLines × maxValueLength`.
 
 When either cap is reached, the counters `bdiff:added`, `bdiff:removed` and `bdiff:changed` stay **exact** — counting continues past the budget — and `bdiff:truncated` is set. Only the rendering is shortened, never the accounting.
 
 > [!NOTE]
-> When both sides of a modification are longer than `maxValueLength` and only differ past it, the rendered entry shows two identical prefixes (`~ key : X… -> X…`). The modification is still counted and flagged; only that one line of the report is uninformative.
+> A value longer than `maxValueLength` is shown as its beginning, followed by its length and a short SHA-256 of the whole (`X… [32767 chars, sha256:…]`). Two values that only differ past the beginning are still reported as a modification, and their digests tell them apart in the report.
 
 ### Search Engine Prerequisite
 
@@ -535,6 +535,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestExcelDiff | No | Complete Excel processing chain |
 | TestSpreadsheetStreaming | No | Streamed `.xlsx` reading: same values as POI's usermodel, shared formulas, bounded memory |
 | TestPlainTextExtractor | No | txt / json / xml / csv |
+| TestExtractedValueBounding | No | Long values bounded at extraction, still compared exactly |
 | TestExtractorSelection | No | MIME type matching |
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
 | TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |

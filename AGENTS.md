@@ -241,6 +241,16 @@ monotone, and `added` / `removed` / `changed` keep counting past the budget so t
 Any change to `diffKeyed` or `diffPositional` must preserve all three properties.
 Coverage: `TestTextDifferBounding`.
 
+**Extracted values are bounded when they are created** (item 39). `BlobDiffComponent#resolve`
+hands the configured `maxValueLength` to every extractor through `init()`, as the
+`maxValueLength` property, and the four text extractors build every value through
+`ContentLine.of(key, value, maxValueLength)`. Past the limit, `compact` keeps the beginning, the
+full length and the first 16 hex characters of the SHA-256 of the whole value, so equality still
+means equality, and the result stays within `maxValueLength`, which lets `TextDiffer#elide` leave
+it alone. A new extractor must do the same, or nothing bounds what it holds.
+Coverage: `TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
+`TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`.
+
 **`BlobTextExtractor.extract` declares `throws IOException`, and must not be widened back.** It
 declared `throws Exception` until item 28, which forced `catch (Exception)` on all three call sites
 — the shape the Nuxeo "Catching Exceptions" page rules out, because it also catches
@@ -334,7 +344,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 246 tests (25 test classes)
+mvn -o install                                     # full build, 252 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -347,7 +357,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -360,7 +370,8 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 `imageWord`), `blobaudit-test-txprobe-contrib.xml` to record whether a transaction is open during
 the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`),
 `blobaudit-test-passthrough-contrib.xml` to make the converter output exactly the input
-(`PassThroughConverter`, contributed to the `ConversionService` as `blobauditPassThrough`), and
+(`PassThroughConverter`, contributed to the `ConversionService` as `blobauditPassThrough`),
+`blobaudit-test-smallvalue-config.xml` to set `maxValueLength` to 200, and
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
@@ -390,7 +401,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 38 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 39 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -684,6 +695,7 @@ cited here as "code review 2026-10".
     Known limitation, documented rather than worked around: when both sides of a modification are
     longer than `maxValueLength` and differ only past it, the entry renders as two identical
     prefixes (`~ key : X… -> X…`). The counters stay exact and `bdiff:changed` still reports it.
+    **Resolved for the built-in extractors by item 39**: their values carry a digest of the whole.
 
     Coverage: `TestTextDifferBounding`. Four of its seven cases were checked to fail against the
     unpatched code, with the measurements above.
@@ -1028,6 +1040,31 @@ cited here as "code review 2026-10".
     Coverage: `TestConverterTextExtractor#testTheConverterOutputIsReadOnlyUpToMaxLines`, checked to
     fail against the unpatched code, and `#testTheConverterOutputIsSplitOnEveryLineBreak`, which
     passes on both, as it must. Both run through `PassThroughConverter`. 244 tests → 246.
+
+39. *(code review 2026-10, finding `RES-07`, S2)* `maxLines` bounded how many values an extraction
+    held, never how long they were: `maxValueLength` only applied when `TextDiffer` rendered the
+    body. 10 000 cells of 32 767 characters were held whole, 327 M characters per side, and a
+    converted or slide paragraph had no limit at all.
+
+    Values are now bounded when they are created. `BlobTextExtractor.MAX_VALUE_LENGTH` is the
+    property `BlobDiffComponent#resolve` passes to every extractor from the configuration, unless
+    its contribution sets one; the spreadsheet, presentation, plain text and converter extractors
+    build their values through `ContentLine.of(key, value, maxValueLength)`. A longer value is
+    compacted to its beginning, its length and a 64-bit prefix of its SHA-256, within
+    `maxValueLength`: two values still compare equal exactly when they are, and the rendered entry
+    of a change past the kept beginning now shows two different digests instead of two identical
+    prefixes - the limitation item 23 had documented.
+
+    Not changed: a single unit is still read whole before it is compacted (a cell, a paragraph, a
+    converted line); only the accumulation is bounded, to `maxLines × maxValueLength` per side.
+    The image inventory holds digests, short by construction, and is untouched.
+
+    Coverage: `TestExtractedValueBounding` (200 cells of 32 000 characters, the other formats, a
+    change past the kept beginning, equal long values),
+    `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength` and
+    `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`. Five of the six
+    were checked to fail against the unpatched code, the equal-values one passes on both, as it
+    must. 246 tests → 252.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

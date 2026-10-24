@@ -25,6 +25,7 @@ import org.apache.poi.openxml4j.opc.PackagePart;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.xml.sax.SAXException;
@@ -57,9 +58,12 @@ public class PresentationExtractor implements BlobTextExtractor {
 
     protected boolean includeNotes = true;
 
+    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+
     @Override
     public void init(Map<String, String> properties) {
         includeNotes = !"false".equalsIgnoreCase(properties.get("includeNotes"));
+        maxValueLength = BlobTextExtractor.maxValueLength(properties);
     }
 
     /**
@@ -73,7 +77,7 @@ public class PresentationExtractor implements BlobTextExtractor {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Collector collector = new Collector(maxLines);
+        Collector collector = new Collector(maxLines, maxValueLength);
         OPCPackage pkg = OoxmlPackages.open(blob);
         try {
             for (PackagePart slide : SlideHandler.slides(pkg)) {
@@ -205,12 +209,15 @@ public class PresentationExtractor implements BlobTextExtractor {
     protected static class Collector {
         protected final int maxLines;
 
+        protected final int maxValueLength;
+
         protected final List<ContentLine> lines = new ArrayList<>();
 
         protected boolean truncated;
 
-        protected Collector(int maxLines) {
+        protected Collector(int maxLines, int maxValueLength) {
             this.maxLines = maxLines;
+            this.maxValueLength = maxValueLength;
         }
 
         protected boolean add(String value) {
@@ -218,7 +225,7 @@ public class PresentationExtractor implements BlobTextExtractor {
                 truncated = true;
                 return false;
             }
-            lines.add(ContentLine.of(value));
+            lines.add(ContentLine.of(null, value, maxValueLength));
             return true;
         }
     }

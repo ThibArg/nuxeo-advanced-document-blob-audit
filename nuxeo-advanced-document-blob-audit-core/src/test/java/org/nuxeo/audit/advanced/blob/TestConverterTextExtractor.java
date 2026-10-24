@@ -234,4 +234,20 @@ public class TestConverterTextExtractor {
             Files.deleteIfExists(file.toPath());
         }
     }
+
+    /** RES-07 (code review 2026-10): a converted line is bounded when it is extracted, not when rendered. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-passthrough-contrib.xml")
+    public void testAConvertedLineIsBoundedByMaxValueLength() throws Exception {
+        ConverterTextExtractor extractor = new ConverterTextExtractor();
+        extractor.init(Map.of("converter", "blobauditPassThrough", "maxValueLength", "1000"));
+        String line = "word ".repeat(10_000);
+
+        DiffableContent content = extractor.extract(
+                BlobAuditTestHelper.textBlob(line + "\n", "text/plain", "long-line.txt"), MAX_LINES);
+
+        assertEquals(1, content.size());
+        assertTrue(content.lines().get(0).value().length() <= 1000);
+        assertTrue(content.lines().get(0).value().startsWith("word word"));
+    }
 }

@@ -33,6 +33,24 @@ import org.nuxeo.ecm.core.api.Blob;
 public interface BlobTextExtractor {
 
     /**
+     * Property through which the component hands every extractor the configured
+     * {@code maxValueLength}, unless its contribution sets one itself.
+     *
+     * @since 2025.1
+     */
+    String MAX_VALUE_LENGTH = "maxValueLength";
+
+    /**
+     * Returns the {@link #MAX_VALUE_LENGTH} property, or {@link TextDiffer#DEFAULT_MAX_VALUE_LENGTH}.
+     *
+     * @since 2025.1
+     */
+    static int maxValueLength(Map<String, String> properties) {
+        String value = properties.get(MAX_VALUE_LENGTH);
+        return value == null ? TextDiffer.DEFAULT_MAX_VALUE_LENGTH : Integer.parseInt(value.trim());
+    }
+
+    /**
      * Extracts the comparable content of the given blob.
      * <p>
      * <b>Declares {@code IOException}, deliberately not {@code Exception}.</b> It used to declare
@@ -43,7 +61,9 @@ public interface BlobTextExtractor {
      *
      * @param blob the blob to read, never {@code null}
      * @param maxLines the maximum number of {@link ContentLine} to produce; implementations must
-     *            stop past this limit and flag the result as truncated
+     *            stop past this limit and flag the result as truncated. Each value should also be
+     *            bounded at creation, through {@link ContentLine#of(String, String, int)}: past
+     *            {@code maxLines}, its length is what the extraction holds in heap
      */
     DiffableContent extract(Blob blob, int maxLines) throws IOException;
 

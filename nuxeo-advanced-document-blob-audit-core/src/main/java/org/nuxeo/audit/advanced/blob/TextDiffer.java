@@ -121,8 +121,9 @@ public class TextDiffer {
      * <b>Known limitation.</b> When both sides of a modification are longer than
      * {@code maxValueLength} and only differ past it, the rendered entry shows two identical
      * prefixes ({@code ~ key : X… -> X…}). The counters stay exact and {@code bdiff:changed} still
-     * reports the modification; only the rendering is uninformative. Resolving it - a digest, or
-     * the offset of the first difference - was judged not worth the complexity for a rare case.
+     * reports the modification; only the rendering is uninformative. The built-in extractors avoid
+     * it: they bound values with {@link ContentLine#compact(String, int)}, whose digest tells the two
+     * sides apart and whose result is short enough to pass through here unchanged.
      *
      * @since 2025.1
      */

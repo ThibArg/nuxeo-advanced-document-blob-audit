@@ -62,6 +62,7 @@ import org.apache.xmlbeans.XmlException;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTDefinedName;
@@ -94,9 +95,12 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
 
     protected boolean useFormulas = true;
 
+    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+
     @Override
     public void init(Map<String, String> properties) {
         useFormulas = !"false".equalsIgnoreCase(properties.get("useFormulas"));
+        maxValueLength = BlobTextExtractor.maxValueLength(properties);
     }
 
     /**
@@ -196,7 +200,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
                         return true;
                     }
                     String key = sheetName + "!" + new CellReference(cell).formatAsString(false);
-                    lines.add(ContentLine.of(key, value));
+                    lines.add(ContentLine.of(key, value, maxValueLength));
                 }
             }
         }
@@ -514,7 +518,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
             if (lines.size() >= maxLines) {
                 throw new MaxLinesReached();
             }
-            lines.add(ContentLine.of(sheetName + "!" + ref, cellText));
+            lines.add(ContentLine.of(sheetName + "!" + ref, cellText, maxValueLength));
         }
 
         protected String cellText() {

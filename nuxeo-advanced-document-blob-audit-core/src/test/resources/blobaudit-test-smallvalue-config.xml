@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.smallvalue">
+
+  <require>org.nuxeo.audit.advanced.blob.test.config</require>
+
+  <!-- Same as blobaudit-test-config.xml with a small maxValueLength, to check it reaches the extractors. -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <maxBlobSize>1048576</maxBlobSize>
+      <maxLines>1000</maxLines>
+      <maxDiffEntries>500</maxDiffEntries>
+      <maxValueLength>200</maxValueLength>
+      <docTypes />
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+    </config>
+  </extension>
+
+</component>

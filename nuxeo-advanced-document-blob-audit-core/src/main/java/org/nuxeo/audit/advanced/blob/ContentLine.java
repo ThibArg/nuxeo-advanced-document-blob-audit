@@ -15,6 +15,13 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+
+import org.nuxeo.ecm.core.api.NuxeoException;
+
 /**
  * One comparable unit of content extracted from a blob.
  * <p>
@@ -33,6 +40,40 @@ public record ContentLine(String key, String value) {
 
     public static ContentLine of(String key, String value) {
         return new ContentLine(key, value);
+    }
+
+    /**
+     * Same as {@link #of(String, String)}, with the value bounded by {@link #compact(String, int)}.
+     *
+     * @since 2025.1
+     */
+    public static ContentLine of(String key, String value, int maxValueLength) {
+        return new ContentLine(key, compact(value, maxValueLength));
+    }
+
+    /**
+     * Bounds a value without losing what tells it apart: past {@code maxValueLength}, it keeps its
+     * beginning followed by its full length and the start of its SHA-256, so that two long values
+     * still compare equal exactly when they are, and the result is still {@code maxValueLength}
+     * characters at most - {@link TextDiffer} then renders it as is.
+     *
+     * @since 2025.1
+     */
+    public static String compact(String value, int maxValueLength) {
+        if (value == null || value.length() <= maxValueLength) {
+            return value;
+        }
+        String marker = "… [" + value.length() + " chars, sha256:" + digest(value) + "]";
+        return value.substring(0, Math.max(0, maxValueLength - marker.length())) + marker;
+    }
+
+    private static String digest(String value) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 8);
+        } catch (NoSuchAlgorithmException e) {
+            throw new NuxeoException("SHA-256 is not available on this JVM", e);
+        }
     }
 
     public boolean isKeyed() {

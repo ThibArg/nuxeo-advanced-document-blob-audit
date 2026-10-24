@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.BlobCharsets;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
@@ -56,6 +57,8 @@ public class ConverterTextExtractor implements BlobTextExtractor {
     /** Minimum length for a line to be considered a comparable unit. */
     protected int minLineLength = 1;
 
+    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+
     @Override
     public void init(Map<String, String> properties) {
         converter = properties.getOrDefault("converter", ANY_2_TEXT);
@@ -63,6 +66,7 @@ public class ConverterTextExtractor implements BlobTextExtractor {
         if (min != null) {
             minLineLength = Integer.parseInt(min);
         }
+        maxValueLength = BlobTextExtractor.maxValueLength(properties);
     }
 
     /**
@@ -94,7 +98,7 @@ public class ConverterTextExtractor implements BlobTextExtractor {
                     if (lines.size() >= maxLines) {
                         return DiffableContent.positional(lines, true);
                     }
-                    lines.add(ContentLine.of(value));
+                    lines.add(ContentLine.of(null, value, maxValueLength));
                 }
             }
         }

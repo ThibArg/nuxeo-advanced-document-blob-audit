@@ -27,6 +27,7 @@ import java.util.Map;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.BlobCharsets;
 import org.nuxeo.ecm.core.api.Blob;
 
@@ -44,10 +45,13 @@ public class PlainTextExtractor implements BlobTextExtractor {
 
     protected boolean skipBlankLines = false;
 
+    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+
     @Override
     public void init(Map<String, String> properties) {
         trimLines = !"false".equalsIgnoreCase(properties.get("trimLines"));
         skipBlankLines = "true".equalsIgnoreCase(properties.get("skipBlankLines"));
+        maxValueLength = BlobTextExtractor.maxValueLength(properties);
     }
 
     @Override
@@ -71,7 +75,7 @@ public class PlainTextExtractor implements BlobTextExtractor {
                 if (skipBlankLines && value.isEmpty()) {
                     continue;
                 }
-                lines.add(ContentLine.of(value));
+                lines.add(ContentLine.of(null, value, maxValueLength));
             }
         }
         return DiffableContent.positional(lines, truncated);

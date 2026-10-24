@@ -91,6 +91,17 @@ public class TestBlobDiffService {
         assertFalse("text must produce positional content", content.keyed());
     }
 
+    /** RES-07 (code review 2026-10): the configured {@code maxValueLength} bounds values at extraction. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-smallvalue-config.xml")
+    public void testTheConfiguredMaxValueLengthReachesTheExtractors() throws Exception {
+        DiffableContent content = blobDiffService.extract(textBlob("x".repeat(10_000), "text/plain", "f.txt"));
+
+        assertEquals(200, blobDiffService.getConfig().getMaxValueLength());
+        assertEquals(1, content.size());
+        assertTrue(content.lines().get(0).value().length() <= 200);
+    }
+
     /**
      * No extractor means no diff, and a {@code null} result the caller must handle. This is now the
      * <b>only</b> meaning of {@code null}: the counterpart of the test just below.

@@ -49,8 +49,10 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.LogManager;
@@ -125,7 +127,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             }
             try {
                 BlobTextExtractor extractor = descriptor.getKlass().getDeclaredConstructor().newInstance();
-                extractor.init(descriptor.getProperties());
+                Map<String, String> properties = new HashMap<>(descriptor.getProperties());
+                properties.putIfAbsent(BlobTextExtractor.MAX_VALUE_LENGTH,
+                        String.valueOf(getConfig().getMaxValueLength()));
+                extractor.init(properties);
                 resolved.add(new ResolvedExtractor(descriptor, extractor));
             } catch (ReflectiveOperationException | RuntimeException e) {
                 // RuntimeException included on purpose: init() parses contributed properties -
