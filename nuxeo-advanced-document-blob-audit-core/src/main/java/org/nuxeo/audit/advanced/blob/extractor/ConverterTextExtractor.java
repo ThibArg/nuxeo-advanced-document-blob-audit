@@ -15,13 +15,15 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
-import org.apache.commons.io.IOUtils;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
@@ -46,6 +48,9 @@ public class ConverterTextExtractor implements BlobTextExtractor {
 
     public static final String ANY_2_TEXT = "any2text";
 
+    /** The line breaks {@code \R} matches and {@code BufferedReader#readLine()} does not. */
+    protected static final Pattern OTHER_LINE_BREAKS = Pattern.compile("[\\u000B\\u000C\\u0085\\u2028\\u2029]");
+
     protected String converter = ANY_2_TEXT;
 
     /** Minimum length for a line to be considered a comparable unit. */
@@ -60,6 +65,14 @@ public class ConverterTextExtractor implements BlobTextExtractor {
         }
     }
 
+    /**
+     * Reads the converter output line by line and stops at {@code maxLines}: a long document converts
+     * to hundreds of megabytes of text, of which only the first lines are kept.
+     * <p>
+     * The charset is resolved by {@link BlobCharsets}, not by {@code textBlob.getString()}: the
+     * converter is a contributed property, and a blank or unknown declared encoding would otherwise
+     * file the whole diff as {@code error}.
+     */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         ConversionService conversionService = Framework.getService(ConversionService.class);
@@ -68,38 +81,23 @@ public class ConverterTextExtractor implements BlobTextExtractor {
         if (textBlob == null) {
             return DiffableContent.positional(List.of(), false);
         }
-        String text = read(textBlob);
         List<ContentLine> lines = new ArrayList<>();
-        boolean truncated = false;
-        for (String raw : text.split("\\R")) {
-            String value = raw.trim();
-            if (value.length() < minLineLength) {
-                continue;
+        try (InputStream in = textBlob.getStream();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in, BlobCharsets.of(textBlob)))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                for (String raw : OTHER_LINE_BREAKS.split(line, -1)) {
+                    String value = raw.trim();
+                    if (value.length() < minLineLength) {
+                        continue;
+                    }
+                    if (lines.size() >= maxLines) {
+                        return DiffableContent.positional(lines, true);
+                    }
+                    lines.add(ContentLine.of(value));
+                }
             }
-            if (lines.size() >= maxLines) {
-                truncated = true;
-                break;
-            }
-            lines.add(ContentLine.of(value));
         }
-        return DiffableContent.positional(lines, truncated);
-    }
-
-    /**
-     * Decodes the converter output with an explicitly resolved charset.
-     * <p>
-     * Deliberately not {@code textBlob.getString()}: that builds an
-     * {@code InputStreamReader(stream, String)} from {@code getEncoding()} and only guards against
-     * {@code null}. A <b>blank</b> or unknown encoding - and {@code converter} is a contributed
-     * property, so the output blob is not necessarily produced by {@code any2text} - becomes an
-     * {@code UnsupportedEncodingException}, and the whole diff is filed as {@code error} for a
-     * reason that has nothing to do with the content.
-     *
-     * @since 2025.1
-     */
-    protected String read(Blob textBlob) throws IOException {
-        try (InputStream in = textBlob.getStream()) {
-            return IOUtils.toString(in, BlobCharsets.of(textBlob));
-        }
+        return DiffableContent.positional(lines, false);
     }
 }

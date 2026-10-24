@@ -472,6 +472,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared: restyling a Word paragraph or a PowerPoint text box produces no diff.
 - **Scanned PDFs / image-only content.** Without OCR, nothing is extracted: status stays `ok` with an empty diff.
 - **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
+- **Converted formats** (Word, PDF, OpenDocument, RTF...) are read line by line from the converter output, and reading stops at `maxLines`. The conversion itself still processes the whole document.
 - **Positional counters are not an exact edit script.** A removal immediately followed by an addition is coalesced into a modification, so fully rewritten blocks report a mix of removals, additions and modifications (totals remain consistent).
 - **Quadratic running time.** Hirschberg keeps memory linear, but time stays O(n × m): `maxLines` must remain bounded.
 - **Truncation.** Beyond `maxLines` (extraction), or `maxDiffEntries` / `maxDiffChars` / `maxValueLength` (reporting), the diff is partial and flagged `truncated`. The counters stay exact in every case.

@@ -304,6 +304,13 @@ read-only package logs a WARN before doing the same.
 Coverage: `TestPresentationStreaming`, `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
 `#testAOneCellAnchorIsKeyedOnItsCell`.
 
+**The converter output is read line by line** (item 38). `ConverterTextExtractor` reads it with a
+`BufferedReader` and stops at `maxLines`. `readLine` breaks only on CR and LF, so each line is split
+again on `OTHER_LINE_BREAKS` (VT, FF, NEL, U+2028, U+2029): the segmentation stays that of the
+former `split("\\R")`. Do not drop that second split, the diff of every converted PDF would shift.
+Coverage: `TestConverterTextExtractor#testTheConverterOutputIsSplitOnEveryLineBreak`,
+`#testTheConverterOutputIsReadOnlyUpToMaxLines`.
+
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
@@ -327,7 +334,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 244 tests (25 test classes)
+mvn -o install                                     # full build, 246 tests (25 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -351,7 +358,9 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 `blobaudit-test-failingimage-contrib.xml` to make the Word image inventory throw
 (`FailingImageExtractor`, a test class contributed to `imageExtractors` with a lower `order` than
 `imageWord`), `blobaudit-test-txprobe-contrib.xml` to record whether a transaction is open during
-the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`), and
+the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`),
+`blobaudit-test-passthrough-contrib.xml` to make the converter output exactly the input
+(`PassThroughConverter`, contributed to the `ConversionService` as `blobauditPassThrough`), and
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
@@ -381,7 +390,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 37 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 38 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -999,6 +1008,26 @@ cited here as "code review 2026-10".
     subclass overrides `digestStream(MessageDigest, InputStream)`, a signature older than the fix)
     and `#testTheImagesOfOneFileAreReadWithinATotalBudget` (DOCX, PDF and PPTX). All four were
     checked to fail against the unpatched code — 20 reads instead of 1, and no stop. 240 tests → 244.
+
+38. *(code review 2026-10, finding `RES-06`, S2)* `ConverterTextExtractor` read the whole
+    converter output into a `String` with `IOUtils.toString`, then `split("\\R")` built an array
+    of every line, before `maxLines` kept the first of them. Measured on 9 MB of text: 64 MB
+    allocated to keep 100 lines. `pdf2text` writes its output to a file, which this pulled whole
+    into heap, per side; and the text size is not bounded by `maxBlobSize`, which caps the
+    compressed input.
+
+    The output is now read with a `BufferedReader`, as `PlainTextExtractor` does, and the read
+    stops at `maxLines`: 0.5 MB on the same input. The five breaks `\R` matches and `readLine` does
+    not are split within each line, so the lines are the same as before. The charset is still
+    resolved by `BlobCharsets`.
+
+    Not changed: the conversion itself still processes the whole document, and a converter that
+    builds its output in memory (`any2text` through Tika) still holds it whole. Only this
+    extractor's copies are gone.
+
+    Coverage: `TestConverterTextExtractor#testTheConverterOutputIsReadOnlyUpToMaxLines`, checked to
+    fail against the unpatched code, and `#testTheConverterOutputIsSplitOnEveryLineBreak`, which
+    passes on both, as it must. Both run through `PassThroughConverter`. 244 tests → 246.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

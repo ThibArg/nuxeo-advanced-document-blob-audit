@@ -20,6 +20,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.Writer;
+import java.lang.management.ManagementFactory;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import jakarta.inject.Inject;
@@ -31,10 +38,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.ecm.core.convert.api.ConversionService;
+import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
+
+import com.sun.management.ThreadMXBean;
 
 /**
  * Tests for the Word / PDF path.
@@ -164,5 +175,63 @@ public class TestConverterTextExtractor {
                 MAX_LINES);
 
         assertTrue(content.lines().stream().noneMatch(line -> line.value().length() < 10));
+    }
+
+    /* ==================== converter output (RES-06) ==================== */
+
+    protected static ConverterTextExtractor passThrough() {
+        ConverterTextExtractor extractor = new ConverterTextExtractor();
+        extractor.init(Map.of("converter", "blobauditPassThrough"));
+        return extractor;
+    }
+
+    /** The output is now read line by line: it must still be split on every break {@code \R} matches. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-passthrough-contrib.xml")
+    public void testTheConverterOutputIsSplitOnEveryLineBreak() throws Exception {
+        String text = "first\r\nsecond\rthird\nfourth\u000Bfifth\u000Csixth\u0085seventh\u2028eighth\u2029ninth"
+                + "\n\n  padded  \n\u2028\nlast";
+        List<String> expected = new ArrayList<>();
+        for (String raw : text.split("\\R")) {
+            if (!raw.trim().isEmpty()) {
+                expected.add(raw.trim());
+            }
+        }
+
+        DiffableContent content = passThrough().extract(BlobAuditTestHelper.textBlob(text, "text/plain", "breaks.txt"),
+                MAX_LINES);
+
+        assertEquals(11, expected.size());
+        assertEquals(expected, content.lines().stream().map(ContentLine::value).toList());
+    }
+
+    /**
+     * RES-06 (code review 2026-10): the whole converter output was read into a String and split into
+     * an array of every line before {@code maxLines} applied - several times the size of the text, per
+     * side, to keep the first lines of it.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-passthrough-contrib.xml")
+    public void testTheConverterOutputIsReadOnlyUpToMaxLines() throws Exception {
+        File file = Framework.createTempFile("blobaudit-test-", ".txt");
+        try {
+            try (Writer writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
+                for (int i = 0; i < 200_000; i++) {
+                    writer.write("Line " + i + " of a very long converted document\n");
+                }
+            }
+            Blob blob = new FileBlob(file, "text/plain", StandardCharsets.UTF_8.name(), "long.txt", null);
+            ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+            long before = threads.getCurrentThreadAllocatedBytes();
+
+            DiffableContent content = passThrough().extract(blob, 100);
+
+            long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+            assertEquals(100, content.size());
+            assertTrue(content.truncated());
+            assertTrue("keeping 100 lines allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
+        } finally {
+            Files.deleteIfExists(file.toPath());
+        }
     }
 }

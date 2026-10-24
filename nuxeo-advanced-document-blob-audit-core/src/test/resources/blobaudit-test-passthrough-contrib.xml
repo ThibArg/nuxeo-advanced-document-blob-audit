@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.passthrough">
+
+  <!-- Hands back its input as the converter output, for the ConverterTextExtractor tests (RES-06). -->
+  <extension target="org.nuxeo.ecm.core.convert.service.ConversionServiceImpl" point="converter">
+    <converter name="blobauditPassThrough" class="org.nuxeo.audit.advanced.blob.PassThroughConverter">
+      <sourceMimeType>text/plain</sourceMimeType>
+      <destinationMimeType>text/plain</destinationMimeType>
+    </converter>
+  </extension>
+
+</component>
