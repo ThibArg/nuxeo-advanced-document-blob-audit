@@ -432,7 +432,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 43 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 44 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1181,6 +1181,17 @@ cited here as "code review 2026-10".
     No automated coverage, no JS test infrastructure. Manual checks: a purge that completes, one
     stopped mid-run, one stopped just after it completed, and the network cut during a run (the
     dialog must keep polling, then report the purge as still running).
+
+44. *(code review 2026-10, finding `WEB-02`, S2)* Unticking "Truncated diffs only" hid every
+    truncated diff. The two-way binding wrote `false`, `nuxeo-page-provider` only drops `null` and
+    `undefined` named parameters, and `NXQLQueryBuilder` turned `false` into `bdiff:truncated = 0`:
+    a box labelled "only truncated" meant "exclude truncated" once touched, with no visible filter.
+    The checkbox is now bound one way and its handler sets `true` or `null`; an observer replaces a
+    `false` read back from a saved search by `null`. **Rule for any future boolean filter of this
+    form: send `true` or nothing, never `false`.**
+
+    No automated coverage. Manual check: tick, untick, the result count must come back to the
+    unfiltered one; then load a saved search created before the fix with the box unticked.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
