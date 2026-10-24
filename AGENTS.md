@@ -245,7 +245,8 @@ fallback never runs and every filter is dropped quietly. That fallback model nev
 the prefixed keys the UI sends, because it is built with `anySchema=true` and resolves a prefix
 through the schema registry; it would *not* have worked for bare field names. Both are now valid,
 but keep the prefix: a bare key is matched by iterating the schemas of the search document, where a
-generic name such as `user` can collide. No test covers this — `BLOB_DIFFS_ADMIN` has none.
+generic name such as `user` can collide. Coverage: `TestBlobDiffAdminSearch` (item 57), which builds
+the search document from string named parameters the way the REST endpoint does.
 
 **The `eventTypes` label is resolved server side, not by Web UI.** `nuxeo-audit-search` asks for
 `localize=true` without `dbl10n`, so `SuggestDirectoryEntries` translates the label against the
@@ -395,7 +396,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 277 tests (26 test classes)
+mvn -o install                                     # full build, 283 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -458,7 +459,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 56 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 57 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1364,6 +1365,20 @@ cited here as "code review 2026-10".
     `BlobDiffPurgeComputation#compute` now returns at once for an aborted command, so the abort
     takes effect at the next batch of 50. Checked three times in a row on each side: 0 diffs left
     before, at least 200 after. Test count unchanged, 277.
+
+57. *(code review 2026-10, finding `BLD-04`, S3)* `BLOB_DIFFS_ADMIN`, the query behind every Web UI
+    screen of the audit, had no test, although its filters had already been dropped in silence once
+    (item 25). It needs a search service, not a search engine: `TestBlobDiffAdminSearch` runs on
+    `CoreSearchFeature`, whose default client is the repository one, as on a bare instance. It
+    builds the search document with `PageProviderHelper#getSearchDocumentModel` from string named
+    parameters, as the REST search endpoint does for Web UI, and checks that each filter (source,
+    user, date range, truncated) narrows the result and that filters combine. Aggregates are left
+    out: that client has no `AGGREGATE` capability.
+
+    Checked by breaking the page provider for one run: a wrong `user` field and a wrong
+    `truncated` parameter made three of the six tests fail. Removing `<searchDocumentType>` did
+    not, and cannot: the fallback search document resolves `bdsearch:` keys too (item 25), which is
+    why the prefix is kept. 277 tests → 283, 26 test classes → 27.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

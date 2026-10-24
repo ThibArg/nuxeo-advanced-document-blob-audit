@@ -588,6 +588,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
 | TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, retry single-flight and recovery, blobDiffSource enricher |
 | TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |
+| TestBlobDiffAdminSearch | Yes | `BLOB_DIFFS_ADMIN` on the repository search client: each filter of the audit search narrows the result |
 | TestBlobDiffHardening | Yes | Full-text exclusion, dedicated work queue, deterministic work id, work idempotence, bounded version lookup |
 | TestBlobDiffListenerDisabling | Yes | Per-operation context data flag, thread-scoped `runDisabled`, no leak between operations |
 | TestBlobAuditIntegration | Yes | End-to-end validation |
