@@ -163,7 +163,8 @@ public class TextDiffer {
         }
         boolean cut = false;
         if (unified.length() > maxChars) {
-            int lastNewline = unified.lastIndexOf('\n', maxChars);
+            // maxChars - 1: the kept prefix ends with the newline and must fit within maxChars
+            int lastNewline = unified.lastIndexOf('\n', maxChars - 1);
             unified = lastNewline < 0 ? "" : unified.substring(0, lastNewline + 1);
             cut = true;
         }

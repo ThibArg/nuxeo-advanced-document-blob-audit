@@ -190,4 +190,19 @@ public class TestTextDifferBounding {
         assertFalse(merged.truncated());
         assertEquals("+ text line\n\n# Images\n- image line\n", merged.unified());
     }
+
+    /**
+     * COR-07 (code review 2026-10): the cut searched for a newline from index {@code maxChars}
+     * included, so a newline sitting exactly there kept {@code maxChars + 1} characters.
+     */
+    @Test
+    public void testMergeHonoursTheCapWhenANewlineSitsExactlyOnIt() {
+        TextDiffer tiny = new TextDiffer(5000, 10, MAX_VALUE_LENGTH);
+        DiffResult text = new DiffResult(2, 0, 0, false, "abcd\nefghi\n");
+
+        DiffResult merged = tiny.merge(text, new DiffResult(0, 0, 0, false, ""));
+
+        assertEquals("abcd\n", merged.unified());
+        assertTrue(merged.truncated());
+    }
 }
