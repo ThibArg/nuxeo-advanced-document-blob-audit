@@ -50,6 +50,10 @@ import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.bulk.BulkService;
 import org.nuxeo.ecm.core.bulk.CoreBulkFeature;
 import org.nuxeo.ecm.core.test.CoreFeature;
+import org.nuxeo.lib.stream.log.LogManager;
+import org.nuxeo.lib.stream.log.Name;
+import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.stream.StreamService;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
@@ -305,19 +309,51 @@ public class TestBlobDiffPurgeAction {
         assertTrue(bulkService.await(third.get("commandId").asText(), TIMEOUT));
     }
 
+    /**
+     * BLD-03 (code review 2026-10): the purge of a single diff could complete before the abort ran,
+     * and the test only checked the state flag. The first removal is now held until the abort is
+     * sent, and the test checks what an abort is for: the buckets after the one in flight are not
+     * processed, so most diffs survive.
+     */
     @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-purgegate-contrib.xml")
     public void testAPurgeCanBeAborted() throws Exception {
         DocumentModel source = file("abortable", textBlob("x", "text/plain", "x.txt"));
-        diff(source, daysAgo(40), BlobAuditConstants.STATUS_OK);
+        for (int i = 0; i < 300; i++) {
+            diff(source, daysAgo(40), BlobAuditConstants.STATUS_OK);
+        }
         txFeature.nextTransaction();
 
-        JsonNode submitted = run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
-        String commandId = submitted.get("commandId").asText();
+        PurgeGateListener.arm();
+        String commandId;
+        try {
+            JsonNode submitted = run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
+            commandId = submitted.get("commandId").asText();
+            assertTrue("the purge never reached its first removal", PurgeGateListener.awaitHeld());
 
-        JsonNode aborted = run(session, BlobDiffPurgeAbortOp.ID, null, Map.of("commandId", commandId));
+            JsonNode aborted = run(session, BlobDiffPurgeAbortOp.ID, null, Map.of("commandId", commandId));
+            assertEquals("ABORTED", aborted.get("state").asText());
+        } finally {
+            PurgeGateListener.release();
+        }
+        awaitPurgeStreamDrained();
+        restartTransaction();
 
-        assertNotNull(aborted.get("state"));
         assertEquals("ABORTED", bulkService.getStatus(commandId).getState().name());
+        // bucketSize is 100: only the bucket in flight may complete, the two others are skipped
+        int left = diffsOf(source.getId()).size();
+        assertTrue("the abort must stop the purge, " + left + " diffs left", left >= 200);
+    }
+
+    /** The bucket in flight is processed whatever happens, so wait for the stream rather than the status. */
+    protected void awaitPurgeStreamDrained() throws InterruptedException {
+        LogManager logs = Framework.getService(StreamService.class).getLogManager();
+        Name stream = Name.ofUrn(BlobDiffPurgeAction.ACTION_FULL_NAME);
+        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        while (logs.getLag(stream, stream).lag() > 0) {
+            assertTrue("the purge stream was not drained in " + TIMEOUT, System.nanoTime() < deadline);
+            Thread.sleep(100);
+        }
     }
 
     @Test

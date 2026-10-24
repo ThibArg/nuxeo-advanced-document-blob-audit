@@ -176,6 +176,11 @@ a generic delete. Coverage: `TestBlobDiffPurgeAction`.
 both go through `BlobDiffPurgeAction.purgeStatus`, which answers any other id as `UNKNOWN`, and the
 abort is never forwarded for it. Any auditor may still stop any purge, by design.
 
+**An abort is honoured by the purge computation itself** (item 56). `AbstractBulkComputation` only
+skips a bucket of a command it no longer knows, and it caches commands, so buckets already scrolled
+are processed whatever the state. `BlobDiffPurgeComputation#compute` must keep checking
+`isAbortedCommand` first. Coverage: `TestBlobDiffPurgeAction#testAPurgeCanBeAborted`.
+
 **`BlobDiff.Purge` uses `submit()`, not `submitTransactional()`.** The latter defers the real
 submission — and with it the exclusivity check and the parameter validation — to
 `beforeCompletion`, so a second concurrent purge surfaces as a commit failure instead of a readable
@@ -428,7 +433,10 @@ with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a 
 in this test stack deploys, and without which the `eventTypes` directory never registers.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 `TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
-`BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`.
+`BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`. Its abort test deploys
+`blobaudit-test-purgegate-contrib.xml`, whose `PurgeGateListener` holds the first `BlobDiff`
+removal until released, and waits for the purge stream to drain, since `await` returns as soon as
+the command is aborted.
 
 Do not run the build when a commit only touches `README.md`, `AGENTS.md` or `.gitignore`.
 
@@ -450,7 +458,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 55 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 56 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1343,6 +1351,19 @@ cited here as "code review 2026-10".
     compares two fully rewritten 4 900-line documents and counts the bytes the thread allocates
     (`ThreadMXBean#getCurrentThreadAllocatedBytes`), under 24 MB. Checked by adding a full
     `int[n+1][m+1]` table to `positionalEdits` for one run: 101 MB allocated, the test failed.
+
+56. *(code review 2026-10, finding `BLD-03`, S3, and a bug it uncovered)* `testAPurgeCanBeAborted`
+    raced the purge of a single diff, which could complete before the abort ran, and only checked
+    the state flag. It now holds the first removal (`PurgeGateListener`) until the abort is sent,
+    waits for the purge stream to drain, and checks that most of 300 diffs survive.
+
+    **Written that way, it failed every time: an abort deleted nothing less.**
+    `AbstractBulkComputation#processRecord` only checks the abort for a command it no longer knows,
+    and it caches the command, so every bucket already scrolled was processed whatever the state:
+    "Purge stopped" was shown while the purge deleted everything it had selected.
+    `BlobDiffPurgeComputation#compute` now returns at once for an aborted command, so the abort
+    takes effect at the next batch of 50. Checked three times in a row on each side: 0 diffs left
+    before, at least 200 after. Test count unchanged, 277.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

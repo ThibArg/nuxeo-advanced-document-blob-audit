@@ -115,6 +115,11 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
          */
         @Override
         protected void compute(CoreSession session, List<String> ids, Map<String, Serializable> properties) {
+            // The framework only checks the abort for a command it no longer knows: buckets already
+            // scrolled were processed whatever the state, so a stopped purge kept deleting.
+            if (isAbortedCommand(getCurrentCommand().getId())) {
+                return;
+            }
             for (DocumentModel doc : loadDocuments(session, ids)) {
                 if (!BlobAuditConstants.DIFF_DOCTYPE.equals(doc.getType())) {
                     log.warn("Skipping {} of type {}: the purge only removes {} documents",

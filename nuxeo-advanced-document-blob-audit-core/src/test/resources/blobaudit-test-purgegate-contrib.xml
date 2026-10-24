@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.purgegate">
+
+  <!-- BLD-03: holds the first BlobDiff removal of a purge, so that the test aborts it mid-run. -->
+  <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+    <listener name="blobAuditTestPurgeGate" async="false" postCommit="false"
+              class="org.nuxeo.audit.advanced.blob.PurgeGateListener">
+      <event>aboutToRemove</event>
+    </listener>
+  </extension>
+
+</component>
