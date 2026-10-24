@@ -273,6 +273,8 @@ Notes:
 
 `OSGI-INF/deployment-fragment.xml` unzips `web/nuxeo.war/**` and appends `ui/i18n/messages.json` and `messages-fr.json` (also to `messages-fr-FR.json`) to the Web UI translations. The bundle `ui/nuxeo-advanced-document-blob-audit/nuxeo-advanced-document-blob-audit.html` is registered through `WebResources` (`OSGI-INF/blobaudit-webui-contrib.xml`).
 
+The marketplace package ships the plugin bundle only. Apache POI and PDFBox, which the extractors rely on, come with the LTS 2025 server, in the versions `nuxeo-parent` manages.
+
 ```
 web/nuxeo.war/ui/
 ├── document/blobdiff/

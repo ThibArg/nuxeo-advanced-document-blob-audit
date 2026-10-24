@@ -461,7 +461,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 59 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 60 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1401,6 +1401,16 @@ cited here as "code review 2026-10".
     `jakarta.inject-api`). The POI family (`poi-ooxml-lite`, `xmlbeans`, `pdfbox-io`) went with
     item 60, which reworks that block. The "unused declared" ones are runtime deployments of the
     tests (`nuxeo-automation-test`, `nuxeo-platform-convert`) and stay.
+
+60. *(code review 2026-10, finding `BLD-07`, S3)* The core POM declared POI and PDFBox in compile
+    scope, "on purpose: POI is not part of a standard Nuxeo distribution, so the bundle must ship
+    it". False: the LTS 2025 server ships POI 5.5.1, PDFBox 3.0.7 and their dependencies in
+    `lib/`. The package only contained the bundle because `nx:zipdiff` drops a jar whose name
+    matches the distribution's; a maintainer pinning another POI version on the strength of that
+    comment would have shipped a second one onto the shared classpath. POI, `poi-ooxml-lite`,
+    `xmlbeans`, PDFBox and `pdfbox-io` are now `provided`, with a comment saying why and that no
+    version may be pinned here. `dependency:analyze` reports nothing used but undeclared, and the
+    package still holds the bundle alone. README, "Deployment", says so.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

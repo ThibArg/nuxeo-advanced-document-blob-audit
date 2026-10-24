@@ -129,21 +129,40 @@
     </dependency>
 
     <!--
-      Spreadsheet extraction. Compile scope on purpose: POI is not part of a standard Nuxeo
-      distribution, so the bundle must ship it. This is precisely the dependency that did not belong
-      in the original scalar-field audit plugin.
+      Spreadsheet, presentation and PDF reading. Provided: the LTS 2025 server ships POI, PDFBox and
+      their dependencies in its lib/ folder, and nuxeo-parent manages their versions. Never pin a
+      version here: the marketplace package would then ship a second POI next to the server's, both
+      on the shared classpath. poi-ooxml-lite, xmlbeans and pdfbox-io are imported directly too.
     -->
     <dependency>
       <groupId>org.apache.poi</groupId>
       <artifactId>poi</artifactId>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.poi</groupId>
       <artifactId>poi-ooxml</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml-lite</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.xmlbeans</groupId>
+      <artifactId>xmlbeans</artifactId>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.pdfbox</groupId>
       <artifactId>pdfbox</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox-io</artifactId>
+      <scope>provided</scope>
     </dependency>
 
     <!-- Test -->
