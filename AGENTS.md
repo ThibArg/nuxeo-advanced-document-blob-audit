@@ -402,7 +402,9 @@ mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#s
 ```
 
 `nuxeo.skip.enforcer` is `true` in the parent pom, so the Nuxeo enforcer rules do not run; do not
-rely on them to catch a bad dependency. The build resolves against
+rely on them to catch a bad dependency. Run `mvn -o dependency:analyze -pl
+nuxeo-advanced-document-blob-audit-core` instead: every artifact the code imports is declared, so
+"Used undeclared dependencies" must stay empty (item 59). The build resolves against
 `https://packages.nuxeo.com/repository/maven-public/` — `-o` only works once the local repo is warm.
 
 Tests needing no Nuxeo runtime (fast, pure JUnit):
@@ -459,7 +461,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 58 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 59 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1388,6 +1390,17 @@ cited here as "code review 2026-10".
     user granted the diff but not the source. The default auditors group, `administrators`,
     bypasses ACLs, hence the direct grant on the diff. Checked by making the enricher read the source
     privileged for one run: that test failed, and only it. 283 tests → 284.
+
+59. *(code review 2026-10, finding `BLD-06`, S3)* The core POM declared `nuxeo-core-bulk` and
+    `nuxeo-runtime-stream` explicitly so that a reshaped transitive path could not break the build
+    unnoticed, and applied that rule nowhere else. `mvn dependency:analyze` listed thirteen used
+    but undeclared artifacts. The Nuxeo, Jackson and Jakarta ones are now declared - `provided`
+    for what the code imports (`nuxeo-runtime`, `nuxeo-runtime-jtajca`, `nuxeo-common`,
+    `nuxeo-core-schema`, `nuxeo-stream`, `nuxeo-platform-directory-api`, `jackson-core`), `test`
+    for what only the tests import (`nuxeo-core-convert`, `jackson-databind`,
+    `jakarta.inject-api`). The POI family (`poi-ooxml-lite`, `xmlbeans`, `pdfbox-io`) went with
+    item 60, which reworks that block. The "unused declared" ones are runtime deployments of the
+    tests (`nuxeo-automation-test`, `nuxeo-platform-convert`) and stay.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
