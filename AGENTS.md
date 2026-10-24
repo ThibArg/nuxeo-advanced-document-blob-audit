@@ -450,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 53 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 54 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1327,6 +1327,14 @@ cited here as "code review 2026-10".
 
     No automated coverage. Manual check, once item 26 is fixed: open a large diff, move to the next
     one within a second; only the second diff's lines must show.
+
+54. *(code review 2026-10, finding `BLD-01`, S3)* Three container-path tests built 10:00 in the JVM
+    default zone while the path is rendered in UTC: east of UTC+10 the instant fell on the previous
+    UTC day and `mvn install` failed - `TestBlobDiffService#testContainerIsPartitionedByDate`,
+    `#testDifferentDaysGetDifferentFolders` and
+    `TestBlobDiffLocationAndSecurity#testConcurrentContainerCreationStaysUnderASingleRoot`. Both
+    `date(...)` helpers now build the instant in UTC. Checked by running both classes with
+    `TZ=Pacific/Auckland`, where the three failed before, and `TZ=America/Los_Angeles`.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

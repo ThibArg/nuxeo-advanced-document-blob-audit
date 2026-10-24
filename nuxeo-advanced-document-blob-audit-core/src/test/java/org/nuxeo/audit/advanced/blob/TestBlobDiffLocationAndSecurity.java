@@ -156,8 +156,9 @@ public class TestBlobDiffLocationAndSecurity {
         return id;
     }
 
+    /** In UTC, the zone the container path is rendered in: east of UTC+10, 10:00 local is the day before. */
     protected Date date(int year, int month, int day) {
-        Calendar calendar = Calendar.getInstance();
+        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
         calendar.clear();
         calendar.set(year, month, day, 10, 0, 0);
         return calendar.getTime();

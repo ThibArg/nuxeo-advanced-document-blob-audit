@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 
 import jakarta.inject.Inject;
 
@@ -403,8 +404,9 @@ public class TestBlobDiffService {
         assertEquals(stored.getDigest(), diffDoc.getPropertyValue(BlobAuditConstants.XP_NEW_DIGEST));
     }
 
+    /** In UTC, the zone the container path is rendered in: east of UTC+10, 10:00 local is the day before. */
     protected Date date(int year, int month, int day) {
-        Calendar calendar = Calendar.getInstance();
+        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
         calendar.clear();
         calendar.set(year, month, day, 10, 0, 0);
         return calendar.getTime();
