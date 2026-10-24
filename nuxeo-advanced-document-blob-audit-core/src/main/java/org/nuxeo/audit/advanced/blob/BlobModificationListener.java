@@ -52,7 +52,6 @@ import org.nuxeo.ecm.core.event.EventListener;
 import org.nuxeo.ecm.core.event.EventService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.core.query.sql.NXQL;
-import org.nuxeo.ecm.core.schema.DocumentType;
 import org.nuxeo.ecm.core.schema.SchemaManager;
 import org.nuxeo.ecm.core.schema.TypeConstants;
 import org.nuxeo.ecm.core.schema.types.ComplexType;
@@ -102,10 +101,15 @@ public class BlobModificationListener implements EventListener {
     protected static final int MAX_SCHEMA_DEPTH = 10;
 
     /**
-     * Blob xpath templates per document type. A document type is immutable for the life of the
-     * runtime, so this never needs invalidating.
+     * Blob xpath templates per schema name. Cleared when {@link BlobDiffComponent} stops, which a
+     * hot reload does, since schemas can then be redefined.
      */
     protected static final Map<String, List<String>> BLOB_XPATH_TEMPLATES = new ConcurrentHashMap<>();
+
+    /** @since 2025.1 */
+    public static void clearBlobXPathTemplates() {
+        BLOB_XPATH_TEMPLATES.clear();
+    }
 
     /**
      * Context data / event property disabling this listener for a single operation, following the
@@ -288,7 +292,7 @@ public class BlobModificationListener implements EventListener {
                 newVersion.getId(), newVersion.getVersionLabel(), newVersion.getVersionSeriesId());
         EventService eventService = Framework.getService(EventService.class);
         String principal = session.getPrincipal().getName();
-        for (BlobPair blobs : blobPairs(liveDoc, previousVersion, newVersion, config)) {
+        for (BlobPair blobs : blobPairs(previousVersion, newVersion, config)) {
             BlobDiffTrigger.Outcome outcome = blobs.unattributed()
                     ? BlobDiffTrigger.Outcome.skipped(STATUS_SKIPPED_LIST_CHANGED)
                     : BlobDiffTrigger.scheduleIfNeeded(liveDoc, blobs.xpath(), blobs.oldBlob(), blobs.newBlob(),
@@ -326,16 +330,16 @@ public class BlobModificationListener implements EventListener {
      * default - are compared verbatim: a path holding no blob simply yields {@code null} in
      * {@link #safeGetBlob} and is skipped downstream, so there is nothing to pre-filter.
      * <p>
-     * With {@code *}, the paths are derived from the <b>document type</b> and cached. The previous
-     * implementation walked every schema and every property of both version documents and called
+     * With {@code *}, the paths are derived from the <b>schemas the new version carries</b>, those of
+     * facets added to the document included, and cached per schema. The previous implementation
+     * walked every schema and every property of both version documents and called
      * {@code property.getValue()} on each, forcing the load of every complex and list property
-     * inside the user transaction, on every single check-in. A document type does not change
-     * between two check-ins, so this is computed once per type and per JVM. Blobs inside a list are
-     * paired by {@link #pairListEntries}.
+     * inside the user transaction, on every single check-in. Blobs inside a list are paired by
+     * {@link #pairListEntries}.
      *
      * @since 2025.1
      */
-    protected List<BlobPair> blobPairs(DocumentModel liveDoc, DocumentModel previous, DocumentModel current,
+    protected List<BlobPair> blobPairs(DocumentModel previous, DocumentModel current,
             BlobDiffConfigDescriptor config) {
         List<BlobPair> pairs = new ArrayList<>();
         if (!config.isEveryXPath()) {
@@ -344,14 +348,15 @@ public class BlobModificationListener implements EventListener {
             }
             return pairs;
         }
-        List<String> templates = BLOB_XPATH_TEMPLATES.computeIfAbsent(liveDoc.getType(),
-                BlobModificationListener::computeBlobXPathTemplates);
-        for (String template : templates) {
-            if (template.indexOf('*') < 0) {
-                pairs.add(new BlobPair(template, safeGetBlob(previous, template), safeGetBlob(current, template),
-                        false));
-            } else {
-                pairListEntries(template, previous, current, pairs);
+        for (String schema : current.getSchemas()) {
+            for (String template : BLOB_XPATH_TEMPLATES.computeIfAbsent(schema,
+                    BlobModificationListener::computeBlobXPathTemplates)) {
+                if (template.indexOf('*') < 0) {
+                    pairs.add(new BlobPair(template, safeGetBlob(previous, template),
+                            safeGetBlob(current, template), false));
+                } else {
+                    pairListEntries(template, previous, current, pairs);
+                }
             }
         }
         return pairs;
@@ -428,21 +433,19 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * Blob xpaths of a document type, as <b>templates</b>: a {@code *} stands for the index of a
-     * list entry, which only a document can resolve.
+     * Blob xpaths of a schema, as <b>templates</b>: a {@code *} stands for the index of a list entry,
+     * which only a document can resolve.
      */
-    protected static List<String> computeBlobXPathTemplates(String docType) {
+    protected static List<String> computeBlobXPathTemplates(String schemaName) {
         SchemaManager schemaManager = Framework.getService(SchemaManager.class);
-        DocumentType type = schemaManager == null ? null : schemaManager.getDocumentType(docType);
-        if (type == null) {
+        Schema schema = schemaManager == null ? null : schemaManager.getSchema(schemaName);
+        if (schema == null) {
             return List.of();
         }
         Set<String> xpaths = new LinkedHashSet<>();
-        for (Schema schema : type.getSchemas()) {
-            String prefix = schema.getNamespace().hasPrefix() ? schema.getNamespace().prefix : schema.getName();
-            for (Field field : schema.getFields()) {
-                collectBlobFields(prefix + ":" + field.getName().getLocalName(), field.getType(), xpaths, 0);
-            }
+        String prefix = schema.getNamespace().hasPrefix() ? schema.getNamespace().prefix : schema.getName();
+        for (Field field : schema.getFields()) {
+            collectBlobFields(prefix + ":" + field.getName().getLocalName(), field.getType(), xpaths, 0);
         }
         return List.copyOf(xpaths);
     }

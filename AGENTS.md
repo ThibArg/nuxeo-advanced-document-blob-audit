@@ -390,7 +390,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 276 tests (26 test classes)
+mvn -o install                                     # full build, 277 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -421,7 +421,8 @@ the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead 
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths with `<xpath>*</xpath>`, and `blobaudit-test-partial-config.xml` (used by
 `TestBlobDiffService`) to override nothing but `docTypes` and one property of the `converter`
-extractor.
+extractor, and `blobaudit-test-dynamicfacet-contrib.xml` (used by `TestBlobDiffVersionPairing`,
+with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a blob.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
 `template-vocabulary`, which the platform ships in `org.nuxeo.ecm.default.config` — a bundle nothing
 in this test stack deploys, and without which the `eventTypes` directory never registers.
@@ -449,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 49 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 50 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1277,6 +1278,22 @@ cited here as "code review 2026-10".
     mislabelled hole. The lists hold no resource, so `stop()` is gone; `start()` replaces them.
     Coverage: `TestBlobDiffService#testAStoppingComponentKeepsItsExtractors`, checked to fail against
     the unpatched code. 275 tests → 276.
+
+50. *(code review 2026-10, finding `API-03`, S3)* With `<xpath>*</xpath>`, the blob xpaths came
+    from `DocumentType#getSchemas()`, which only knows the static facets of the type: a blob in a
+    schema brought by a facet added to the document (`addFacet`) was never watched. The templates
+    were also cached per type in a static map nothing cleared, so a hot reload redefining a type
+    kept the old field list.
+
+    `blobPairs` now walks `DocumentModel#getSchemas()` of the new version, and
+    `computeBlobXPathTemplates` works on one schema; the cache is keyed by schema name, which a
+    document type plus its instance facets reduce to. `BlobDiffComponent#stop` came back, to clear
+    that cache and nothing else - the extractor lists stay (item 49).
+
+    Coverage: `TestBlobDiffVersionPairing#testABlobInASchemaOfAnInstanceFacetIsDiffed`, through
+    `blobaudit-test-dynamicfacet-contrib.xml`, checked to fail against the unpatched code;
+    `#testTemplatesAreComputedPerSchema` and `#testUnknownSchemaYieldsNoXPath` replace the two
+    per-type cases. 276 tests → 277.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

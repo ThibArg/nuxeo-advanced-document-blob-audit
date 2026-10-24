@@ -16,7 +16,6 @@
 package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
@@ -214,25 +213,46 @@ public class TestBlobDiffVersionPairing {
                 xpaths.contains("files:files/0/file"));
     }
 
-    /** The templates of a type are computed once and reused. */
+    /** Templates are computed per schema: a blob field, and a blob inside a list. */
     @Test
-    public void testTemplatesAreCachedPerDocumentType() {
-        BlobModificationListener.BLOB_XPATH_TEMPLATES.remove("File");
-
-        List<String> first = BlobModificationListener.computeBlobXPathTemplates("File");
-        BlobModificationListener.BLOB_XPATH_TEMPLATES.put("File", first);
-        List<String> cached = BlobModificationListener.BLOB_XPATH_TEMPLATES.get("File");
-
-        assertNotNull(first);
-        assertTrue("File must expose file:content, got " + first, first.contains("file:content"));
-        assertTrue("a blob in a list must be a template, got " + first, first.contains("files:files/*/file"));
-        assertEquals(first, cached);
+    public void testTemplatesAreComputedPerSchema() {
+        assertEquals(List.of("file:content"), BlobModificationListener.computeBlobXPathTemplates("file"));
+        assertEquals(List.of("files:files/*/file"), BlobModificationListener.computeBlobXPathTemplates("files"));
     }
 
-    /** An unknown document type must not throw, only yield nothing. */
+    /** An unknown schema must not throw, only yield nothing. */
     @Test
-    public void testUnknownDocumentTypeYieldsNoXPath() {
-        assertTrue(BlobModificationListener.computeBlobXPathTemplates("NoSuchTypeAtAll").isEmpty());
+    public void testUnknownSchemaYieldsNoXPath() {
+        assertTrue(BlobModificationListener.computeBlobXPathTemplates("noSuchSchemaAtAll").isEmpty());
+    }
+
+    /**
+     * API-03 (code review 2026-10): the paths came from the schemas of the document <b>type</b>, so
+     * a blob in a schema brought by a facet added to the document itself was never watched.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-dynamicfacet-contrib.xml")
+    public void testABlobInASchemaOfAnInstanceFacetIsDiffed() throws Exception {
+        DocumentModel doc = session.createDocumentModel("/", "faceted", "File");
+        assertTrue(doc.addFacet("BlobAuditExtra"));
+        doc.setPropertyValue("bdextra:attachment", (Serializable) textBlob("extra v1", "text/plain", "extra.txt"));
+        doc = session.createDocument(doc);
+        session.save();
+        session.checkIn(doc.getRef(), VersioningOption.MAJOR, "initial");
+        session.save();
+        txFeature.nextTransaction();
+
+        DocumentModel updated = session.getDocument(doc.getRef());
+        updated.setPropertyValue("bdextra:attachment", (Serializable) textBlob("extra v2", "text/plain", "extra.txt"));
+        updated.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
+        session.saveDocument(updated);
+        session.save();
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsFor(doc.getId());
+        assertEquals(1, diffs.size());
+        assertEquals("bdextra:attachment", diffs.get(0).getPropertyValue("bdiff:xpath"));
     }
 
     /* ------------------------------------- COR-01: list entries by content */

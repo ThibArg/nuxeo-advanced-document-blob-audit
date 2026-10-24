@@ -342,7 +342,7 @@ Contributions to `config` **merge**: a later one only overrides what it sets, an
 
 - A list (`docTypes`, `xpaths`) replaces the earlier one only when it is **not empty**. An empty element cannot widen a list back: list `*` instead.
 - `<docType>*</docType>` means every document type, as does an empty `docTypes` everywhere.
-- `<xpath>*</xpath>` means every blob xpath of the document type, discovered from its schemas. With no xpath configured anywhere, only `file:content` is diffed.
+- `<xpath>*</xpath>` means every blob xpath of the document, discovered from the schemas it carries, those of facets added to the document itself included. With no xpath configured anywhere, only `file:content` is diffed.
 - `<config enabled="false">` still switches the feature off: a value that is set always wins.
 
 The `extractors` and `imageExtractors` points merge the same way, by extractor name. An override only names the extractor and sets what it changes; its properties are added to the earlier ones, and its MIME types replace them only when it lists some:

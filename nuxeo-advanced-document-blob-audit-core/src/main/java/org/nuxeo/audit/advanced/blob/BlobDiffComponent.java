@@ -144,6 +144,16 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return resolved;
     }
 
+    /**
+     * The extractor lists are kept: a work still running past the WorkManager drain needs them
+     * (item 49). Only the blob xpaths derived from schemas go, a hot reload can redefine those.
+     */
+    @Override
+    public void stop(ComponentContext context) throws InterruptedException {
+        super.stop(context);
+        BlobModificationListener.clearBlobXPathTemplates();
+    }
+
     @Override
     public BlobDiffConfigDescriptor getConfig() {
         BlobDiffConfigDescriptor config = getDescriptor(XP_CONFIG, BlobDiffConfigDescriptor.DEFAULT_ID);

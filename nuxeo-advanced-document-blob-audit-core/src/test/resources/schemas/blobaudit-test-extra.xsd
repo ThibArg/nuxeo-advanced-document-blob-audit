@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:nxs="http://www.nuxeo.org/ecm/schemas/blobauditextra/"
+           targetNamespace="http://www.nuxeo.org/ecm/schemas/blobauditextra/">
+
+  <xs:include schemaLocation="core-types.xsd" />
+
+  <xs:element name="attachment" type="nxs:content" />
+
+</xs:schema>
