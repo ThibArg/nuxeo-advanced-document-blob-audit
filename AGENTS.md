@@ -267,10 +267,17 @@ decodes a JPX image.
 replays them on every later reference, skips a form already on the current path, and stops at
 `MAX_FORM_DEPTH`. `maxLines` counts every placement, dropped ones included, so replays stay bounded
 too. Never recurse into `form.getResources()` without going through `collectPdfForm`.
+**Each image is read once per file, and all of them within a budget** (item 37). Every format
+creates one `ImageBudget` per extraction: `digestOnce` memoizes digests by part name (OOXML) or by
+stream identity (PDF), and `meter` charges every byte read against `maxTotalImageBytes()` — eight
+times `maxImageBytes()`, 256 MB — after which the inventory stops, flagged `truncated`. Never read
+image bytes except through `digestOnce` and a metered stream. `digestStream` reads at most
+`maxImageBytes() + 1` bytes, so a dropped image costs the budget no more than the cap.
 Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
 `#testDroppingAPictureDoesNotRenumberTheFollowingOnes`,
-`#testAPdfFlateBombIsDigestedWithoutBeingDecoded` and the three `#testAPdfForm*` /
-`#testABranchingPdfFormGraph*` cases.
+`#testAPdfFlateBombIsDigestedWithoutBeingDecoded`, the three `#testAPdfForm*` /
+`#testABranchingPdfFormGraph*` cases, the three `#test*IsReadOnce` cases and
+`#testTheImagesOfOneFileAreReadWithinATotalBudget`.
 
 **XLSX text is streamed, never read through POI's usermodel** (item 34). `SpreadsheetExtractor`
 parses each sheet with SAX and stops at `maxLines`; the usermodel builds the XMLBeans tree of every
@@ -320,7 +327,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 240 tests (25 test classes)
+mvn -o install                                     # full build, 244 tests (25 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -374,7 +381,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 36 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 37 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -968,6 +975,30 @@ cited here as "code review 2026-10".
     `#testADiffRecordedDuringTheExtractionIsNotDuplicated` (the probe records a competing diff in
     its own transaction during the extraction). Both were checked to fail against the unpatched code
     — `[true, true]`, and two diffs instead of one. 238 tests → 240.
+
+37. *(code review 2026-10, finding `RES-05`, S2)* The image inventory was bounded per image
+    (`maxImageBytes()`) and per count (`maxLines`), never per file, and read every placement of an
+    image again. A scanned background shared by the 300 pages of a PDF was read 300 times per side;
+    a picture anchored 10 000 times in a few kilobytes of sheet was inflated and hashed 10 000
+    times, up to 320 GB per side in the worst case.
+
+    `ImageBudget`, created once per extraction, holds the digests already computed — by
+    `PackagePartName` for OOXML, by `COSStream` identity for PDF — and the bytes left to read.
+    `digestOnce` reads an image the first time it is met; `meter` wraps every image stream and
+    raises `BudgetExhausted` once `maxTotalImageBytes()` is spent, after which each format stops its
+    inventory and flags it `truncated`, like `maxLines` does. The total is not a new setting: it is
+    eight times the per-image cap, 256 MB by default, overridable with it.
+
+    One side effect, found by the existing tests: `digestStream` used to read in 8 KB chunks and
+    only then compare with the cap, so a dropped image cost up to 8 KB past it. It now never reads
+    more than `maxImageBytes() + 1` bytes. The warning for an image over the cap is logged once per
+    image, no longer once per placement.
+
+    Coverage: `TestImageInventoryExtractor#testAnImageOnEveryPdfPageIsReadOnce`,
+    `#testAPictureOnEverySlideIsReadOnce`, `#testAPictureAnchoredManyTimesIsReadOnce` (a counting
+    subclass overrides `digestStream(MessageDigest, InputStream)`, a signature older than the fix)
+    and `#testTheImagesOfOneFileAreReadWithinATotalBudget` (DOCX, PDF and PPTX). All four were
+    checked to fail against the unpatched code — 20 reads instead of 1, and no stop. 240 tests → 244.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

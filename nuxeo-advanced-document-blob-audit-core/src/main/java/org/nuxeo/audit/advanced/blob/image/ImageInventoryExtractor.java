@@ -16,6 +16,7 @@
 package org.nuxeo.audit.advanced.blob.image;
 
 import java.io.File;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -138,6 +139,114 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         return MAX_IMAGE_BYTES;
     }
 
+    /**
+     * Upper bound on the bytes read from all the images of one file together: eight images at
+     * {@link #maxImageBytes()}, so 256 MB by default.
+     *
+     * @since 2025.1
+     */
+    protected long maxTotalImageBytes() {
+        return 8 * maxImageBytes();
+    }
+
+    /**
+     * The images of one file already digested, and the bytes that may still be read from it.
+     * <p>
+     * An image placed many times - a logo on every slide, a scanned background on every page - is
+     * read once, and all the images of the file together within {@link #maxTotalImageBytes()}.
+     * Without either, a few kilobytes of placements could keep a worker inflating and hashing the
+     * same picture for hours.
+     *
+     * @since 2025.1
+     */
+    protected class ImageBudget {
+
+        /** By part name for OOXML, by stream identity for PDF; {@code null} for an image over budget. */
+        protected final Map<Object, String> digests;
+
+        protected long remaining = maxTotalImageBytes();
+
+        protected boolean exhausted;
+
+        protected ImageBudget(Map<Object, String> digests) {
+            this.digests = digests;
+        }
+
+        protected void spend(long bytes) throws BudgetExhausted {
+            remaining -= bytes;
+            if (remaining < 0) {
+                if (!exhausted) {
+                    log.warn("Image inventory stopped: the images of one file are over {} bytes",
+                            maxTotalImageBytes());
+                }
+                exhausted = true;
+                throw new BudgetExhausted();
+            }
+        }
+
+        /** A view of the stream that spends every byte read from it. */
+        protected InputStream meter(InputStream in) {
+            return new FilterInputStream(in) {
+                @Override
+                public int read() throws IOException {
+                    int value = super.read();
+                    if (value >= 0) {
+                        spend(1);
+                    }
+                    return value;
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) throws IOException {
+                    int read = super.read(buffer, offset, length);
+                    if (read > 0) {
+                        spend(read);
+                    }
+                    return read;
+                }
+            };
+        }
+    }
+
+    /** Raised once the images of a file are over {@link #maxTotalImageBytes()}. */
+    protected static class BudgetExhausted extends IOException {
+
+        private static final long serialVersionUID = 1L;
+
+        protected BudgetExhausted() {
+            super("image inventory budget exhausted");
+        }
+    }
+
+    @FunctionalInterface
+    protected interface ImageDigester {
+        String digest() throws IOException;
+    }
+
+    /**
+     * Digests an image the first time it is met in its file, within the budget of the file.
+     *
+     * @param image what identifies the image within its file
+     * @return the digest, or {@code null} if the image is over a budget and must be dropped; the
+     *         inventory must stop as well once {@link ImageBudget#exhausted} is set
+     * @since 2025.1
+     */
+    protected String digestOnce(ImageBudget budget, Object image, ImageDigester digester) throws IOException {
+        if (budget.digests.containsKey(image)) {
+            return budget.digests.get(image);
+        }
+        String digest = null;
+        if (!budget.exhausted) {
+            try {
+                digest = digester.digest();
+            } catch (BudgetExhausted e) {
+                // already logged, and flagged on the budget
+            }
+        }
+        budget.digests.put(image, digest);
+        return digest;
+    }
+
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         String mime = blob.getMimeType() == null ? "" : blob.getMimeType().toLowerCase(Locale.ROOT);
@@ -166,6 +275,7 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     protected DiffableContent extractDocx(Blob blob, int maxLines) throws IOException {
         List<ContentLine> images = new ArrayList<>();
         boolean truncated = false;
+        ImageBudget budget = new ImageBudget(new HashMap<>());
         // Two resources on purpose: if the ZipInputStream constructor throws - it allocates a
         // buffer and an Inflater - the underlying stream must still be closed.
         try (InputStream source = blob.getStream(); ZipInputStream zip = new ZipInputStream(source)) {
@@ -187,7 +297,12 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                 }
                 // Not closed on purpose: the iteration must go on, and getNextEntry() skips
                 // whatever is left of a partially read entry.
-                String digest = digestStream(zip);
+                String digest = digestOnce(budget, entry.getName(),
+                        () -> digestStream(newDigest(), budget.meter(zip)));
+                if (budget.exhausted) {
+                    truncated = true;
+                    break;
+                }
                 if (digest == null) {
                     log.warn("Skipping image {}: inflates past the {} byte inventory budget", name, maxImageBytes());
                     truncated = true;
@@ -217,29 +332,23 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     }
 
     /**
-     * SHA-256 of the stream, computed in 8 KB chunks and abandoned past {@link #maxImageBytes()}.
+     * SHA-256 of the stream, continuing a digest that may already hold a header, computed in 8 KB
+     * chunks and abandoned past {@link #maxImageBytes()}.
      * <p>
-     * Does <b>not</b> close the stream: the callers iterate over a shared {@link ZipInputStream}.
+     * Does <b>not</b> close the stream: the DOCX path iterates over a shared {@link ZipInputStream}.
      *
      * @return the digest, or {@code null} if the stream went over the budget
      * @since 2025.1
      */
-    protected String digestStream(InputStream in) throws IOException {
-        return digestStream(newDigest(), in);
-    }
-
-    /**
-     * Same as {@link #digestStream(InputStream)}, continuing a digest that may already hold a header.
-     *
-     * @since 2025.1
-     */
     protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
         byte[] buffer = new byte[8192];
+        long limit = maxImageBytes();
         long total = 0;
         int read;
-        while ((read = in.read(buffer)) != -1) {
+        // One byte past the limit is proof enough, and every byte read is charged to the file.
+        while ((read = in.read(buffer, 0, (int) Math.min(buffer.length, limit + 1 - total))) != -1) {
             total += read;
-            if (total > maxImageBytes()) {
+            if (total > limit) {
                 return null;
             }
             digest.update(buffer, 0, read);
@@ -309,6 +418,7 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     protected boolean streamSpreadsheetImages(OPCPackage pkg, List<ContentLine> images, int maxLines,
             boolean[] dropped) throws IOException {
         try {
+            ImageBudget budget = new ImageBudget(new HashMap<>());
             XSSFReader.SheetIterator sheets = new XSSFReader(pkg).getSheetIterator();
             while (sheets.hasNext()) {
                 // Only the part is wanted: the stream next() opens on the sheet is never read.
@@ -318,7 +428,7 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                 if (!drawings.isEmpty()) {
                     PackagePart drawing = drawings.get(0);
                     OoxmlPackages.parse(drawing,
-                            new DrawingPictures(drawing, sheets.getSheetName(), images, maxLines, dropped));
+                            new DrawingPictures(drawing, sheets.getSheetName(), images, maxLines, dropped, budget));
                 }
             }
             return false;
@@ -356,6 +466,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
         protected final boolean[] dropped;
 
+        protected final ImageBudget budget;
+
         protected final Map<String, Integer> seen = new HashMap<>();
 
         protected final List<String> path = new ArrayList<>();
@@ -374,12 +486,13 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         protected String blip;
 
         protected DrawingPictures(PackagePart drawing, String sheetName, List<ContentLine> images, int maxLines,
-                boolean[] dropped) {
+                boolean[] dropped, ImageBudget budget) {
             this.drawing = drawing;
             this.sheetName = sheetName;
             this.images = images;
             this.maxLines = maxLines;
             this.dropped = dropped;
+            this.budget = budget;
         }
 
         @Override
@@ -445,7 +558,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                 // every following image look changed.
                 location = "image:" + (++ordinal);
             }
-            inventory(media, occurrence(seen, "excel:image:" + sheetName + ":" + location), images, dropped);
+            inventory(media, occurrence(seen, "excel:image:" + sheetName + ":" + location), images, dropped,
+                    budget);
         }
 
         protected boolean isCell(int[] cell) {
@@ -477,14 +591,20 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         return count > 1 ? key + "#" + count : key;
     }
 
-    /** Digests an embedded picture part and lists it, or flags the inventory if it is over budget. */
-    protected void inventory(PackagePart media, String key, List<ContentLine> images, boolean[] dropped)
-            throws SAXException {
+    /**
+     * Digests an embedded picture part and lists it, or flags the inventory if it is over budget, or
+     * stops it once the file is.
+     */
+    protected void inventory(PackagePart media, String key, List<ContentLine> images, boolean[] dropped,
+            ImageBudget budget) throws SAXException {
         String digest;
         try {
-            digest = digestOoxmlPicture(media, key);
+            digest = digestOnce(budget, media.getPartName(), () -> digestOoxmlPicture(media, key, budget));
         } catch (IOException e) {
             throw new SAXException(e);
+        }
+        if (budget.exhausted) {
+            throw new OoxmlPackages.Stop();
         }
         if (digest == null) {
             dropped[0] = true;
@@ -500,7 +620,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * @return {@code true} if the {@code maxLines} budget was exhausted
      */
     protected boolean collectSpreadsheetImages(Workbook workbook, List<ContentLine> images, int maxLines,
-            boolean[] dropped) {
+            boolean[] dropped) throws IOException {
+        ImageBudget budget = new ImageBudget(new HashMap<>());
         Map<String, Integer> seen = new HashMap<>();
         for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
             Sheet sheet = workbook.getSheetAt(i);
@@ -524,7 +645,14 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                     // look changed.
                     String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
                     String key = occurrence(seen, "excel:image:" + sheet.getSheetName() + ":" + location);
-                    String digest = digestBytes(data.getData(), key);
+                    byte[] bytes = data.getData();
+                    String digest = digestOnce(budget, bytes, () -> {
+                        budget.spend(bytes.length);
+                        return digestBytes(bytes, key);
+                    });
+                    if (budget.exhausted) {
+                        return true;
+                    }
                     if (digest == null) {
                         dropped[0] = true;
                         continue;
@@ -546,15 +674,15 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * @return the digest, or {@code null} if the image is over budget and must be dropped
      * @since 2025.1
      */
-    protected String digestOoxmlPicture(PackagePart part, String key) throws IOException {
+    protected String digestOoxmlPicture(PackagePart part, String key, ImageBudget budget) throws IOException {
         long declared = part.getSize();
         if (declared > maxImageBytes()) {
             log.warn("Skipping {}: {} declared bytes, over the {} byte inventory budget", key, declared,
                     maxImageBytes());
             return null;
         }
-        try (InputStream in = part.getInputStream()) {
-            String digest = digestStream(in);
+        try (InputStream in = budget.meter(part.getInputStream())) {
+            String digest = digestStream(newDigest(), in);
             if (digest == null) {
                 log.warn("Skipping {}: inflates past the {} byte inventory budget", key, maxImageBytes());
             }
@@ -619,7 +747,7 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
     protected boolean collectPdf(PDDocument document, List<ContentLine> images, int maxLines, boolean[] dropped)
             throws IOException {
-        PdfWalk walk = new PdfWalk(images, maxLines, dropped);
+        PdfWalk walk = new PdfWalk(images, maxLines, dropped, new ImageBudget(new IdentityHashMap<>()));
         int pageNumber = 0;
         for (PDPage page : document.getPages()) {
             pageNumber++;
@@ -650,6 +778,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
         protected final boolean[] dropped;
 
+        protected final ImageBudget budget;
+
         /** Placements of each fully walked form, in order; {@code null} for an image over budget. */
         protected final Map<COSBase, List<String>> forms = new IdentityHashMap<>();
 
@@ -658,14 +788,15 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         /** Counts dropped images too, so that replaying them is bounded by {@code maxLines} as well. */
         protected int placements;
 
-        protected PdfWalk(List<ContentLine> images, int maxLines, boolean[] dropped) {
+        protected PdfWalk(List<ContentLine> images, int maxLines, boolean[] dropped, ImageBudget budget) {
             this.images = images;
             this.maxLines = maxLines;
             this.dropped = dropped;
+            this.budget = budget;
         }
 
         protected boolean exhausted() {
-            return placements >= maxLines;
+            return placements >= maxLines || budget.exhausted;
         }
 
         protected void place(String key, String digest, List<String> record) {
@@ -685,7 +816,7 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * @param ordinal per-page counter; advanced even for a skipped image, because keys are positional
      *            and renumbering one side would make every following image look changed
      * @param record placements of the enclosing form, {@code null} at page level
-     * @return {@code true} if the {@code maxLines} budget was exhausted
+     * @return {@code true} if the {@code maxLines} budget or the byte budget of the file was exhausted
      */
     protected boolean collectPdfResources(PDResources resources, String prefix, int[] ordinal, PdfWalk walk,
             int depth, List<String> record) throws IOException {
@@ -699,10 +830,15 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                     return true;
                 }
                 String key = prefix + ":image:" + (++ordinal[0]);
-                String digest = digestPdfImage(image.getCOSObject());
-                if (digest == null) {
-                    log.warn("Skipping {}: encoded stream over the {} byte inventory budget", key, maxImageBytes());
-                }
+                COSStream stream = image.getCOSObject();
+                String digest = digestOnce(walk.budget, stream, () -> {
+                    String computed = digestPdfImage(stream, walk.budget);
+                    if (computed == null) {
+                        log.warn("Skipping {}: encoded stream over the {} byte inventory budget", key,
+                                maxImageBytes());
+                    }
+                    return computed;
+                });
                 walk.place(key, digest, record);
             } else if (object instanceof PDFormXObject form
                     && collectPdfForm(form, prefix, ordinal, walk, depth, record)) {
@@ -769,14 +905,14 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * @return the digest, or {@code null} if the encoded stream is over {@link #maxImageBytes()}
      * @since 2025.1
      */
-    protected String digestPdfImage(COSStream stream) throws IOException {
+    protected String digestPdfImage(COSStream stream, ImageBudget budget) throws IOException {
         String parameters = "Filter=" + canonical(stream.getDictionaryObject(COSName.FILTER), 0)
                 + ";DecodeParms=" + canonical(stream.getDictionaryObject(COSName.DECODE_PARMS, COSName.DP), 0)
                 + ";Width=" + stream.getInt(COSName.WIDTH) + ";Height=" + stream.getInt(COSName.HEIGHT)
                 + ";BitsPerComponent=" + stream.getInt(COSName.BITS_PER_COMPONENT) + "\n";
         MessageDigest digest = newDigest();
         digest.update(parameters.getBytes(StandardCharsets.UTF_8));
-        try (InputStream in = stream.createRawInputStream()) {
+        try (InputStream in = budget.meter(stream.createRawInputStream())) {
             return digestStream(digest, in);
         }
     }
@@ -831,11 +967,12 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         boolean[] dropped = new boolean[1];
         OPCPackage pkg = OoxmlPackages.open(blob);
         try {
+            ImageBudget budget = new ImageBudget(new HashMap<>());
             int slideNumber = 0;
             for (PackagePart slide : SlideHandler.slides(pkg)) {
                 slideNumber++;
                 OoxmlPackages.parse(slide, new SlidePictures(slide, "powerpoint:slide:" + slideNumber + ":image:",
-                        images, maxLines, dropped));
+                        images, maxLines, dropped, budget));
             }
         } catch (OoxmlPackages.Stop e) {
             truncated = true;
@@ -859,15 +996,18 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
         protected final boolean[] dropped;
 
+        protected final ImageBudget budget;
+
         protected final Map<String, Integer> seen = new HashMap<>();
 
         protected SlidePictures(PackagePart slide, String prefix, List<ContentLine> images, int maxLines,
-                boolean[] dropped) {
+                boolean[] dropped, ImageBudget budget) {
             this.slide = slide;
             this.prefix = prefix;
             this.images = images;
             this.maxLines = maxLines;
             this.dropped = dropped;
+            this.budget = budget;
         }
 
         @Override
@@ -890,7 +1030,8 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                 throw new OoxmlPackages.Stop();
             }
             String name = media.getPartName().getName();
-            inventory(media, occurrence(seen, prefix + name.substring(name.lastIndexOf('/') + 1)), images, dropped);
+            inventory(media, occurrence(seen, prefix + name.substring(name.lastIndexOf('/') + 1)), images, dropped,
+                    budget);
         }
     }
 }

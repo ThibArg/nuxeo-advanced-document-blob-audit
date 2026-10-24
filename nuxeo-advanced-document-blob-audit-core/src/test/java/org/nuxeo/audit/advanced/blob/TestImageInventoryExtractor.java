@@ -23,9 +23,12 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -393,7 +396,11 @@ public class TestImageInventoryExtractor {
 
     /** A real PNG of the requested square size, filled with seeded noise so that it does not compress. */
     protected static byte[] png(int size) throws Exception {
-        Random random = new Random(size);
+        return png(size, size);
+    }
+
+    protected static byte[] png(int size, long seed) throws Exception {
+        Random random = new Random(seed);
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
@@ -602,6 +609,116 @@ public class TestImageInventoryExtractor {
         long allocated = threads.getCurrentThreadAllocatedBytes() - before;
         assertEquals(1, content.size());
         assertTrue("listing one picture allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
+    }
+
+    /* ==================== Images read once, within a budget per file (RES-05) ==================== */
+
+    /** Counts the images actually read, whatever the format. */
+    protected static class CountingExtractor extends ImageInventoryExtractor {
+
+        protected int reads;
+
+        @Override
+        protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
+            reads++;
+            return super.digestStream(digest, in);
+        }
+    }
+
+    /**
+     * RES-05 (code review 2026-10): every placement of an image was read and hashed again. A scanned
+     * background shared by the 300 pages of a PDF was read 300 times per side.
+     */
+    @Test
+    public void testAnImageOnEveryPdfPageIsReadOnce() throws Exception {
+        Blob blob;
+        try (PDDocument document = new PDDocument()) {
+            PDImageXObject background = PDImageXObject.createFromByteArray(document, png(64), "img");
+            for (int i = 0; i < 20; i++) {
+                addPage(document, background);
+            }
+            blob = save(document, "background.pdf");
+        }
+        CountingExtractor counting = new CountingExtractor();
+
+        List<ContentLine> lines = counting.extract(blob, MAX_LINES).lines();
+
+        assertEquals(20, lines.size());
+        assertEquals(1, lines.stream().map(ContentLine::value).distinct().count());
+        assertEquals(1, counting.reads);
+    }
+
+    /** @see #testAnImageOnEveryPdfPageIsReadOnce */
+    @Test
+    public void testAPictureOnEverySlideIsReadOnce() throws Exception {
+        byte[] bytes;
+        try (XMLSlideShow show = new XMLSlideShow(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var logo = show.addPicture(PNG, PictureType.PNG);
+            for (int i = 0; i < 20; i++) {
+                show.createSlide().createPicture(logo);
+            }
+            show.write(out);
+            bytes = out.toByteArray();
+        }
+        CountingExtractor counting = new CountingExtractor();
+
+        DiffableContent content = counting.extract(
+                BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.PPTX_MIME, "logo.pptx"), MAX_LINES);
+
+        assertEquals(20, content.size());
+        assertEquals(1, counting.reads);
+    }
+
+    /** @see #testAnImageOnEveryPdfPageIsReadOnce */
+    @Test
+    public void testAPictureAnchoredManyTimesIsReadOnce() throws Exception {
+        byte[] bytes;
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var drawing = workbook.createSheet("Budget").createDrawingPatriarch();
+            int picture = workbook.addPicture(PNG, XSSFWorkbook.PICTURE_TYPE_PNG);
+            for (int row = 0; row < 20; row++) {
+                ClientAnchor anchor = workbook.getCreationHelper().createClientAnchor();
+                anchor.setCol1(0);
+                anchor.setRow1(row);
+                anchor.setCol2(1);
+                anchor.setRow2(row + 1);
+                drawing.createPicture(anchor, picture);
+            }
+            workbook.write(out);
+            bytes = out.toByteArray();
+        }
+        CountingExtractor counting = new CountingExtractor();
+
+        DiffableContent content = counting.extract(
+                BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "logo.xlsx"), MAX_LINES);
+
+        assertEquals(20, content.size());
+        assertEquals(1, counting.reads);
+    }
+
+    /**
+     * RES-05, second half: all the images of one file are read within eight times the per-image
+     * budget, past which the inventory stops and is flagged truncated. Forty distinct images of about
+     * 5 KB each, against a cap of 8 KB per image, hence 64 KB per file.
+     */
+    @Test
+    public void testTheImagesOfOneFileAreReadWithinATotalBudget() throws Exception {
+        byte[][] images = new byte[40][];
+        for (int i = 0; i < images.length; i++) {
+            images[i] = png(40, i);
+        }
+        for (Blob blob : List.of(docx("many.docx", images), pdf("many.pdf", images),
+                pptxWithPictures("many.pptx", images))) {
+            DiffableContent all = extractor.extract(blob, MAX_LINES);
+            DiffableContent capped = new CappedExtractor(8 * 1024).extract(blob, MAX_LINES);
+
+            assertEquals(blob.getFilename(), 40, all.size());
+            assertFalse(blob.getFilename(), all.truncated());
+            assertTrue(blob.getFilename() + ": the inventory must stop past the budget of the file",
+                    capped.truncated());
+            assertTrue(blob.getFilename() + " listed " + capped.size() + " images",
+                    capped.size() > 0 && capped.size() < 20);
+        }
     }
 
     protected Blob pptxWithPictures(String filename, byte[]... images) throws Exception {

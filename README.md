@@ -497,6 +497,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **Word** keys are media part names: the same image used in several places appears once.
 - **Linked (external) images** and images in PowerPoint layouts/masters are ignored.
 - **Bounded by `maxLines`**, like the text: past that many images the inventory stops and the diff is flagged `truncated`.
+- **Bounded in bytes.** An image is read once per file however many times it is placed, at most 32 MB per image (a larger one is skipped) and 256 MB for all the images of one file, past which the inventory stops and the diff is flagged `truncated`.
 - **PDF form XObjects** are walked once per document, however many times they are referenced. One that contains itself, or nests deeper than 16 levels, is skipped and the diff flagged `truncated`.
 - Image extraction failure silently falls back to the text-only result (logged as WARN). A format with no contributed image extractor simply gets no inventory.
 
