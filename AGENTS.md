@@ -67,11 +67,14 @@ Coverage: `TestBlobDiffVersionPairing`.
 **The listener can be muted.** `BlobModificationListener` honours three switches (see README,
 "Disabling the Listener"):
 
-- `DISABLE_BLOB_DIFF_LISTENER` context data / event property — works through
-  `session.saveDocument` (its options reach both check-in events), **not** through
-  `session.checkIn` (which builds a fresh, empty option map);
+- `DISABLE_BLOB_DIFF_LISTENER` context data / event property — works for the version
+  `session.saveDocument` creates itself from a `VERSIONING_OPTION` (its options reach both
+  check-in events), and for **nothing else**: an automatic policy applied during the same save
+  (`collaborative-save`, shipped and active; `note-as-wiki`) goes through `DocumentModel#checkIn`,
+  `session.checkIn` builds a fresh, empty option map, and `restoreToVersion` and `publishDocument`
+  pass `null` (item 41);
 - `BlobModificationListener.runDisabled(Runnable|Supplier)`, thread-scoped — the answer for explicit
-  check-ins, migrations and importers;
+  check-ins, restores, publishing, migrations and importers;
 - `EventServiceAdmin.setListenerEnabledFlag("blobModificationListener", false)`, instance-wide.
 
 Any change to `handleEvent` must keep these checks first, before any I/O.
@@ -416,7 +419,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 40 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 41 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1101,6 +1104,29 @@ cited here as "code review 2026-10".
     disabled by name) and `TestBlobDiffService#testAPartialContributionOnlyChangesWhatItSets`, which
     goes through the real registry. Six of the seven were checked to fail against the unpatched
     code; `testAnExplicitValueStillWins` passes on both, as it must. 252 tests → 259.
+
+41. *(code review 2026-10, finding `COR-03`, S2)* The documented scope of
+    `DISABLE_BLOB_DIFF_LISTENER` was wrong. The Javadoc and the README said the flag worked through
+    `saveDocument` and only warned about an explicit `session.checkIn`; the Javadoc also claimed the
+    listener read the `documentCreated` event of the new version, when it reads `aboutToCheckIn`
+    and `documentCheckedIn` on the live document. The flag only reaches those two events through
+    the option map `saveDocument` builds from the context data, that is for the version it creates
+    itself from a `VERSIONING_OPTION`. Verified in `AbstractSession` and
+    `StandardVersioningService`: an automatic policy applied during the same save goes through
+    `doAutomaticVersioning` → `DocumentModel#checkIn` → `AbstractSession#checkIn`, whose option map
+    is fresh and empty; `restoreToVersion` and `publishDocument` call `notifyCheckedInVersion` with
+    `null`. The platform ships `collaborative-save` (minor version *before* the update whenever the
+    saving user is not the last contributor) and `note-as-wiki`, both active. An importer re-saving
+    documents last edited by someone else, with the flag and no `VERSIONING_OPTION`, still got one
+    audit entry and one `BlobDiff` per snapshot.
+
+    **Documentation only, by product decision**: the Javadoc of `DISABLE_BLOB_DIFF_LISTENER` and of
+    the thread-local switch, the README "Disabling the Listener" section and the invariant above now
+    state the real scope and point to `runDisabled` for every other path. No code change, and no
+    test: the review suggested pinning the limitation with a `TestBlobDiffListenerDisabling` case
+    relying on `collaborative-save`, not written. Making the flag survive those paths would mean
+    carrying it outside the option map (the live document's context data is not re-read by
+    `AbstractSession#checkIn`), which is what `runDisabled` already does.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

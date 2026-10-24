@@ -398,12 +398,18 @@ doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
 session.saveDocument(doc);   // version created, no audit entry and no BlobDiff
 ```
 
-`CoreSession#saveDocument` copies the document context data into the event options, which are then passed to both `aboutToCheckIn` and `documentCheckedIn` — the two events the listener reads. The same key also works when you fire the event yourself and set it as an event property.
+`CoreSession#saveDocument` copies the document context data into its option map, which it passes to `aboutToCheckIn` and `documentCheckedIn` — the two events the listener reads — for the version **it creates itself**, from the `VERSIONING_OPTION` set on the document. The same key also works when you fire the event yourself and set it as an event property.
 
 > [!IMPORTANT]
-> This does **not** work with `session.checkIn(docRef, option, comment)`. That method builds a *fresh, empty* option map, so context data set on the document is never propagated on that path. Use the thread-scoped switch below when you check in explicitly.
+> The flag only covers **manual** versioning through `saveDocument`. Every other path that creates a version builds its own option map, so the flag never reaches the listener and the version is audited and diffed regardless:
+>
+> - an **automatic versioning policy** applied during the same save. The platform ships `collaborative-save`, active by default, which creates a minor version *before* the update whenever the user saving is not the last contributor, and `note-as-wiki`, which versions every note. Both go through `DocumentModel#checkIn`, the next path;
+> - `session.checkIn(docRef, option, comment)`, which builds a *fresh, empty* option map;
+> - `session.restoreToVersion(...)`, which snapshots the live document before restoring, and `session.publishDocument(...)`, both of which pass no option map at all.
+>
+> An importer or a migration that re-saves documents last edited by someone else is the typical trap: with the flag set and no `VERSIONING_OPTION`, `collaborative-save` still snapshots each document, and each snapshot yields an audit entry and a `BlobDiff`. Use the thread-scoped switch below for anything that checks in explicitly, restores, publishes, or saves documents that a policy may version.
 
-**2. Thread-scoped, for migrations, importers and explicit check-ins**
+**2. Thread-scoped, for migrations, importers, explicit check-ins, restores and publishing**
 
 ```java
 BlobModificationListener.runDisabled(() -> {

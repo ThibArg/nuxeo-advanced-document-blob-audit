@@ -117,13 +117,27 @@ public class BlobModificationListener implements EventListener {
      * session.saveDocument(doc);
      * </pre>
      *
-     * {@code CoreSession#saveDocument} copies the document context data into the event options, and
-     * {@code notifyCheckedInVersion} forwards them to the {@code documentCreated} event fired on the
-     * new version, which is what this listener reads.
+     * {@code CoreSession#saveDocument} copies the document context data into its option map, and
+     * passes that map to the {@code aboutToCheckIn} and {@code documentCheckedIn} events it fires on
+     * the live document for the version <b>it creates itself</b>, which are the two events this
+     * listener reads.
      * <p>
-     * <b>Limitation.</b> {@code CoreSession#checkIn(DocumentRef, VersioningOption, String)} builds a
-     * <i>fresh, empty</i> option map, so context data set on the document is <b>not</b> propagated on
-     * that path. Use {@link #runDisabled(Runnable)} when you check in explicitly.
+     * <b>Scope.</b> That covers manual versioning only, a {@code VERSIONING_OPTION} set on the
+     * document. Every other path creating a version builds its own option map, so the flag never
+     * reaches the listener and the version is audited and diffed regardless:
+     * <ul>
+     * <li>an automatic versioning policy applied <i>during</i> the same {@code saveDocument} -
+     * {@code collaborative-save}, shipped and active by default, snapshots a document before a user
+     * other than its last contributor updates it, and {@code note-as-wiki} versions every note. Both
+     * go through {@code DocumentModel#checkIn}, that is the path below;</li>
+     * <li>{@code CoreSession#checkIn(DocumentRef, VersioningOption, String)}, which builds a
+     * <i>fresh, empty</i> option map;</li>
+     * <li>{@code CoreSession#restoreToVersion}, which snapshots the live document first, and
+     * {@code CoreSession#publishDocument}, both of which pass no option map at all.</li>
+     * </ul>
+     * Anything that checks in explicitly, restores, publishes, or saves a document that a policy may
+     * version - an importer or a migration re-saving documents last edited by someone else, typically
+     * - must use {@link #runDisabled(Runnable)} instead.
      *
      * @since 2025.1
      */
@@ -131,7 +145,8 @@ public class BlobModificationListener implements EventListener {
 
     /**
      * Thread-scoped kill switch, covering the cases where no event property can be passed - an
-     * explicit {@code session.checkIn(...)}, a migration script, a bulk importer.
+     * explicit {@code session.checkIn(...)}, an automatic versioning policy, a restore, a
+     * publication, a migration script, a bulk importer.
      */
     protected static final ThreadLocal<Boolean> DISABLED = new ThreadLocal<>();
 
