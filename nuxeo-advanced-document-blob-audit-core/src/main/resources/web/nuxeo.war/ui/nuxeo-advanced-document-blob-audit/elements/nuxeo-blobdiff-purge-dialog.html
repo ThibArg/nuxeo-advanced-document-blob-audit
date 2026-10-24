@@ -91,6 +91,9 @@
       // Interval between two BlobDiff.PurgeStatus calls, in milliseconds.
       _POLL_INTERVAL: 2000,
 
+      // Failed status calls in a row before the dialog stops observing a purge that keeps running.
+      _MAX_POLL_FAILURES: 5,
+
       detached: function () {
         this._stopPolling();
       },
@@ -102,6 +105,7 @@
         this._commandId = null;
         this._processed = 0;
         this._total = 0;
+        this._pollFailures = 0;
         this.$.dialog.open();
         return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
       },
@@ -144,6 +148,7 @@
         this.$.statusOp.execute()
           .then(function (status) {
             if (!this._running) { return; }
+            this._pollFailures = 0;
             this._processed = (status && status.processed) || 0;
             this._total = (status && status.total) || 0;
             if (status && status.state === 'COMPLETED') {
@@ -152,15 +157,28 @@
               this._stopPolling();
               this.fire('notify', { message: this.i18n('label.blobaudit.purge.aborted', status.deleted || 0) });
               this._close(true);
+            } else if (status && status.state === 'UNKNOWN') {
+              this._unobservable();
             } else {
               this._pollTimer = this.async(this._poll, this._POLL_INTERVAL);
             }
           }.bind(this))
-          .catch(function (err) {
-            this._stopPolling();
-            this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
-            this._close(true);
+          .catch(function () {
+            // A failed status call says nothing about the purge, which keeps deleting server side.
+            if (!this._running) { return; }
+            this._pollFailures += 1;
+            if (this._pollFailures >= this._MAX_POLL_FAILURES) {
+              this._unobservable();
+            } else {
+              this._pollTimer = this.async(this._poll, this._POLL_INTERVAL * Math.pow(2, this._pollFailures));
+            }
           }.bind(this));
+      },
+
+      _unobservable: function () {
+        this._stopPolling();
+        this.fire('notify', { message: this.i18n('label.blobaudit.purge.unobservable'), dismissible: true });
+        this._close(true);
       },
 
       _stopPolling: function () {
@@ -175,27 +193,48 @@
       _finish: function (status) {
         this._stopPolling();
         var deleted = status && status.deleted !== undefined ? status.deleted : '?';
+        var errors = (status && status.errorCount) || 0;
+        var skipped = (status && status.skipCount) || 0;
+        var limited = !!(status && status.queryLimitReached);
+        var message = this.i18n('label.blobaudit.purge.done', deleted);
+        if (errors || skipped) {
+          message += ' ' + this.i18n('label.blobaudit.purge.partial', errors, skipped);
+        }
+        if (limited) {
+          message += ' ' + this.i18n('label.blobaudit.purge.queryLimit');
+        }
+        if (errors || limited) {
+          message += ' ' + this.i18n('label.blobaudit.purge.runAgain');
+        }
         this.$.cleanOp.params = {};
         this.$.cleanOp.execute()
           .catch(function () { /* the folders are harmless, and the next purge will clean them */ })
           .then(function () {
-            this.fire('notify', { message: this.i18n('label.blobaudit.purge.done', deleted) });
+            this.fire('notify', { message: message, dismissible: !!(errors || skipped || limited) });
             this._close(true);
           }.bind(this));
       },
 
       /* ==================== abort / background ==================== */
 
+      // The abort answers the state of the command: a purge that completed meanwhile was not stopped.
       _abort: function () {
         this.$.abortOp.params = { commandId: this._commandId };
         this.$.abortOp.execute()
           .then(function (status) {
-            this._stopPolling();
-            this.fire('notify', { message: this.i18n('label.blobaudit.purge.aborted', (status && status.deleted) || 0) });
-            this._close(true);
+            var state = status && status.state;
+            if (state === 'COMPLETED') {
+              this._finish(status);
+            } else if (state === 'UNKNOWN') {
+              this._unobservable();
+            } else {
+              this._stopPolling();
+              this.fire('notify', { message: this.i18n('label.blobaudit.purge.aborted', (status && status.deleted) || 0) });
+              this._close(true);
+            }
           }.bind(this))
           .catch(function (err) {
-            this.fire('notify', { message: this.i18n('label.blobaudit.purge.failed') + ' ' + (err && err.message || '') });
+            this.fire('notify', { message: this.i18n('label.blobaudit.purge.abortFailed') + ' ' + (err && err.message || '') });
           }.bind(this));
       },
 

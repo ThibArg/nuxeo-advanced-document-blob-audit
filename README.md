@@ -263,6 +263,7 @@ Notes:
 - The command is submitted **under the calling user**, so the deletion stays subject to the ACL of `/change-diff`.
 - **The `blobDiffPurge` action is deliberately not `httpEnabled`.** It is unreachable through `Bulk.RunAction` and through the `/search/bulk/{action}` REST endpoint for anyone but an administrator. `BlobDiff.Purge` is the only supported entry point: it enforces the auditors check and builds the query itself. Turning `httpEnabled` on would publish a delete-by-NXQL API to every authenticated user.
 - The action only ever removes documents of type `BlobDiff`, whatever the query it is given.
+- **What the dialog reports.** A completed purge reports the number of deleted diffs, plus any failed or skipped ones and a reached query limit, which mean another run is needed. A failed status call is retried with a growing delay; after five in a row the dialog closes and says the purge keeps running server side, rather than "Purge failed." Stopping a purge that already completed reports it as completed.
 
 ### Deployment
 

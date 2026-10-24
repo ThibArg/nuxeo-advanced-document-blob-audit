@@ -432,7 +432,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 42 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 43 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1162,6 +1162,25 @@ cited here as "code review 2026-10".
     retry during the extraction of the first), `#testARetryThatFailsForGoodPutsTheDiffBackInError`
     and `#testARetryLostWithItsQueueCanBeRequestedAgain`. All four were checked to fail against the
     unpatched code. 259 tests → 263.
+
+43. *(code review 2026-10, finding `WEB-01`, S2)* The purge dialog misreported the outcome of a
+    permanent purge. A single failed `BlobDiff.PurgeStatus` call (expired session, proxy timeout)
+    stopped the polling and announced "Purge failed." while the bulk command kept deleting; a
+    completed command was announced as a clean "N purged" whatever its `errorCount`, `skipCount` and
+    `queryLimitReached`; and "Purge stopped" was shown whatever the abort returned, although
+    `BulkService#abort` hands back a completed command unchanged, in which case the empty folders
+    were never cleaned either.
+
+    `nuxeo-blobdiff-purge-dialog` now retries a failed status call with a doubling delay and, after
+    five in a row or an `UNKNOWN` state, closes with a message saying the purge keeps running
+    server side. The completion message adds the failed and skipped counts and the query limit, and
+    asks for another run when it is needed (a skipped document is not a `BlobDiff`, so another run
+    would not help). The abort branches on the returned state: `COMPLETED` goes through the normal
+    completion, folder cleanup included. A failed abort request no longer says "Purge failed.".
+
+    No automated coverage, no JS test infrastructure. Manual checks: a purge that completes, one
+    stopped mid-run, one stopped just after it completed, and the network cut during a run (the
+    dialog must keep polling, then report the purge as still running).
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
