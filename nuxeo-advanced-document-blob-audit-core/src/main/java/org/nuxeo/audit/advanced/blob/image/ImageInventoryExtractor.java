@@ -52,10 +52,10 @@ import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
-import org.apache.poi.ooxml.POIXMLDocumentPart;
-import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
+import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.openxml4j.opc.PackageAccess;
+import org.apache.poi.openxml4j.opc.PackagePart;
+import org.apache.poi.poifs.filesystem.FileMagic;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.Drawing;
 import org.apache.poi.ss.usermodel.Picture;
@@ -65,18 +65,19 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.xslf.usermodel.XMLSlideShow;
-import org.apache.poi.xslf.usermodel.XSLFGroupShape;
-import org.apache.poi.xslf.usermodel.XSLFPictureData;
-import org.apache.poi.xslf.usermodel.XSLFPictureShape;
-import org.apache.poi.xslf.usermodel.XSLFShape;
-import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.usermodel.XSSFRelation;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.extractor.SlideHandler;
 import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
+import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.NuxeoException;
+import org.xml.sax.Attributes;
+import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
 
 /**
  * Digest-based image inventory used by {@code imageAnalysisLevel 1}.
@@ -128,6 +129,9 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
 
     /** Nesting bound for PDF form XObjects, far past anything a real producer nests. */
     protected static final int MAX_FORM_DEPTH = 16;
+
+    /** The elements of a sheet drawing that place a shape on the sheet. */
+    protected static final Set<String> ANCHORS = Set.of("twoCellAnchor", "oneCellAnchor", "absoluteAnchor");
 
     /** Overridable so a test can lower the cap instead of building a real multi-gigabyte bomb. */
     protected long maxImageBytes() {
@@ -261,9 +265,12 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     }
 
     /**
-     * Reads the workbook from the local file whenever there is one, like
-     * {@link org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor}: the {@code InputStream}
-     * variant of {@code WorkbookFactory} buffers the whole OOXML package in heap.
+     * Lists the pictures of every sheet drawing without ever parsing a sheet: {@code .xlsx} through
+     * the package parts, binary {@code .xls} through the usermodel, which HSSF loads whole anyway.
+     * <p>
+     * The usermodel parsed every sheet into an XMLBeans tree to reach drawings that are separate
+     * parts, so a workbook with a few hundred thousand cells cost hundreds of megabytes for a single
+     * picture.
      */
     protected DiffableContent extractSpreadsheet(Blob blob, int maxLines) throws IOException {
         List<ContentLine> images = new ArrayList<>();
@@ -271,23 +278,230 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
         boolean[] dropped = new boolean[1];
         File file = blob.getFile();
         if (file != null) {
-            try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
-                truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
+            if (FileMagic.valueOf(file) == FileMagic.OOXML) {
+                truncated = streamSpreadsheetImages(OoxmlPackages.open(file), images, maxLines, dropped);
+            } else {
+                try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
+                    truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
+                }
             }
         } else {
-            try (InputStream in = blob.getStream(); Workbook workbook = WorkbookFactory.create(in)) {
-                truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
+            try (InputStream in = FileMagic.prepareToCheckMagic(blob.getStream())) {
+                if (FileMagic.valueOf(in) == FileMagic.OOXML) {
+                    truncated = streamSpreadsheetImages(OoxmlPackages.open(in), images, maxLines, dropped);
+                } else {
+                    try (Workbook workbook = WorkbookFactory.create(in)) {
+                        truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
+                    }
+                }
             }
         }
         return DiffableContent.keyed(images, truncated || dropped[0]);
     }
 
     /**
+     * Reads the drawing of each sheet, then releases the package.
+     *
+     * @param dropped one-element out parameter, set when an image was skipped for being over budget
+     * @return {@code true} if the {@code maxLines} budget was exhausted
+     * @since 2025.1
+     */
+    protected boolean streamSpreadsheetImages(OPCPackage pkg, List<ContentLine> images, int maxLines,
+            boolean[] dropped) throws IOException {
+        try {
+            XSSFReader.SheetIterator sheets = new XSSFReader(pkg).getSheetIterator();
+            while (sheets.hasNext()) {
+                // Only the part is wanted: the stream next() opens on the sheet is never read.
+                sheets.next().close();
+                List<PackagePart> drawings = OoxmlPackages.relatedOfType(sheets.getSheetPart(),
+                        XSSFRelation.DRAWINGS.getRelation());
+                if (!drawings.isEmpty()) {
+                    PackagePart drawing = drawings.get(0);
+                    OoxmlPackages.parse(drawing,
+                            new DrawingPictures(drawing, sheets.getSheetName(), images, maxLines, dropped));
+                }
+            }
+            return false;
+        } catch (OoxmlPackages.Stop e) {
+            return true;
+        } catch (SAXException e) {
+            throw OoxmlPackages.unreadable(e, "OOXML workbook");
+        } catch (OpenXML4JException e) {
+            throw new IOException("Not a readable OOXML workbook", e);
+        } finally {
+            pkg.revert();
+        }
+    }
+
+    /**
+     * The pictures of a sheet drawing, as {@code XSSFDrawing#getShapes()} lists them: a {@code pic}
+     * placed directly in a cell anchor. The usermodel lists none inside a group or alternate content
+     * either.
+     * <p>
+     * A two-cell anchor is keyed on its two cells. A one-cell anchor is keyed on its cell alone: the
+     * usermodel derived the second one from the size of the picture and the row heights and column
+     * widths of the sheet, which would mean parsing it. An absolute anchor gets an ordinal.
+     *
+     * @since 2025.1
+     */
+    protected class DrawingPictures extends DefaultHandler {
+
+        protected final PackagePart drawing;
+
+        protected final String sheetName;
+
+        protected final List<ContentLine> images;
+
+        protected final int maxLines;
+
+        protected final boolean[] dropped;
+
+        protected final Map<String, Integer> seen = new HashMap<>();
+
+        protected final List<String> path = new ArrayList<>();
+
+        protected int ordinal;
+
+        protected String anchor;
+
+        /** Row and column of the {@code from} and {@code to} cells, -1 when not given. */
+        protected int[] from;
+
+        protected int[] to;
+
+        protected StringBuilder number;
+
+        protected String blip;
+
+        protected DrawingPictures(PackagePart drawing, String sheetName, List<ContentLine> images, int maxLines,
+                boolean[] dropped) {
+            this.drawing = drawing;
+            this.sheetName = sheetName;
+            this.images = images;
+            this.maxLines = maxLines;
+            this.dropped = dropped;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            path.add(localName);
+            int depth = path.size();
+            if (depth == 2) {
+                anchor = ANCHORS.contains(localName) ? localName : null;
+                from = null;
+                to = null;
+            } else if (anchor == null) {
+                return;
+            } else if (depth == 3 && "from".equals(localName)) {
+                from = new int[] { -1, -1 };
+            } else if (depth == 3 && "to".equals(localName)) {
+                to = new int[] { -1, -1 };
+            } else if (depth == 3 && "pic".equals(localName)) {
+                blip = null;
+            } else if (depth == 4 && ("row".equals(localName) || "col".equals(localName))
+                    && ("from".equals(path.get(2)) || "to".equals(path.get(2)))) {
+                number = new StringBuilder();
+            } else if (depth == 5 && "blip".equals(localName) && "pic".equals(path.get(2))
+                    && "blipFill".equals(path.get(3))) {
+                blip = OoxmlPackages.relationshipAttribute(attributes, "embed");
+            }
+        }
+
+        @Override
+        public void characters(char[] ch, int start, int length) {
+            if (number != null) {
+                number.append(ch, start, length);
+            }
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String qName) throws SAXException {
+            int depth = path.size();
+            if (depth == 4 && number != null) {
+                int[] cell = "from".equals(path.get(2)) ? from : to;
+                cell["row".equals(localName) ? 0 : 1] = parseIndex(number.toString());
+                number = null;
+            } else if (depth == 3 && anchor != null && "pic".equals(localName) && blip != null && !blip.isEmpty()) {
+                picture();
+            }
+            path.remove(depth - 1);
+        }
+
+        protected void picture() throws SAXException {
+            PackagePart media = OoxmlPackages.related(drawing, blip);
+            if (media == null) {
+                return; // linked (external) picture: no embedded bytes to digest
+            }
+            if (images.size() >= maxLines) {
+                throw new OoxmlPackages.Stop();
+            }
+            String location;
+            if ("twoCellAnchor".equals(anchor) && isCell(from) && isCell(to)) {
+                location = cell(from) + ":" + cell(to);
+            } else if ("oneCellAnchor".equals(anchor) && isCell(from)) {
+                location = cell(from);
+            } else {
+                // The ordinal advances even for a dropped image: renumbering one side would make
+                // every following image look changed.
+                location = "image:" + (++ordinal);
+            }
+            inventory(media, occurrence(seen, "excel:image:" + sheetName + ":" + location), images, dropped);
+        }
+
+        protected boolean isCell(int[] cell) {
+            return cell != null && cell[0] >= 0 && cell[1] >= 0;
+        }
+
+        protected String cell(int[] cell) {
+            return new CellReference(cell[0], cell[1]).formatAsString(false);
+        }
+
+        protected int parseIndex(String text) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+    }
+
+    /**
+     * Appends {@code #2}, {@code #3}... to a key already used, so that two pictures with the same
+     * location are both listed. Counted before the budget check: a dropped picture must not renumber
+     * the ones after it.
+     *
+     * @since 2025.1
+     */
+    protected static String occurrence(Map<String, Integer> seen, String key) {
+        int count = seen.merge(key, 1, Integer::sum);
+        return count > 1 ? key + "#" + count : key;
+    }
+
+    /** Digests an embedded picture part and lists it, or flags the inventory if it is over budget. */
+    protected void inventory(PackagePart media, String key, List<ContentLine> images, boolean[] dropped)
+            throws SAXException {
+        String digest;
+        try {
+            digest = digestOoxmlPicture(media, key);
+        } catch (IOException e) {
+            throw new SAXException(e);
+        }
+        if (digest == null) {
+            dropped[0] = true;
+        } else {
+            images.add(ContentLine.of(key, digest));
+        }
+    }
+
+    /**
+     * Usermodel path, for binary {@code .xls}.
+     *
      * @param dropped one-element out parameter, set when an image was skipped for being over budget
      * @return {@code true} if the {@code maxLines} budget was exhausted
      */
     protected boolean collectSpreadsheetImages(Workbook workbook, List<ContentLine> images, int maxLines,
-            boolean[] dropped) throws IOException {
+            boolean[] dropped) {
+        Map<String, Integer> seen = new HashMap<>();
         for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
             Sheet sheet = workbook.getSheetAt(i);
             Drawing<?> drawing = sheet.getDrawingPatriarch();
@@ -301,14 +515,16 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
                         return true;
                     }
                     PictureData data = picture.getPictureData();
+                    if (data == null) {
+                        continue;
+                    }
                     ClientAnchor anchor = picture.getClientAnchor();
                     // The ordinal advances even for a skipped image: an anchor-less key is
                     // positional, so renumbering one side would make every following image
                     // look changed.
                     String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
-                    String key = "excel:image:" + sheet.getSheetName() + ":" + location;
-                    String digest = data instanceof POIXMLDocumentPart part ? digestOoxmlPicture(part, key)
-                            : digestBytes(data.getData(), key);
+                    String key = occurrence(seen, "excel:image:" + sheet.getSheetName() + ":" + location);
+                    String digest = digestBytes(data.getData(), key);
                     if (digest == null) {
                         dropped[0] = true;
                         continue;
@@ -323,28 +539,21 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
     /**
      * Digests an embedded OOXML picture part without ever holding it whole in heap.
      * <p>
-     * {@code PictureData#getData()} returns the <b>inflated</b> image as a single array. POI caps
-     * it at its own {@code MAX_IMAGE_SIZE} (100 MB in 5.5.1), which is three times this extractor's
-     * {@link #maxImageBytes()} budget and the only ceiling the XLSX and PPTX paths used to have -
-     * the DOCX and PDF paths dropped the entry at 32 MB. An OOXML picture is reachable as a stream
-     * through {@link POIXMLDocumentPart#getPackagePart()}, so the same streaming digest applies and
-     * the budget is finally uniform across the four formats.
-     * <p>
-     * There is deliberately no single entry point covering both this and {@link #digestBytes}:
-     * {@code XSLFPictureData} and the spreadsheet {@code PictureData} implement two unrelated
-     * interfaces, and widening the parameter to {@code Object} to paper over that would buy nothing.
+     * {@code PictureData#getData()} returns the <b>inflated</b> image as a single array, capped only
+     * by POI's own {@code MAX_IMAGE_SIZE} (100 MB in 5.5.1). The part is streamed instead, so the
+     * {@link #maxImageBytes()} budget is the same across the four formats.
      *
      * @return the digest, or {@code null} if the image is over budget and must be dropped
      * @since 2025.1
      */
-    protected String digestOoxmlPicture(POIXMLDocumentPart part, String key) throws IOException {
-        long declared = part.getPackagePart().getSize();
+    protected String digestOoxmlPicture(PackagePart part, String key) throws IOException {
+        long declared = part.getSize();
         if (declared > maxImageBytes()) {
             log.warn("Skipping {}: {} declared bytes, over the {} byte inventory budget", key, declared,
                     maxImageBytes());
             return null;
         }
-        try (InputStream in = part.getPackagePart().getInputStream()) {
+        try (InputStream in = part.getInputStream()) {
             String digest = digestStream(in);
             if (digest == null) {
                 log.warn("Skipping {}: inflates past the {} byte inventory budget", key, maxImageBytes());
@@ -613,79 +822,75 @@ public class ImageInventoryExtractor implements BlobTextExtractor {
      * gets a {@code #2}, {@code #3}... suffix so no placement is lost. Pictures inside group shapes
      * are included; layouts and masters are not (they belong to the template, not the content).
      * <p>
-     * Opened from the local file when there is one. The {@link OPCPackage} is closed explicitly:
-     * {@link XMLSlideShow#close()} does not close a package it was handed.
+     * Slides are streamed one by one with SAX: {@code XMLSlideShow} parsed the whole deck into
+     * XMLBeans trees before the first picture was read.
      */
     protected DiffableContent extractPresentation(Blob blob, int maxLines) throws IOException {
         List<ContentLine> images = new ArrayList<>();
-        boolean truncated;
+        boolean truncated = false;
         boolean[] dropped = new boolean[1];
-        File file = blob.getFile();
-        if (file != null) {
-            try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ);
-                    XMLSlideShow show = new XMLSlideShow(pkg)) {
-                truncated = collectPresentationImages(show, images, maxLines, dropped);
-            } catch (InvalidFormatException e) {
-                throw new IOException("Not a readable OOXML presentation: " + blob.getFilename(), e);
+        OPCPackage pkg = OoxmlPackages.open(blob);
+        try {
+            int slideNumber = 0;
+            for (PackagePart slide : SlideHandler.slides(pkg)) {
+                slideNumber++;
+                OoxmlPackages.parse(slide, new SlidePictures(slide, "powerpoint:slide:" + slideNumber + ":image:",
+                        images, maxLines, dropped));
             }
-        } else {
-            try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
-                truncated = collectPresentationImages(show, images, maxLines, dropped);
-            }
+        } catch (OoxmlPackages.Stop e) {
+            truncated = true;
+        } catch (SAXException e) {
+            throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
+        } finally {
+            pkg.revert();
         }
         return DiffableContent.keyed(images, truncated || dropped[0]);
     }
 
-    /**
-     * @param dropped one-element out parameter, set when an image was skipped for being over budget
-     * @return {@code true} if the {@code maxLines} budget was exhausted
-     */
-    protected boolean collectPresentationImages(XMLSlideShow show, List<ContentLine> images, int maxLines,
-            boolean[] dropped) throws IOException {
-        int slideNumber = 0;
-        for (XSLFSlide slide : show.getSlides()) {
-            slideNumber++;
-            Map<String, Integer> seen = new HashMap<>();
-            if (collectSlidePictures(slide.getShapes(), "powerpoint:slide:" + slideNumber + ":image:", images, seen,
-                    maxLines, dropped)) {
-                return true;
-            }
-        }
-        return false;
-    }
+    protected class SlidePictures extends SlideHandler {
 
-    /**
-     * @param dropped one-element out parameter, set when an image was skipped for being over budget
-     * @return {@code true} if the {@code maxLines} budget was exhausted
-     */
-    protected boolean collectSlidePictures(List<? extends XSLFShape> shapes, String prefix, List<ContentLine> images,
-            Map<String, Integer> seen, int maxLines, boolean[] dropped) throws IOException {
-        for (XSLFShape shape : shapes) {
-            if (shape instanceof XSLFGroupShape group) {
-                if (collectSlidePictures(group.getShapes(), prefix, images, seen, maxLines, dropped)) {
-                    return true;
-                }
-            } else if (shape instanceof XSLFPictureShape picture) {
-                XSLFPictureData data = picture.getPictureData();
-                if (data == null) {
-                    continue; // linked (external) picture: no embedded bytes to digest
-                }
-                if (images.size() >= maxLines) {
-                    return true;
-                }
-                // Counted even for a skipped image: the #2, #3... suffixes are positional, so
-                // renumbering one side would make every following placement look changed.
-                String name = data.getFileName();
-                int count = seen.merge(name, 1, Integer::sum);
-                String key = prefix + name + (count > 1 ? "#" + count : "");
-                String digest = digestOoxmlPicture(data, key);
-                if (digest == null) {
-                    dropped[0] = true;
-                    continue;
-                }
-                images.add(ContentLine.of(key, digest));
-            }
+        protected final PackagePart slide;
+
+        protected final String prefix;
+
+        protected final List<ContentLine> images;
+
+        protected final int maxLines;
+
+        protected final boolean[] dropped;
+
+        protected final Map<String, Integer> seen = new HashMap<>();
+
+        protected SlidePictures(PackagePart slide, String prefix, List<ContentLine> images, int maxLines,
+                boolean[] dropped) {
+            this.slide = slide;
+            this.prefix = prefix;
+            this.images = images;
+            this.maxLines = maxLines;
+            this.dropped = dropped;
         }
-        return false;
+
+        @Override
+        protected boolean readsText(boolean topLevel, String placeholder) {
+            return false;
+        }
+
+        @Override
+        protected boolean readsTables() {
+            return false;
+        }
+
+        @Override
+        protected void picture(String relationshipId) throws SAXException {
+            PackagePart media = OoxmlPackages.related(slide, relationshipId);
+            if (media == null) {
+                return; // linked (external) picture: no embedded bytes to digest
+            }
+            if (images.size() >= maxLines) {
+                throw new OoxmlPackages.Stop();
+            }
+            String name = media.getPartName().getName();
+            inventory(media, occurrence(seen, prefix + name.substring(name.lastIndexOf('/') + 1)), images, dropped);
+        }
     }
 }

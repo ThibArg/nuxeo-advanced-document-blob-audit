@@ -82,6 +82,7 @@ public class TestImageInventoryExtractor {
             Files.deleteIfExists(file.toPath());
         }
         tempFiles.clear();
+        BlobAuditTestHelper.deleteTempFiles();
     }
 
     protected static final byte[] PNG = Base64.getDecoder().decode(
@@ -510,6 +511,11 @@ public class TestImageInventoryExtractor {
     }
 
     protected Blob xlsxWithPictures(String filename, byte[]... images) throws Exception {
+        return BlobAuditTestHelper.blob(xlsxBytes(false, images), BlobAuditTestHelper.XLSX_MIME, filename);
+    }
+
+    /** Pictures anchored one under the other on {@code A:C}, or all on {@code A1:C5} when {@code stacked}. */
+    protected static byte[] xlsxBytes(boolean stacked, byte[]... images) throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Budget");
             CreationHelper helper = workbook.getCreationHelper();
@@ -521,12 +527,81 @@ public class TestImageInventoryExtractor {
                 anchor.setRow1(row);
                 anchor.setCol2(2);
                 anchor.setRow2(row + 4);
-                row += 5;
+                row += stacked ? 0 : 5;
                 drawing.createPicture(anchor, workbook.addPicture(image, XSSFWorkbook.PICTURE_TYPE_PNG));
             }
             workbook.write(out);
-            return BlobAuditTestHelper.blob(out.toByteArray(), BlobAuditTestHelper.XLSX_MIME, filename);
+            return out.toByteArray();
         }
+    }
+
+    protected static List<String> keys(DiffableContent content) {
+        return content.lines().stream().map(ContentLine::key).toList();
+    }
+
+    /* ==================== XLSX drawings ==================== */
+
+    /**
+     * COR-08 (code review 2026-10): two pictures on the same cells had the same key, so the diff only
+     * ever saw the last one - replacing the first was not reported.
+     */
+    @Test
+    public void testTwoPicturesOnTheSameCellsAreBothListed() throws Exception {
+        Blob before = BlobAuditTestHelper.blob(xlsxBytes(true, PNG, PNG_2), BlobAuditTestHelper.XLSX_MIME, "a.xlsx");
+        Blob after = BlobAuditTestHelper.blob(xlsxBytes(true, PNG_2, PNG_2), BlobAuditTestHelper.XLSX_MIME, "b.xlsx");
+
+        DiffableContent content = extractor.extract(before, MAX_LINES);
+        DiffResult result = new TextDiffer().diff(content, extractor.extract(after, MAX_LINES));
+
+        assertEquals(List.of("excel:image:Budget:A1:C5", "excel:image:Budget:A1:C5#2"), keys(content));
+        assertEquals(1, result.changed());
+    }
+
+    /**
+     * The usermodel derived the second cell of a one-cell anchor from the picture size and the
+     * geometry of the sheet; reading that geometry would mean parsing the sheet.
+     */
+    @Test
+    public void testAOneCellAnchorIsKeyedOnItsCell() throws Exception {
+        byte[] bytes = BlobAuditTestHelper.rewrite(xlsxBytes(false, PNG), "xl/drawings/drawing1.xml",
+                xml -> xml.replaceAll("<(\\w+:)?twoCellAnchor[^>]*>", "<$1oneCellAnchor>")
+                          .replaceAll("</(\\w+:)?twoCellAnchor>", "</$1oneCellAnchor>")
+                          .replaceAll("<(\\w+:)?to>.*?</(\\w+:)?to>", "<$1ext cx=\"914400\" cy=\"914400\"/>"));
+
+        DiffableContent content = extractor.extract(
+                BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "one-cell.xlsx"), MAX_LINES);
+
+        assertEquals(List.of("excel:image:Budget:A1"), keys(content));
+    }
+
+    /**
+     * RES-03 (code review 2026-10): drawings are separate parts, yet the usermodel parsed every sheet
+     * into an XMLBeans tree to reach them. 300 000 cells for one picture.
+     */
+    @Test
+    public void testASheetIsNotParsedToListItsPictures() throws Exception {
+        StringBuilder data = new StringBuilder("<sheetData>");
+        for (int r = 1; r <= 100_000; r++) {
+            data.append("<row r=\"").append(r).append("\">");
+            for (String column : List.of("A", "B", "C")) {
+                data.append("<c r=\"").append(column).append(r).append("\"><v>").append(r).append("</v></c>");
+            }
+            data.append("</row>");
+        }
+        String rows = data.append("</sheetData>").toString();
+        byte[] bytes = BlobAuditTestHelper.rewrite(xlsxBytes(false, PNG), "xl/worksheets/sheet1.xml", xml -> {
+            assertTrue(xml.contains("<sheetData/>"));
+            return xml.replace("<sheetData/>", rows);
+        });
+        Blob blob = BlobAuditTestHelper.onDisk(BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "big.xlsx"));
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long before = threads.getCurrentThreadAllocatedBytes();
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        assertEquals(1, content.size());
+        assertTrue("listing one picture allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
     }
 
     protected Blob pptxWithPictures(String filename, byte[]... images) throws Exception {

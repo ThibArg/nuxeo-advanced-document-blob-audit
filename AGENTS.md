@@ -243,14 +243,12 @@ WorkManager thread that *is* interrupted at shutdown, and it swallowed the cance
 something eleven signatures should carry.
 
 **The image budget is uniform across the four formats, and dropping an image never renumbers.**
-`maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The two
-OOXML office paths reach the bytes through `POIXMLDocumentPart#getPackagePart()` rather than
-`PictureData#getData()`, which materialises the whole inflated image — POI caps that at 100 MB, so
-it was a budget inconsistency and not the unbounded allocation SEC-02 was, but it is gone either
-way. There is deliberately **no common helper** over `digestOoxmlPicture` and `digestBytes`:
-`XSLFPictureData` implements `sl.usermodel.PictureData` and the spreadsheet one
-`ss.usermodel.PictureData`, two unrelated interfaces. In all four collectors the key counter — the
-XLSX anchor-less ordinal, the PPTX `#2` occurrence suffix, the PDF positional ordinal — is advanced
+`maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The
+XLSX and PPTX paths resolve the picture part from its relationship and stream it through
+`digestOoxmlPicture(PackagePart, …)`, never through `PictureData#getData()`, which materialises the
+whole inflated image (POI caps it at 100 MB). Only binary `.xls` goes through `digestBytes`, its
+bytes being in the HSSF model already. In all four collectors the key counter — the XLSX ordinal,
+the `#2` occurrence suffix of XLSX and PPTX keys, the PDF positional ordinal — is advanced
 **before** the drop check, so a dropped image on one side cannot shift every following key.
 **A PDF image is never decoded** (item 30): `digestPdfImage` hashes its encoding parameters and its
 raw stream. Do not reintroduce `createInputStream()`, `getImage()` or even `getWidth()` on that
@@ -273,6 +271,22 @@ deliberate exception: shared formulas are rebuilt with an in-place shift rather 
 `SharedFormula`, which turns a reference to another sheet into a plain one. The parser comes from
 `XMLHelper.newXMLReader()` (no DTD, no external entity) — never build one by hand.
 Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`, `TestExtractorFileBacking`.
+
+**PPTX, and the XLSX image inventory, are streamed too** (item 35). `XMLSlideShow` parses every
+slide when it opens a deck. `SlideHandler` walks the shape tree of a slide with SAX the way
+`XSLFSheet#buildShapes` builds it, quirks included, on purpose: of an `mc:AlternateContent` only
+the first element of the first `mc:Choice` is read, in place of the block, and never the
+`mc:Fallback`; only top-level shapes count for the title and for the notes body.
+`TestPresentationStreaming` keeps the former usermodel code as the reference and compares the two
+on a hand-written slide — it caught a wrong reading of the alternate content once already, keep it
+green. The title needs its own first pass, which skips every shape that is not a title placeholder
+without reading it. The XLSX inventory never opens a sheet: it reaches the drawing through the
+relationships of the sheet part. A one-cell anchor is therefore keyed on its cell alone and an
+absolute anchor gets an ordinal, the second cell of the usermodel being derived from the sheet
+geometry. Packages are opened through `OoxmlPackages` and released with `revert()`; `close()` on a
+read-only package logs a WARN before doing the same.
+Coverage: `TestPresentationStreaming`, `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
+`#testAOneCellAnchorIsKeyedOnItsCell`.
 
 ## Conventions
 
@@ -297,7 +311,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 230 tests (24 test classes)
+mvn -o install                                     # full build, 238 tests (25 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -310,7 +324,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -350,7 +364,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 34 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 35 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -719,6 +733,9 @@ cited here as "code review 2026-10".
       and the PPTX `#2` occurrence counter are both advanced before the drop check, exactly as
       `collectPdfResources` already did.
 
+      **Superseded (item 35)**: neither path goes through `POIXMLDocumentPart` any more — the
+      picture part is resolved from its relationship — so the two-interfaces argument is moot.
+
     - **`BlobTextExtractor.extract` declared `throws Exception`.** That is the shape the Nuxeo
       "Catching Exceptions" page names, and it forced `catch (Exception)` on all three call sites —
       including `BlobDiffWork#resolveBlob`, which runs on a WorkManager thread that *is* interrupted
@@ -883,14 +900,45 @@ cited here as "code review 2026-10".
     formula text when it has no evaluator. The streaming path compares cached values, and the `.xls`
     path now sets `setUseCachedValuesForFormulaCells`.
 
-    **Still open from `RES-03`**: the XLSX image inventory (`ImageInventoryExtractor#
-    extractSpreadsheet`, only with `imageAnalysisLevel=1`) and the PPTX extractors still go through
-    the usermodel.
+    **Closed by item 35**, which streams the XLSX image inventory and the PPTX extractors too.
 
     Coverage: `TestSpreadsheetStreaming` — equivalence with the usermodel on a hand-written sheet,
     the 3D shared formula, `useFormulas=false` on both formats, and the 300 000-cell allocation
     bound (under 32 MB); the last three were checked to fail against the unpatched code. 226 tests
     → 230.
+
+35. *(code review 2026-10, rest of finding `RES-03`, S2, and `COR-08`, S3)* Item 34 left three POI
+    usermodel call sites: the PPTX text, the PPTX image inventory and the XLSX image inventory. All
+    three built the model of the whole document to read a bounded part of it. Measured: 319 MB
+    allocated to extract 100 lines of a 200 000-paragraph slide, 314 MB to list its one picture,
+    400 MB to list the one picture of a 300 000-cell sheet. All three now stay under 3 MB.
+
+    `SlideHandler` (new, `extractor/`) walks the shape tree of a slide or notes part with SAX and
+    reports paragraphs, table rows and picture relationships; `SlideTitle`, `SlideText` and
+    `SlidePictures` keep what they need and skip the rest unread. `OoxmlPackages` (new, `io/`)
+    opens a package — from the file, or buffered as before for the stream fallback — and parses a
+    part through `XMLHelper.newXMLReader()`. `SpreadsheetExtractor` lost its two `open` helpers to it.
+    The XLSX inventory reads the drawing part through the sheet's relationships and never parses the
+    sheet; `.xls` keeps the usermodel.
+
+    One deliberate key change: a picture on a one-cell anchor was keyed on two cells, the second
+    computed by POI from the picture size and the sheet geometry. It is now keyed on its cell alone,
+    and an absolute anchor gets an ordinal. Keys are only ever compared between two extractions by
+    the same code, so nothing stored is affected. That change would have made `COR-08` (two
+    pictures on the same cells collapse into one key, hiding a replacement of the first) more
+    likely, so it is fixed here: XLSX keys take the `#2`, `#3`… suffix PPTX keys already had,
+    counted before the drop check.
+
+    Settled by the reference test rather than by reading POI: of an alternate content block, POI
+    reads the first element of the first choice as a shape. The first attempt read it as a
+    container of shapes and dropped a single shape — `TestPresentationStreaming` failed on it.
+
+    Coverage: `TestPresentationStreaming` — text, notes and images against the former usermodel
+    code on a deck mixing POI-built slides and a hand-written one, plus the two allocation bounds —
+    and `TestImageInventoryExtractor#testTwoPicturesOnTheSameCellsAreBothListed`,
+    `#testAOneCellAnchorIsKeyedOnItsCell`, `#testASheetIsNotParsedToListItsPictures`. The three
+    allocation tests and the two key tests were checked to fail against the unpatched code; the
+    three equivalence tests pass on both, as they must. 230 tests → 238.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -27,6 +28,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
@@ -125,6 +130,30 @@ public class BlobAuditTestHelper {
             }
             TEMP_FILES.clear();
         }
+    }
+
+    /**
+     * Rewrites one XML part of an OOXML package, for the structures POI's writer never produces.
+     *
+     * @since 2025.1
+     */
+    public static byte[] rewrite(byte[] pkg, String partName, UnaryOperator<String> edit) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(pkg));
+                ZipOutputStream rewritten = new ZipOutputStream(out)) {
+            ZipEntry entry;
+            while ((entry = in.getNextEntry()) != null) {
+                rewritten.putNextEntry(new ZipEntry(entry.getName()));
+                if (partName.equals(entry.getName())) {
+                    String xml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                    rewritten.write(edit.apply(xml).getBytes(StandardCharsets.UTF_8));
+                } else {
+                    in.transferTo(rewritten);
+                }
+                rewritten.closeEntry();
+            }
+        }
+        return out.toByteArray();
     }
 
     /**

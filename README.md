@@ -412,7 +412,7 @@ When the listener is disabled by any of these means, **nothing** happens: no `bl
 
 This version supports values from `0` to `1`. At component startup, an invalid value is clamped to the nearest supported bound and a `WARN` is logged. For example, `-1` becomes `0`, while `2` becomes `1`. Future versions may raise the maximum when richer image-analysis modes are implemented.
 
-At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>`, and `pdf:page:<page>:image:<ordinal>` and `powerpoint:slide:<slide>:image:<media-part>` (suffixed `#2`, `#3`… when the same image is placed several times on one slide). For PowerPoint, only pictures placed on slides (including inside groups) are inventoried; layouts/masters and linked pictures are ignored. Legacy `.ppt` gets text diff only. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
+At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>` (`<cell>` alone for a picture anchored on a single cell, `image:<ordinal>` for an absolute position), `pdf:page:<page>:image:<ordinal>` and `powerpoint:slide:<slide>:image:<media-part>`. Excel and PowerPoint keys are suffixed `#2`, `#3`… when several pictures share one. For PowerPoint, only pictures placed on slides (including inside groups) are inventoried; layouts/masters and linked pictures are ignored. Legacy `.ppt` gets text diff only. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
 
 ## Build
 
@@ -448,7 +448,7 @@ Without OCR, text extraction returns nothing. The status remains `ok` but the di
 
 ### PowerPoint Diff
 
-`PresentationExtractor` (Apache POI XSLF, already provided by the platform) emits one `## Slide: <title>` marker per slide, then each text paragraph in drawing order (group shapes included), table rows as `[table] a | b | c`, and speaker notes as `[notes] ...` (disable with the `includeNotes=false` extractor property). Slide numbers are deliberately **not** part of the text: inserting or deleting a slide yields a compact diff instead of shifting every following slide. Image keys, on the other hand, do carry the slide number (see Known Limitations).
+`PresentationExtractor` (reads each slide with SAX, the way Apache POI XSLF does) emits one `## Slide: <title>` marker per slide, then each text paragraph in drawing order (group shapes included), table rows as `[table] a | b | c`, and speaker notes as `[notes] ...` (disable with the `includeNotes=false` extractor property). Slide numbers are deliberately **not** part of the text: inserting or deleting a slide yields a compact diff instead of shifting every following slide. Image keys, on the other hand, do carry the slide number (see Known Limitations).
 
 ### Excel Row Insertions
 
@@ -487,11 +487,12 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 - **Not extracted:** SmartArt, charts, embedded OLE objects, text inherited from layouts/masters, comments, alt-text, hidden-slide status.
 - **Slide moves** are reported as a removal plus an addition of the same content.
 - **Slide titles** come from the title placeholder; slides without one get a bare `## Slide` marker, which may lower alignment quality on decks with many untitled slides.
+- Decks are read slide by slide and reading stops at `maxLines`, so a large deck costs what is extracted, not its size.
 
 ### Images (`imageAnalysisLevel=1`)
 - **Digest-based only.** Detects additions, removals and byte-level replacements; no OCR, no visual/pixel comparison. Re-encoding an identical-looking image is reported as a change.
 - **PDF images are never decoded.** They are identified by their encoded stream and its encoding parameters, so a PDF producer that re-compresses an unchanged image reports it as replaced.
-- **Resizing, moving or cropping** an image without changing its bytes is not detected (except Excel, where the anchor is part of the key).
+- **Resizing, moving or cropping** an image without changing its bytes is not detected (except in Excel when the picture changes cells, since its anchor cells are part of the key).
 - **Position-sensitive keys.** PowerPoint keys include the slide number and PDF keys the page number and ordinal: inserting a slide/page before an image reports it as removed + added.
 - **Word** keys are media part names: the same image used in several places appears once.
 - **Linked (external) images** and images in PowerPoint layouts/masters are ignored.
@@ -534,6 +535,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestPlainTextExtractor | No | txt / json / xml / csv |
 | TestExtractorSelection | No | MIME type matching |
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
+| TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |

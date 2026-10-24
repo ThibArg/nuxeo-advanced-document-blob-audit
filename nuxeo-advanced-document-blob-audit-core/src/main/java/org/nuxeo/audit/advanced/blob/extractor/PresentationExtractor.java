@@ -15,34 +15,23 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.openxml4j.opc.PackageAccess;
-import org.apache.poi.xslf.usermodel.XMLSlideShow;
-import org.apache.poi.xslf.usermodel.XSLFGroupShape;
-import org.apache.poi.xslf.usermodel.XSLFNotes;
-import org.apache.poi.xslf.usermodel.XSLFShape;
-import org.apache.poi.xslf.usermodel.XSLFSlide;
-import org.apache.poi.xslf.usermodel.XSLFTable;
-import org.apache.poi.xslf.usermodel.XSLFTableCell;
-import org.apache.poi.xslf.usermodel.XSLFTableRow;
-import org.apache.poi.xslf.usermodel.XSLFTextParagraph;
-import org.apache.poi.xslf.usermodel.XSLFTextShape;
+import org.apache.poi.openxml4j.opc.PackagePart;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
+import org.xml.sax.SAXException;
 
 /**
  * Paragraph-level extractor for PowerPoint OOXML files ({@code .pptx}, {@code .pptm}, {@code .ppsx},
- * {@code .potx}), based on Apache POI XSLF.
+ * {@code .potx}), streamed with SAX the way Apache POI XSLF reads them.
  * <p>
  * Produces <b>positional</b> content. Each slide starts with a {@code ## Slide} marker line carrying
  * its title (never its number: numbering would make a slide insertion shift, and therefore
@@ -74,99 +63,143 @@ public class PresentationExtractor implements BlobTextExtractor {
     }
 
     /**
-     * Reads the slideshow from the local file whenever there is one.
+     * Streams the slides one by one, and stops at {@code maxLines}.
      * <p>
-     * {@code new XMLSlideShow(InputStream)} buffers the whole OOXML package in heap - POI cannot
-     * reposition a stream. Opening an {@link OPCPackage} on the file reads the parts on demand, in
-     * random access and read only.
-     * <p>
-     * The package is closed explicitly: {@link XMLSlideShow#close()} does <b>not</b> close an
-     * {@code OPCPackage} it was handed. {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob}
-     * guarantees a file on the nominal path; the stream fallback is for the blobs built in memory
-     * by the unit tests.
+     * {@code XMLSlideShow} parses every slide, layout, master and notes page into an XMLBeans tree
+     * when it is opened, so its footprint followed the size of the deck rather than what is
+     * extracted - from a file as well, which only spares buffering the compressed package. Each
+     * slide is now read twice with SAX, first for its title, which the marker line needs before
+     * anything else, then for its content.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         Collector collector = new Collector(maxLines);
-        File file = blob.getFile();
-        if (file != null) {
-            try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ);
-                    XMLSlideShow show = new XMLSlideShow(pkg)) {
-                collect(show, collector);
-            } catch (InvalidFormatException e) {
-                throw new IOException("Not a readable OOXML presentation: " + blob.getFilename(), e);
+        OPCPackage pkg = OoxmlPackages.open(blob);
+        try {
+            for (PackagePart slide : SlideHandler.slides(pkg)) {
+                if (!collectSlide(slide, collector)) {
+                    break;
+                }
             }
-        } else {
-            try (InputStream in = blob.getStream(); XMLSlideShow show = new XMLSlideShow(in)) {
-                collect(show, collector);
-            }
+        } catch (SAXException e) {
+            throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
+        } finally {
+            pkg.revert();
         }
         return DiffableContent.positional(collector.lines, collector.truncated);
     }
 
-    protected void collect(XMLSlideShow show, Collector collector) {
-        for (XSLFSlide slide : show.getSlides()) {
-            String title = slide.getTitle();
-            if (!collector.add(SLIDE_MARKER + (title == null || title.isBlank() ? "" : ": " + title.trim()))) {
-                return;
-            }
-            if (!collectShapes(slide.getShapes(), "", collector)) {
-                return;
-            }
-            if (includeNotes) {
-                XSLFNotes notes = slide.getNotes();
-                if (notes != null && !collectNotes(notes, collector)) {
-                    return;
-                }
-            }
-        }
-    }
-
     /** @return {@code false} once maxLines has been reached */
-    protected boolean collectShapes(List<? extends XSLFShape> shapes, String prefix, Collector collector) {
-        for (XSLFShape shape : shapes) {
-            if (shape instanceof XSLFGroupShape group) {
-                if (!collectShapes(group.getShapes(), prefix, collector)) {
-                    return false;
-                }
-            } else if (shape instanceof XSLFTable table) {
-                for (XSLFTableRow row : table.getRows()) {
-                    List<String> cells = new ArrayList<>();
-                    for (XSLFTableCell cell : row.getCells()) {
-                        String text = cell.getText();
-                        cells.add(text == null ? "" : text.replaceAll("\\s+", " ").trim());
-                    }
-                    if (cells.stream().anyMatch(c -> !c.isEmpty())
-                            && !collector.add(prefix + TABLE_PREFIX + String.join(" | ", cells))) {
-                        return false;
-                    }
-                }
-            } else if (shape instanceof XSLFTextShape textShape) {
-                for (XSLFTextParagraph paragraph : textShape.getTextParagraphs()) {
-                    String text = paragraph.getText();
-                    if (text != null && !text.isBlank() && !collector.add(prefix + text.trim())) {
-                        return false;
-                    }
-                }
+    protected boolean collectSlide(PackagePart slide, Collector collector) throws IOException, SAXException {
+        String title = title(slide);
+        if (!collector.add(SLIDE_MARKER + (title == null || title.isBlank() ? "" : ": " + title.trim()))) {
+            return false;
+        }
+        try {
+            OoxmlPackages.parse(slide, new SlideText(collector, false));
+            PackagePart notes = includeNotes ? SlideHandler.notes(slide) : null;
+            if (notes != null) {
+                OoxmlPackages.parse(notes, new SlideText(collector, true));
             }
+        } catch (OoxmlPackages.Stop e) {
+            return false;
         }
         return true;
     }
 
-    /** Notes pages also hold the slide thumbnail and the page number: keep the body only. */
-    protected boolean collectNotes(XSLFNotes notes, Collector collector) {
-        for (XSLFShape shape : notes.getShapes()) {
-            if (shape instanceof XSLFTextShape textShape && textShape.getTextType() != null
-                    && textShape.getTextType().name().equals("BODY")) {
-                for (XSLFTextParagraph paragraph : textShape.getTextParagraphs()) {
-                    String text = paragraph.getText();
-                    if (text != null && !text.isBlank() && !collector.add(NOTES_PREFIX + text.trim())) {
-                        return false;
-                    }
-                }
+    /** The text of the first title placeholder of the slide, like {@code XSLFSlide#getTitle()}. */
+    protected String title(PackagePart slide) throws IOException, SAXException {
+        SlideTitle handler = new SlideTitle();
+        try {
+            OoxmlPackages.parse(slide, handler);
+        } catch (OoxmlPackages.Stop e) {
+            // the title shape has been read
+        }
+        return handler.title;
+    }
+
+    protected static class SlideTitle extends SlideHandler {
+
+        protected final StringBuilder text = new StringBuilder();
+
+        protected String title;
+
+        @Override
+        protected boolean readsText(boolean topLevel, String placeholder) {
+            return isTitle(topLevel, placeholder);
+        }
+
+        @Override
+        protected boolean readsTables() {
+            return false;
+        }
+
+        @Override
+        protected void paragraph(boolean topLevel, String placeholder, String paragraph) {
+            if (!text.isEmpty()) {
+                text.append('\n');
+            }
+            text.append(paragraph);
+        }
+
+        @Override
+        protected void textShapeEnd(boolean topLevel, String placeholder) throws SAXException {
+            if (isTitle(topLevel, placeholder)) {
+                title = text.toString();
+                throw new OoxmlPackages.Stop();
             }
         }
-        return true;
+
+        protected boolean isTitle(boolean topLevel, String placeholder) {
+            return topLevel && "title".equals(placeholder);
+        }
+    }
+
+    /**
+     * The lines of a slide, or of its notes page. Notes pages also hold the slide thumbnail and the
+     * page number: only their body placeholder is kept.
+     */
+    protected static class SlideText extends SlideHandler {
+
+        protected final Collector collector;
+
+        protected final boolean notes;
+
+        protected SlideText(Collector collector, boolean notes) {
+            this.collector = collector;
+            this.notes = notes;
+        }
+
+        @Override
+        protected boolean readsText(boolean topLevel, String placeholder) {
+            return !notes || (topLevel && "body".equals(placeholder));
+        }
+
+        @Override
+        protected boolean readsTables() {
+            return !notes;
+        }
+
+        @Override
+        protected void paragraph(boolean topLevel, String placeholder, String text) throws SAXException {
+            if (!text.isBlank()) {
+                add((notes ? NOTES_PREFIX : "") + text.trim());
+            }
+        }
+
+        @Override
+        protected void tableRow(List<String> cells) throws SAXException {
+            List<String> normalized = cells.stream().map(cell -> cell.replaceAll("\\s+", " ").trim()).toList();
+            if (normalized.stream().anyMatch(cell -> !cell.isEmpty())) {
+                add(TABLE_PREFIX + String.join(" | ", normalized));
+            }
+        }
+
+        protected void add(String line) throws SAXException {
+            if (!collector.add(line)) {
+                throw new OoxmlPackages.Stop();
+            }
+        }
     }
 
     protected static class Collector {

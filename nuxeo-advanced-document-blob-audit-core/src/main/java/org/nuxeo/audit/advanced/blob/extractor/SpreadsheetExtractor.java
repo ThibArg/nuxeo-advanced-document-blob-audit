@@ -29,10 +29,8 @@ import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.openxml4j.opc.PackageAccess;
 import org.apache.poi.poifs.filesystem.FileMagic;
 import org.apache.poi.ss.SpreadsheetVersion;
 import org.apache.poi.ss.formula.FormulaParser;
@@ -64,6 +62,7 @@ import org.apache.xmlbeans.XmlException;
 import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
+import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTDefinedName;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTSheet;
@@ -117,7 +116,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
         File file = blob.getFile();
         if (file != null) {
             if (FileMagic.valueOf(file) == FileMagic.OOXML) {
-                truncated = stream(open(file), maxLines, lines);
+                truncated = stream(OoxmlPackages.open(file), maxLines, lines);
             } else {
                 try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
                     truncated = collect(workbook, maxLines, lines);
@@ -126,7 +125,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
         } else {
             try (InputStream in = FileMagic.prepareToCheckMagic(blob.getStream())) {
                 if (FileMagic.valueOf(in) == FileMagic.OOXML) {
-                    truncated = stream(open(in), maxLines, lines);
+                    truncated = stream(OoxmlPackages.open(in), maxLines, lines);
                 } else {
                     try (Workbook workbook = WorkbookFactory.create(in)) {
                         truncated = collect(workbook, maxLines, lines);
@@ -135,23 +134,6 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
             }
         }
         return DiffableContent.keyed(lines, truncated);
-    }
-
-    protected static OPCPackage open(File file) throws IOException {
-        try {
-            return OPCPackage.open(file, PackageAccess.READ);
-        } catch (InvalidFormatException e) {
-            throw new IOException("Not a readable OOXML workbook: " + file.getName(), e);
-        }
-    }
-
-    /** Buffers the whole package: only the fallback for a blob that could not be materialised. */
-    protected static OPCPackage open(InputStream in) throws IOException {
-        try {
-            return OPCPackage.open(in);
-        } catch (InvalidFormatException e) {
-            throw new IOException("Not a readable OOXML workbook", e);
-        }
     }
 
     /**
