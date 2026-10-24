@@ -31,6 +31,7 @@ import jakarta.inject.Inject;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.nuxeo.audit.api.LogEntry;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
@@ -234,12 +235,99 @@ public class TestBlobDiffVersionPairing {
         assertTrue(BlobModificationListener.computeBlobXPathTemplates("NoSuchTypeAtAll").isEmpty());
     }
 
+    /* ------------------------------------- COR-01: list entries by content */
+
+    /**
+     * COR-01 (code review 2026-10): removing the first attachment shifted every following one, and
+     * each index was diffed as a change between two unrelated files. A removal is not audited.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    public void testRemovingTheFirstAttachmentIsNotAuditedAsChanges() throws Exception {
+        DocumentModel doc = fileWithAttachments("removed", "alpha", "beta", "gamma");
+        versionWithAttachments(doc, "beta", "gamma");
+
+        assertTrue(diffsFor(doc.getId()).isEmpty());
+        assertTrue(auditEntries(doc.getId()).isEmpty());
+    }
+
+    /** COR-01: a reorder changes no binary. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    public void testReorderingAttachmentsIsNotAuditedAsChanges() throws Exception {
+        DocumentModel doc = fileWithAttachments("reordered", "alpha", "beta");
+        versionWithAttachments(doc, "beta", "alpha");
+
+        assertTrue(diffsFor(doc.getId()).isEmpty());
+        assertTrue(auditEntries(doc.getId()).isEmpty());
+    }
+
+    /** COR-01: a replacement in place, the list keeping its shape, is still diffed. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    public void testReplacingAnAttachmentInPlaceIsStillDiffed() throws Exception {
+        DocumentModel doc = fileWithAttachments("in-place", "alpha", "beta", "gamma");
+        versionWithAttachments(doc, "alpha", "BETA", "gamma");
+
+        List<DocumentModel> diffs = diffsFor(doc.getId());
+        assertEquals(1, diffs.size());
+        assertEquals("files:files/1/file", diffs.get(0).getPropertyValue("bdiff:xpath"));
+    }
+
+    /**
+     * COR-01: a file changed while another was removed. Which file the new one replaces cannot be
+     * told, so the change is audited without a diff rather than compared with the wrong file.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    public void testAChangeInAListThatAlsoLostAnEntryIsAuditedWithoutADiff() throws Exception {
+        DocumentModel doc = fileWithAttachments("reshaped", "alpha", "beta", "gamma");
+        versionWithAttachments(doc, "BETA", "gamma");
+
+        assertTrue(diffsFor(doc.getId()).isEmpty());
+        List<LogEntry> entries = auditEntries(doc.getId());
+        assertEquals(1, entries.size());
+        assertEquals(BlobAuditConstants.STATUS_SKIPPED_LIST_CHANGED,
+                entries.get(0).getExtendedValue(BlobAuditConstants.EXT_SKIP_REASON));
+        assertEquals("files:files/0/file", entries.get(0).getExtendedValue(BlobAuditConstants.EXT_XPATH));
+    }
+
+    protected DocumentModel fileWithAttachments(String name, String... contents) throws Exception {
+        DocumentModel doc = session.createDocumentModel("/", name, "File");
+        doc.setPropertyValue("files:files", attachments(contents));
+        doc = session.createDocument(doc);
+        session.save();
+        session.checkIn(doc.getRef(), VersioningOption.MAJOR, "initial");
+        session.save();
+        txFeature.nextTransaction();
+        return doc;
+    }
+
+    protected void versionWithAttachments(DocumentModel doc, String... contents) throws Exception {
+        DocumentModel updated = session.getDocument(doc.getRef());
+        updated.setPropertyValue("files:files", attachments(contents));
+        updated.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
+        session.saveDocument(updated);
+        session.save();
+        txFeature.nextTransaction();
+    }
+
     @SuppressWarnings("unchecked")
-    protected Serializable attachments(String content) throws Exception {
+    protected List<LogEntry> auditEntries(String docId) {
+        Map<String, Serializable> props = new HashMap<>();
+        props.put("coreSession", (Serializable) session);
+        return (List<LogEntry>) (List<?>) pageProviderService.getPageProvider("BLOBAUDIT_ENTRIES", null, null, null,
+                props, BlobAuditConstants.EVENT_BLOB_MODIFIED, docId).getCurrentPage();
+    }
+
+    /** One attachment per content, each under the name of its content. */
+    protected Serializable attachments(String... contents) throws Exception {
         ArrayList<Map<String, Serializable>> files = new ArrayList<>();
-        Map<String, Serializable> entry = new HashMap<>();
-        entry.put("file", (Serializable) textBlob(content, "text/plain", "attachment.txt"));
-        files.add(entry);
+        for (String content : contents) {
+            Map<String, Serializable> entry = new HashMap<>();
+            entry.put("file", (Serializable) textBlob(content, "text/plain", content + ".txt"));
+            files.add(entry);
+        }
         return files;
     }
 }

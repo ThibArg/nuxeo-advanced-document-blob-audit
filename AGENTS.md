@@ -100,6 +100,15 @@ document as a binary change even when the binary never moved. `NOT_APPLICABLE` s
 before `sameContent` and stays fully silent; `TOO_LARGE` and `UNSUPPORTED_TYPE` only produce an
 entry once the digests are known to differ. Coverage: `TestBlobDiffSkipReporting`.
 
+**Blobs inside a list are paired by content, never by index alone** (item 45).
+`BlobModificationListener#pairListEntries` expands a list template on each version separately: a
+digest present on both sides is unchanged wherever it sits, a new blob is compared with the one at
+the same xpath only when the list kept its shape and that one is gone, and a new blob in a list that
+also lost an entry is audited as `skippedListChanged`, without a diff. A blob with no digest never
+matches the other side, which degrades to index pairing when the shape is kept. Configured indexed
+xpaths (`files:files/0/file`) are an explicit choice and stay compared by index.
+Coverage: `TestBlobDiffVersionPairing`, the four `COR-01` cases.
+
 Both skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
 `BlobDiffWork` when `service.diff()` returns `null` at work time; `skippedTooLarge` **became**
 reachable with SEC-01, because the work now re-evaluates `getEligibility` on the rehydrated blobs
@@ -373,7 +382,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 263 tests (26 test classes)
+mvn -o install                                     # full build, 267 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -432,7 +441,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 44 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 45 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1192,6 +1201,25 @@ cited here as "code review 2026-10".
 
     No automated coverage. Manual check: tick, untick, the result count must come back to the
     unfiltered one; then load a saved search created before the fix with the box unticked.
+
+45. *(code review 2026-10, finding `COR-01`, S2)* Blobs inside a list were paired by index. With
+    `<xpath>*</xpath>`, removing the first of three attachments compared A with B and B with C:
+    two `blobContentModified` entries and two `BlobDiff` between unrelated files, the second one's
+    body being the text of C presented as a change of B. A reorder did the same, and each shifted
+    index cost an eligibility check, an event and a work in the user transaction.
+
+    The listener now pairs list entries by digest (see the invariant above). `blobXPaths` and
+    `expandTemplates` gave way to `blobPairs` and `pairListEntries`, which expand each list on both
+    versions instead of the new one only. New skip reason `skippedListChanged`, a skip reason only
+    like `skippedNotManaged`. Not done: a per-check-in cap on the number of works, the review's
+    other suggestion - with removals and moves no longer scheduling anything, a check-in only
+    schedules one work per blob that really changed.
+
+    Coverage: `TestBlobDiffVersionPairing#testRemovingTheFirstAttachmentIsNotAuditedAsChanges`,
+    `#testReorderingAttachmentsIsNotAuditedAsChanges`,
+    `#testAChangeInAListThatAlsoLostAnEntryIsAuditedWithoutADiff` (all three checked to fail against
+    the unpatched code) and `#testReplacingAnAttachmentInPlaceIsStillDiffed`, which passes on both,
+    as it must. 263 tests → 267.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

@@ -22,11 +22,14 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_LIST_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -285,13 +288,14 @@ public class BlobModificationListener implements EventListener {
                 newVersion.getId(), newVersion.getVersionLabel(), newVersion.getVersionSeriesId());
         EventService eventService = Framework.getService(EventService.class);
         String principal = session.getPrincipal().getName();
-        for (String xpath : blobXPaths(liveDoc, newVersion, config)) {
-            Blob oldBlob = safeGetBlob(previousVersion, xpath);
-            Blob newBlob = safeGetBlob(newVersion, xpath);
-            BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(liveDoc, xpath, oldBlob, newBlob,
-                    versionContext, principal, eventTime);
+        for (BlobPair blobs : blobPairs(liveDoc, previousVersion, newVersion, config)) {
+            BlobDiffTrigger.Outcome outcome = blobs.unattributed()
+                    ? BlobDiffTrigger.Outcome.skipped(STATUS_SKIPPED_LIST_CHANGED)
+                    : BlobDiffTrigger.scheduleIfNeeded(liveDoc, blobs.xpath(), blobs.oldBlob(), blobs.newBlob(),
+                            versionContext, principal, eventTime);
             if (outcome.isAuditable()) {
-                eventService.fireEvent(buildAuditEvent(liveDoc, session, xpath, oldBlob, newBlob, outcome));
+                eventService.fireEvent(
+                        buildAuditEvent(liveDoc, session, blobs.xpath(), blobs.oldBlob(), blobs.newBlob(), outcome));
             }
         }
     }
@@ -316,26 +320,111 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * The blob xpaths to inspect on this document type.
+     * The blobs to compare between the two versions.
      * <p>
      * Unless {@code <xpaths>} lists {@code *}, the configured paths - {@code file:content} by
-     * default - are used verbatim: a path holding no blob simply yields {@code null} in
+     * default - are compared verbatim: a path holding no blob simply yields {@code null} in
      * {@link #safeGetBlob} and is skipped downstream, so there is nothing to pre-filter.
      * <p>
      * With {@code *}, the paths are derived from the <b>document type</b> and cached. The previous
      * implementation walked every schema and every property of both version documents and called
      * {@code property.getValue()} on each, forcing the load of every complex and list property
      * inside the user transaction, on every single check-in. A document type does not change
-     * between two check-ins, so this is computed once per type and per JVM.
+     * between two check-ins, so this is computed once per type and per JVM. Blobs inside a list are
+     * paired by {@link #pairListEntries}.
+     *
+     * @since 2025.1
      */
-    protected List<String> blobXPaths(DocumentModel liveDoc, DocumentModel version,
+    protected List<BlobPair> blobPairs(DocumentModel liveDoc, DocumentModel previous, DocumentModel current,
             BlobDiffConfigDescriptor config) {
+        List<BlobPair> pairs = new ArrayList<>();
         if (!config.isEveryXPath()) {
-            return config.getXPaths();
+            for (String xpath : config.getXPaths()) {
+                pairs.add(new BlobPair(xpath, safeGetBlob(previous, xpath), safeGetBlob(current, xpath), false));
+            }
+            return pairs;
         }
         List<String> templates = BLOB_XPATH_TEMPLATES.computeIfAbsent(liveDoc.getType(),
                 BlobModificationListener::computeBlobXPathTemplates);
-        return expandTemplates(templates, version);
+        for (String template : templates) {
+            if (template.indexOf('*') < 0) {
+                pairs.add(new BlobPair(template, safeGetBlob(previous, template), safeGetBlob(current, template),
+                        false));
+            } else {
+                pairListEntries(template, previous, current, pairs);
+            }
+        }
+        return pairs;
+    }
+
+    /**
+     * Pairs the blobs of a list by content, never by index alone.
+     * <p>
+     * An index is not an identity: once an entry is removed, inserted or moved, the same index holds
+     * another file on each side, and comparing them reported a change between two unrelated files.
+     * A blob present on both sides, wherever it sits, is unchanged. A new blob is compared with the
+     * one it replaces only when the list kept its shape and that one is gone from the new version;
+     * otherwise, if blobs also disappeared, it is audited without a diff. A new blob with nothing
+     * gone is an addition, which is not audited, like any added blob.
+     */
+    protected void pairListEntries(String template, DocumentModel previous, DocumentModel current,
+            List<BlobPair> pairs) {
+        Map<String, Blob> before = blobsAt(template, previous);
+        Map<String, Blob> after = blobsAt(template, current);
+        Set<String> digestsBefore = digests(before.values());
+        Set<String> digestsAfter = digests(after.values());
+        boolean somethingGone = before.values().stream().anyMatch(blob -> !holds(digestsAfter, blob));
+        boolean sameShape = before.keySet().equals(after.keySet());
+        for (Map.Entry<String, Blob> entry : after.entrySet()) {
+            Blob newBlob = entry.getValue();
+            if (holds(digestsBefore, newBlob)) {
+                continue;
+            }
+            Blob replaced = sameShape ? before.get(entry.getKey()) : null;
+            if (replaced != null && !holds(digestsAfter, replaced)) {
+                pairs.add(new BlobPair(entry.getKey(), replaced, newBlob, false));
+            } else if (somethingGone) {
+                pairs.add(new BlobPair(entry.getKey(), null, newBlob, true));
+            }
+        }
+    }
+
+    protected Map<String, Blob> blobsAt(String template, DocumentModel doc) {
+        List<String> xpaths = new ArrayList<>();
+        expandTemplate(template, doc, xpaths);
+        Map<String, Blob> blobs = new LinkedHashMap<>();
+        for (String xpath : xpaths) {
+            Blob blob = safeGetBlob(doc, xpath);
+            if (blob != null) {
+                blobs.put(xpath, blob);
+            }
+        }
+        return blobs;
+    }
+
+    protected static Set<String> digests(Iterable<Blob> blobs) {
+        Set<String> digests = new HashSet<>();
+        for (Blob blob : blobs) {
+            if (blob.getDigest() != null) {
+                digests.add(blob.getDigest());
+            }
+        }
+        return digests;
+    }
+
+    /** A blob with no digest is never found on the other side: nothing proves it unchanged. */
+    protected static boolean holds(Set<String> digests, Blob blob) {
+        return blob.getDigest() != null && digests.contains(blob.getDigest());
+    }
+
+    /**
+     * Two blobs to compare at one xpath.
+     *
+     * @param unattributed the new blob of a list whose previous file cannot be told: audited
+     *            without a diff
+     * @since 2025.1
+     */
+    protected record BlobPair(String xpath, Blob oldBlob, Blob newBlob, boolean unattributed) {
     }
 
     /**
@@ -382,23 +471,11 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * Resolves the {@code *} of list templates against the actual entries of a document.
+     * Resolves the {@code *} of a list template against the actual entries of a document.
      * <p>
      * Only the list properties that really lead to a blob are read, instead of every property of
      * every schema.
      */
-    protected List<String> expandTemplates(List<String> templates, DocumentModel doc) {
-        List<String> xpaths = new ArrayList<>(templates.size());
-        for (String template : templates) {
-            if (template.indexOf('*') < 0) {
-                xpaths.add(template);
-            } else {
-                expandTemplate(template, doc, xpaths);
-            }
-        }
-        return xpaths;
-    }
-
     protected void expandTemplate(String template, DocumentModel doc, List<String> xpaths) {
         int star = template.indexOf('*');
         String listPath = template.substring(0, star - 1);
@@ -456,6 +533,9 @@ public class BlobModificationListener implements EventListener {
         }
         if (STATUS_SKIPPED_NOT_MANAGED.equals(outcome.skipReason())) {
             return "binary changed (blob not managed by a provider)";
+        }
+        if (STATUS_SKIPPED_LIST_CHANGED.equals(outcome.skipReason())) {
+            return "binary changed (list entries also removed or moved, previous file unknown)";
         }
         return "binary content modified between versions";
     }

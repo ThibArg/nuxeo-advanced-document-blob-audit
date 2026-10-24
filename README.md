@@ -26,16 +26,19 @@ In that case the plugin writes the `blobContentModified` entry **only**, and cre
 | Blob over `maxBlobSize` | `file:content : binary changed (too large)` | `skippedTooLarge` | none |
 | No extractor for the mime type | `file:content : binary changed (unsupported format)` | `skippedUnsupportedType` | none |
 | Blobs not both managed by a provider | `file:content : binary changed (blob not managed by a provider)` | `skippedNotManaged` | none |
+| A blob of a list changed while other entries were removed or moved | `files:files/0/file : binary changed (list entries also removed or moved, previous file unknown)` | `skippedListChanged` | none |
 | Diffable change | `file:content : binary content modified between versions` | absent | created |
 
 The third case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
+
+The fourth case only happens with `<xpath>*</xpath>`, the only mode in which blobs inside lists (such as `files:files`) are watched. A list index is not an identity, so the entries are paired **by content**: a file present in both versions, wherever it sits, is unchanged; a new file is compared with the one it replaces only when the list kept its shape and that file is gone. Removing, adding or reordering attachments is therefore not audited, as an added or removed blob never is; a file that changed in a list that also lost an entry is audited without a diff, since which file it replaces cannot be told.
 
 `skipReason` and `diffCorrelationId` are mutually exclusive: a skipped entry carries no correlation id, because no BlobDiff will ever exist to point at.
 
 Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent.
 
 > [!NOTE]
-> Both skip reasons are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated blobs before extracting, so a `BlobDiff.Retry`, or a work outliving a `maxBlobSize` change, can be filed as `skippedTooLarge` or `skippedUnsupportedType`. `skippedUnsupportedType` is also what the work records when the two blobs no longer share a mime type an extractor handles. `skippedNotManaged`, on the other hand, is a skip reason only: no `BlobDiff` is ever created in that case.
+> Both skip reasons are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated blobs before extracting, so a `BlobDiff.Retry`, or a work outliving a `maxBlobSize` change, can be filed as `skippedTooLarge` or `skippedUnsupportedType`. `skippedUnsupportedType` is also what the work records when the two blobs no longer share a mime type an extractor handles. `skippedNotManaged` and `skippedListChanged`, on the other hand, are skip reasons only: no `BlobDiff` is ever created in those cases.
 
 ### How the Version Pair Is Established
 

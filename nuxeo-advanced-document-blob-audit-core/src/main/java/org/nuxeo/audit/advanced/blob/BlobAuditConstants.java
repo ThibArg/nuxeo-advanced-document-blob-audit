@@ -174,6 +174,14 @@ public class BlobAuditConstants {
      */
     public static final String STATUS_SKIPPED_NOT_MANAGED = "skippedNotManaged";
 
+    /**
+     * A blob inside a list changed, but entries were also removed or moved, so the previous file it
+     * replaces cannot be told. Reported like the other skips; never a {@code bdiff:status}.
+     *
+     * @since 2025.1
+     */
+    public static final String STATUS_SKIPPED_LIST_CHANGED = "skippedListChanged";
+
     public static final String STATUS_ERROR = "error";
 
     /**
