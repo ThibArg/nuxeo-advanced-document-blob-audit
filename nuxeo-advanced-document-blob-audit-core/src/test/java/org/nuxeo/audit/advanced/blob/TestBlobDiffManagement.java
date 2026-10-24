@@ -50,7 +50,15 @@ import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoException;
+import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.VersioningOption;
+import org.nuxeo.ecm.core.api.impl.UserPrincipal;
+import org.nuxeo.ecm.core.api.security.ACE;
+import org.nuxeo.ecm.core.api.security.ACL;
+import org.nuxeo.ecm.core.api.security.ACP;
+import org.nuxeo.ecm.core.api.security.SecurityConstants;
+import org.nuxeo.ecm.core.api.security.impl.ACLImpl;
+import org.nuxeo.ecm.core.api.security.impl.ACPImpl;
 import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.io.registry.MarshallerHelper;
@@ -614,11 +622,50 @@ public class TestBlobDiffManagement {
     /* --------------------------------------------------------------- enricher */
 
     protected JsonNode sourceInfo(DocumentModel diff) throws Exception {
+        return sourceInfo(session, diff);
+    }
+
+    protected JsonNode sourceInfo(CoreSession s, DocumentModel diff) throws Exception {
         RenderingContext ctx = RenderingContext.CtxBuilder.enrichDoc(BlobDiffSourceEnricher.NAME)
-                                                          .session(session)
+                                                          .session(s)
                                                           .get();
-        String json = MarshallerHelper.objectToJson(session.getDocument(diff.getRef()), ctx);
+        String json = MarshallerHelper.objectToJson(s.getDocument(diff.getRef()), ctx);
         return new ObjectMapper().readTree(json).get("contextParameters").get(BlobDiffSourceEnricher.NAME);
+    }
+
+    /**
+     * BLD-05 (code review 2026-10): existence and trash state are computed with a privileged
+     * session, title, path and type are filtered through the caller's Read. Rendered for
+     * Administrator only, that filter never ran - yet an auditor who cannot read the source is the
+     * normal case.
+     */
+    @Test
+    public void testEnricherHidesASourceTheAuditorCannotRead() throws Exception {
+        DocumentModel source = file("private", textBlob("x", "text/plain", "x.txt"));
+        ACP acp = new ACPImpl();
+        ACL acl = new ACLImpl(ACL.LOCAL_ACL);
+        acl.add(new ACE("Administrator", SecurityConstants.EVERYTHING, true));
+        acl.add(ACE.BLOCK);
+        acp.addACL(acl);
+        session.setACP(source.getRef(), acp, true);
+        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        // The default auditors group is "administrators", which bypasses ACLs: grant the diff to a
+        // plain user instead, the way the container grants it to a dedicated auditors group.
+        ACP diffAcp = session.getACP(d.getRef());
+        diffAcp.getOrCreateACL().add(new ACE("auditor", SecurityConstants.READ, true));
+        session.setACP(d.getRef(), diffAcp, true);
+        txFeature.nextTransaction();
+
+        NuxeoPrincipal auditor = new UserPrincipal("auditor", List.of("members"), false, false);
+        try (CloseableCoreSession s = coreFeature.openCoreSession(auditor)) {
+            assertFalse("the fixture must hide the source", s.hasPermission(source.getRef(), SecurityConstants.READ));
+            JsonNode info = sourceInfo(s, d);
+            assertTrue(info.get("exists").asBoolean());
+            assertFalse(info.get("readable").asBoolean());
+            assertNull(info.get("title"));
+            assertNull(info.get("path"));
+            assertNull(info.get("type"));
+        }
     }
 
     @Test

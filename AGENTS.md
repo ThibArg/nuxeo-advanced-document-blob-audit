@@ -396,7 +396,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 283 tests (27 test classes)
+mvn -o install                                     # full build, 284 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -459,7 +459,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 57 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 58 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1379,6 +1379,15 @@ cited here as "code review 2026-10".
     `truncated` parameter made three of the six tests fail. Removing `<searchDocumentType>` did
     not, and cannot: the fallback search document resolves `bdsearch:` keys too (item 25), which is
     why the prefix is kept. 277 tests → 283, 26 test classes → 27.
+
+58. *(code review 2026-10, finding `BLD-05`, S3)* The `blobDiffSource` enricher computes existence
+    and trash state with a privileged session and filters title, path and type through the
+    caller's Read - the only place where privileged data is narrowed before reaching a caller -
+    and every test rendered it as Administrator, so the filter never ran.
+    `TestBlobDiffManagement#testEnricherHidesASourceTheAuditorCannotRead` renders it for a plain
+    user granted the diff but not the source. The default auditors group, `administrators`,
+    bypasses ACLs, hence the direct grant on the diff. Checked by making the enricher read the source
+    privileged for one run: that test failed, and only it. 283 tests → 284.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
