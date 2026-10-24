@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.txprobe">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <!-- Wins text/plain over "plainText" thanks to a lower order, and records the transaction state (RES-04). -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+    <extractor name="plainTextProbe" order="1" class="org.nuxeo.audit.advanced.blob.TransactionProbeExtractor">
+      <mimeTypes>
+        <mimeType>text/plain</mimeType>
+      </mimeTypes>
+    </extractor>
+  </extension>
+
+</component>

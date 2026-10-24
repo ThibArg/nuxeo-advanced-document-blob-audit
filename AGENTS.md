@@ -91,6 +91,15 @@ reachable with SEC-01, because the work now re-evaluates `getEligibility` on the
 it. The purge dialog offers both. This reverses an earlier note claiming `skippedTooLarge` could
 never be persisted; that was true only of the check-in path.
 
+**`BlobDiffWork` extracts with no transaction open** (item 36). `work()` reads in the work
+transaction, calls `commitOrRollbackTransaction()`, runs `service.diff`, then `startTransaction()`
+to write. Nothing in between may touch the repository, and no `DocumentModel` read before the
+commit is used after it: the values it needs are copied into locals first. `alreadyRecorded()` runs
+again once the new transaction is open, because another run of the same work may have recorded
+the diff during the extraction. Do not drop that second check, it is item 5 again.
+Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction`,
+`#testADiffRecordedDuringTheExtractionIsNotDuplicated`.
+
 **`BlobDiff.Retry` trusts nothing on its input but the path.** The operation replays the provider
 id and the storage key persisted on the document, and `BlobDiffWork` re-reads them in a *system
 session* through `provider.readBlob(info)` — a keyed store lookup, subject to **no document ACL**.
@@ -207,7 +216,7 @@ not share a backend:
 
 | Site | Mechanism | Destination |
 |---|---|---|
-| `BlobDiffWork#existingDiffId:214` | `session.query` | repository, always |
+| `BlobDiffWork#existingDiffId:215` | `session.query` | repository, always |
 | `BlobModificationListener#previousVersionRefFallback:283` | `session.query` | repository, always |
 | `BLOB_DIFFS_FOR_DOCUMENT` | `<coreQueryPageProvider>` | repository, always |
 | `BLOB_DIFFS_ADMIN` | `SearchServicePageProvider` → `SearchService` | **the configured search client** |
@@ -311,7 +320,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 238 tests (25 test classes)
+mvn -o install                                     # full build, 240 tests (25 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -334,7 +343,8 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 `blobaudit-test-noimagepdf-config.xml` to disable a single image extractor,
 `blobaudit-test-failingimage-contrib.xml` to make the Word image inventory throw
 (`FailingImageExtractor`, a test class contributed to `imageExtractors` with a lower `order` than
-`imageWord`), and
+`imageWord`), `blobaudit-test-txprobe-contrib.xml` to record whether a transaction is open during
+the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`), and
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
 xpaths.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
@@ -364,7 +374,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 35 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 36 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -939,6 +949,25 @@ cited here as "code review 2026-10".
     `#testAOneCellAnchorIsKeyedOnItsCell`, `#testASheetIsNotParsedToListItsPictures`. The three
     allocation tests and the two key tests were checked to fail against the unpatched code; the
     three equivalence tests pass on both, as they must. 230 tests → 238.
+
+36. *(code review 2026-10, finding `RES-04`, S2)* `BlobDiffWork` downloaded, parsed and compared
+    both binaries inside the transaction `AbstractWork#runWorkWithTransaction` opens, after having
+    queried the repository with it. An extraction outliving the transaction timeout (300 s by
+    default) failed the commit: no `BlobDiff` at all, not even in `error`, since that write belonged
+    to the dead transaction. `AbstractWork#run` then ran the whole extraction twice more
+    (`getRetryCount()` = 2) before giving up.
+
+    `work()` now follows the platform pattern (`PictureViewsHelper#newTransaction`,
+    `ThumbnailRecomputeWork`): it commits once the source and the blobs are resolved, extracts with
+    no transaction open, then starts a new one to write. The idempotency check (item 5) runs again
+    in that new transaction, since a run on another node can have finished in between. No dedicated
+    timeout for the write transaction: it only creates one document.
+
+    Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction` (a probe extractor
+    records the transaction state on both sides) and
+    `#testADiffRecordedDuringTheExtractionIsNotDuplicated` (the probe records a competing diff in
+    its own transaction during the extraction). Both were checked to fail against the unpatched code
+    — `[true, true]`, and two diffs instead of one. 238 tests → 240.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

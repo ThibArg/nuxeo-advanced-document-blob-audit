@@ -46,7 +46,8 @@ import org.nuxeo.ecm.core.work.AbstractWork;
 import org.nuxeo.runtime.api.Framework;
 
 /**
- * Asynchronous side of the blob diff: extraction and comparison never run in the user transaction.
+ * Asynchronous side of the blob diff: extraction and comparison run in no transaction at all, neither
+ * the user's nor the work's.
  * <p>
  * Both sides are frozen by provider id and storage key when the work is scheduled. The work never
  * rereads the blob property from the current document, because a later save could otherwise make a
@@ -241,18 +242,21 @@ public class BlobDiffWork extends AbstractWork {
         return "Blob content diff for " + docId + " (" + xpath + ")";
     }
 
+    /**
+     * Reads in the work transaction, extracts and compares with <b>no transaction open</b>, then
+     * writes in a new one.
+     * <p>
+     * Materialising and parsing two binaries can outlast the transaction timeout. Inside the work
+     * transaction that made the commit fail: nothing was recorded, not even an {@code error} diff, and
+     * every retry ran the whole extraction again. Idempotency is checked again before writing, since
+     * another run of this work may have recorded the diff in the meantime.
+     */
     @Override
     public void work() {
         setStatus("Diffing");
         openSystemSession();
 
-        String alreadyRecorded = existingDiffId();
-        if (alreadyRecorded != null) {
-            // Already done by a previous run of this very work: nothing to add, and above all
-            // nothing to duplicate.
-            log.debug("BlobDiff {} already exists for correlation id {}, skipping", alreadyRecorded, correlationId);
-            removeReplaced();
-            setStatus("Done");
+        if (alreadyRecorded()) {
             return;
         }
 
@@ -272,12 +276,16 @@ public class BlobDiffWork extends AbstractWork {
             return;
         }
         DocumentModel source = session.getDocument(sourceRef);
+        String sourceType = source.getType();
+        String sourceRepository = source.getRepositoryName();
+        String currentTitle = source.getTitle();
         Blob oldBlob = resolveBlob(oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest, oldLength,
                 "previous");
         Blob newBlob = resolveBlob(newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength,
                 "new");
         BlobDiffService service = Framework.getService(BlobDiffService.class);
 
+        commitOrRollbackTransaction();
         DiffResult result = null;
         String status = STATUS_OK;
         if (oldBlob == null || newBlob == null) {
@@ -285,7 +293,7 @@ public class BlobDiffWork extends AbstractWork {
                     newBlobKey, docId, xpath);
             status = STATUS_ERROR;
         } else {
-            String ineligible = ineligibleStatus(service, source.getType(), oldBlob, newBlob);
+            String ineligible = ineligibleStatus(service, sourceType, oldBlob, newBlob);
             if (ineligible != null) {
                 log.warn("Frozen blob pair for {} ({}) is no longer eligible for a diff ({}), recording the skip",
                         docId, xpath, ineligible);
@@ -304,13 +312,33 @@ public class BlobDiffWork extends AbstractWork {
                 }
             }
         }
+        startTransaction();
 
-        DocumentModel diffDoc = service.createDiffDocument(session, source.getId(), source.getRepositoryName(),
-                source.getTitle(), xpath, oldBlob, newBlob, frozen(), versions, principal, new Date(eventTime), result,
-                status, correlationId);
+        if (alreadyRecorded()) {
+            return;
+        }
+        DocumentModel diffDoc = service.createDiffDocument(session, docId, sourceRepository, currentTitle, xpath,
+                oldBlob, newBlob, frozen(), versions, principal, new Date(eventTime), result, status, correlationId);
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");
+    }
+
+    /**
+     * Whether a run of this very work already recorded the diff, in which case there is nothing to add
+     * and above all nothing to duplicate. The diff this work replaces is removed all the same.
+     *
+     * @since 2025.1
+     */
+    protected boolean alreadyRecorded() {
+        String recorded = existingDiffId();
+        if (recorded == null) {
+            return false;
+        }
+        log.debug("BlobDiff {} already exists for correlation id {}, skipping", recorded, correlationId);
+        removeReplaced();
+        setStatus("Done");
+        return true;
     }
 
     /**

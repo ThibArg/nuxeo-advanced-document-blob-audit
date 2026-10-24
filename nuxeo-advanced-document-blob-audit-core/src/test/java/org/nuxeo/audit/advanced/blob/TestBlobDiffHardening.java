@@ -21,6 +21,7 @@ import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 
 import java.io.Serializable;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,18 +31,22 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.VersioningOption;
+import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.schema.FacetNames;
 import org.nuxeo.ecm.core.schema.SchemaManager;
 import org.nuxeo.ecm.core.schema.DocumentType;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
+import org.nuxeo.runtime.transaction.TransactionHelper;
 
 /**
  * Hardening of the asynchronous pipeline: fulltext exclusion, dedicated work queue, deterministic
@@ -158,6 +163,81 @@ public class TestBlobDiffHardening {
 
         assertEquals("The replayed work must not duplicate the BlobDiff", 1, session
                 .query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId() + "'").size());
+    }
+
+    /* ------------------------------------------------------ work transactions */
+
+    /**
+     * RES-04 (code review 2026-10): the work downloaded, parsed and compared both binaries inside its
+     * transaction. An extraction outliving the transaction timeout failed the commit, so nothing was
+     * recorded - not even an error - and every retry ran the extraction again.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-txprobe-contrib.xml")
+    public void testTheExtractionRunsOutsideAnyTransaction() throws Exception {
+        TransactionProbeExtractor.reset(null);
+        DocumentModel doc = session.createDocumentModel("/", "tx-probe", "File");
+        doc.setPropertyValue("file:content", (Serializable) textBlob("line 1", "text/plain", "notes.txt"));
+        doc = session.createDocument(doc);
+        session.save();
+        newVersionWithBlob(doc, "line 1");
+        newVersionWithBlob(doc, "line 1 modified");
+
+        assertEquals("both sides must be extracted with no transaction open", List.of(false, false),
+                TransactionProbeExtractor.transactionActive());
+        List<DocumentModel> diffs = session.query(
+                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId() + "'");
+        assertEquals(1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /**
+     * The other half of RES-04: with the extraction out of the transaction, another run of the same
+     * work can record the diff in the meantime. Idempotency is checked again before writing.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-txprobe-contrib.xml")
+    public void testADiffRecordedDuringTheExtractionIsNotDuplicated() throws Exception {
+        DocumentModel doc = session.createDocumentModel("/", "tx-race", "File");
+        doc.setPropertyValue("file:content", (Serializable) textBlob("line 1", "text/plain", "notes.txt"));
+        DocumentModel created = session.createDocument(doc);
+        session.save();
+        Blob first = textBlob("line 1", "text/plain", "notes.txt");
+        Blob second = textBlob("line 1 modified", "text/plain", "notes.txt");
+        ManagedBlob old = BlobModificationListener.runDisabled(() -> versionBlob(created, first));
+        ManagedBlob current = BlobModificationListener.runDisabled(() -> versionBlob(created, second));
+        txFeature.nextTransaction();
+        String repository = session.getRepositoryName();
+        String correlationId = UUID.randomUUID().toString();
+        TransactionProbeExtractor.reset(() -> TransactionHelper.runInNewTransaction(() -> {
+            CoreSession other = CoreInstance.getCoreSessionSystem(repository);
+            Framework.getService(BlobDiffService.class)
+                     .createDiffDocument(other, created.getId(), repository, "Another run", "file:content", null,
+                             null, FrozenBlobs.NONE, VersionContext.NONE, "Administrator", new Date(), null,
+                             BlobAuditConstants.STATUS_OK, correlationId);
+        }));
+
+        BlobDiffWork work = new BlobDiffWork(repository, created.getId(), created.getTitle(), "file:content",
+                old.getProviderId(), old.getKey(), "notes.txt", "text/plain", old.getDigest(), old.getLength(),
+                current.getProviderId(), current.getKey(), "notes.txt", "text/plain", current.getDigest(),
+                current.getLength(), "Administrator", System.currentTimeMillis(), correlationId, VersionContext.NONE);
+        Framework.getService(WorkManager.class).schedule(work, true);
+        txFeature.nextTransaction();
+
+        assertEquals("the hook must have run during the extraction", 2,
+                TransactionProbeExtractor.transactionActive().size());
+        assertEquals("the diff recorded during the extraction must not be duplicated", 1,
+                session.query("SELECT * FROM BlobDiff WHERE bdiff:correlationId = '" + correlationId + "'").size());
+    }
+
+    /** Checks in a new version holding the given blob, and returns it as stored. */
+    protected ManagedBlob versionBlob(DocumentModel doc, Blob blob) {
+        DocumentModel live = session.getDocument(doc.getRef());
+        live.setPropertyValue("file:content", (Serializable) blob);
+        session.saveDocument(live);
+        DocumentRef version = session.checkIn(live.getRef(), VersioningOption.MINOR, "test");
+        session.save();
+        return (ManagedBlob) session.getDocument(version).getPropertyValue("file:content");
     }
 
     /* ----------------------------------------------------- bounded version query */

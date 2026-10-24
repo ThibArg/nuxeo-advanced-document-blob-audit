@@ -10,7 +10,7 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 |------|------|------|
 | Binary change detection | BlobModificationListener, synchronous | Digest comparison |
 | blobContentModified audit entry | synchronous | Negligible, **no business data** |
-| Extraction + diff | BlobDiffWork, asynchronous | Outside the user transaction |
+| Extraction + diff | BlobDiffWork, asynchronous | Outside any transaction, so no transaction timeout applies to it |
 | Result storage | Dedicated BlobDiff document | Blob stored outside the source document |
 
 The audit log never contains business content. It stores only the xpath, file names, and a `diffCorrelationId` pointing to the BlobDiff document.
