@@ -30,7 +30,9 @@
     <nuxeo-operation id="statusOp" op="BlobDiff.PurgeStatus"></nuxeo-operation>
     <nuxeo-operation id="abortOp" op="BlobDiff.PurgeAbort"></nuxeo-operation>
     <nuxeo-operation id="cleanOp" op="BlobDiff.CleanEmptyFolders"></nuxeo-operation>
-    <nuxeo-dialog id="dialog" with-backdrop no-auto-focus>
+    <!-- While a purge runs, only "background" and "stop" close the dialog: Esc used to drop the command. -->
+    <nuxeo-dialog id="dialog" with-backdrop no-auto-focus
+                  no-cancel-on-esc-key="[[_running]]" no-cancel-on-outside-click="[[_running]]">
       <h2>[[i18n('label.blobaudit.purge.title')]]</h2>
 
       <template is="dom-if" if="[[!_running]]">
@@ -99,13 +101,15 @@
       },
 
       open: function () {
-        this._ack = false;
-        this._status = '';
-        this._running = false;
-        this._commandId = null;
-        this._processed = 0;
-        this._total = 0;
-        this._pollFailures = 0;
+        if (!this._running || !this._commandId) {
+          this._stopPolling();
+          this._ack = false;
+          this._status = '';
+          this._commandId = null;
+          this._processed = 0;
+          this._total = 0;
+          this._pollFailures = 0;
+        }
         this.$.dialog.open();
         return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
       },

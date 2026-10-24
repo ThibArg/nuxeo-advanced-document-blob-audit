@@ -450,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 50 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 51 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1294,6 +1294,16 @@ cited here as "code review 2026-10".
     `blobaudit-test-dynamicfacet-contrib.xml`, checked to fail against the unpatched code;
     `#testTemplatesAreComputedPerSchema` and `#testUnknownSchemaYieldsNoXPath` replace the two
     per-type cases. 276 tests → 277.
+
+51. *(code review 2026-10, finding `WEB-03`, S3)* Esc or a click outside closed the purge dialog
+    mid-run without going through "Let it run in the background". Reopening it then reset
+    `_running` and `_commandId`: the pending poll returned early for good, the completion was never
+    observed (no toast, no folder cleanup) and the Stop button was gone while the purge kept
+    deleting. The dialog now binds `no-cancel-on-esc-key` and `no-cancel-on-outside-click` to
+    `_running`, and `open()` keeps the progress view of a purge still running instead of resetting.
+
+    No automated coverage. Manual checks: Esc and a click outside during a purge do nothing; after
+    "Let it run in the background", reopening shows a fresh form.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
