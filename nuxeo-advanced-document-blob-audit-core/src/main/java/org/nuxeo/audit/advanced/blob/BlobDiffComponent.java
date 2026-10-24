@@ -145,13 +145,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     @Override
-    public void stop(ComponentContext context) throws InterruptedException {
-        super.stop(context);
-        extractors = null;
-        imageExtractors = null;
-    }
-
-    @Override
     public BlobDiffConfigDescriptor getConfig() {
         BlobDiffConfigDescriptor config = getDescriptor(XP_CONFIG, BlobDiffConfigDescriptor.DEFAULT_ID);
         return config == null ? new BlobDiffConfigDescriptor() : config;

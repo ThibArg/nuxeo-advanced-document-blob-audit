@@ -390,7 +390,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 275 tests (26 test classes)
+mvn -o install                                     # full build, 276 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -449,7 +449,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 48 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 49 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1269,6 +1269,14 @@ cited here as "code review 2026-10".
     bound `diffKeyed` and `diffPositional` honour. The search now starts at `maxChars - 1`.
     Coverage: `TestTextDifferBounding#testMergeHonoursTheCapWhenANewlineSitsExactlyOnIt`, checked to
     fail against the unpatched code. 274 tests → 275.
+
+49. *(code review 2026-10, finding `API-02`, S3)* `BlobDiffComponent#stop` set both extractor lists
+    to `null`. Both WorkManagers drain works for 10 s before the components stop, and a work still
+    running after that (`any2text` on a large PDF) found no extractor: `extract` returned `null`
+    and the work filed `skippedUnsupportedType`, which `BlobDiff.Retry` refuses - a permanent,
+    mislabelled hole. The lists hold no resource, so `stop()` is gone; `start()` replaces them.
+    Coverage: `TestBlobDiffService#testAStoppingComponentKeepsItsExtractors`, checked to fail against
+    the unpatched code. 275 tests → 276.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

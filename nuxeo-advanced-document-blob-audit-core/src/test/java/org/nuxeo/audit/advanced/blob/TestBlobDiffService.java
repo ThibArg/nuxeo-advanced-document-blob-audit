@@ -78,6 +78,24 @@ public class TestBlobDiffService {
         assertTrue("test config must enable the feature", blobDiffService.getConfig().isEnabled());
     }
 
+    /**
+     * API-02 (code review 2026-10): {@code stop()} emptied the extractor lists, while a work still
+     * running past the WorkManager drain kept extracting. It then filed the binary as an unsupported
+     * format, a status {@code BlobDiff.Retry} refuses: a permanent, mislabelled hole.
+     */
+    @Test
+    public void testAStoppingComponentKeepsItsExtractors() throws Exception {
+        BlobDiffComponent component = (BlobDiffComponent) blobDiffService;
+        component.stop(null);
+        try {
+            assertNotNull(component.findExtractor("text/plain"));
+            assertEquals(DiffEligibility.ELIGIBLE,
+                    component.getEligibility("File", "file:content", textBlob("x", "text/plain", "x.txt")));
+        } finally {
+            component.start(null);
+        }
+    }
+
     @Test
     public void testSpreadsheetExtractorIsSelected() throws Exception {
         DiffableContent content = blobDiffService.extract(xlsx("Sheet1", cells("A1", "hello"), "f.xlsx"));
