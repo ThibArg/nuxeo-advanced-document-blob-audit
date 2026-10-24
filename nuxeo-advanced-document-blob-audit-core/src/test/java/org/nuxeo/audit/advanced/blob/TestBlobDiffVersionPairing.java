@@ -180,7 +180,7 @@ public class TestBlobDiffVersionPairing {
     /* --------------------------------------- item 8: xpaths from the type */
 
     /**
-     * With {@code <xpaths>} empty, the paths come from the document type. {@code file:content} is a
+     * With {@code <xpath>*</xpath>}, the paths come from the document type. {@code file:content} is a
      * plain complex field, {@code files:files/*&#47;file} a blob inside a list: the template is
      * resolved against the entries the document really has.
      */

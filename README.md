@@ -101,19 +101,16 @@ identical to `extractors`.
 
 ```xml
 <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
-  <extractor name="imagePdf" enabled="false"
-             class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
-    <mimeTypes>
-      <mimeType>application/pdf</mimeType>
-    </mimeTypes>
-  </extractor>
+  <extractor name="imagePdf" enabled="false" />
 </extension>
 ```
 
 `ImageInventoryExtractor` is contributed once per format (`imageWord`, `imageSpreadsheet`,
 `imagePresentation`, `imagePdf`), so a single format can be turned off — the above disables the PDF
-inventory and leaves the others untouched. These extractors only run when `imageAnalysisLevel > 0`,
-and they are bounded by the same `maxLines` as the text.
+inventory and leaves the others untouched. Contributions with the same name merge, so naming the
+extractor is enough (see [Overriding the Configuration](#overriding-the-configuration)). These
+extractors only run when `imageAnalysisLevel > 0`, and they are bounded by the same `maxLines` as
+the text.
 
 ### Reading the Binaries
 
@@ -320,6 +317,37 @@ Auditors group (server and Web UI):
 ```
 
 In production, restrict the feature to specific document types. Computing diffs for every binary in a repository is rarely worth the cost.
+
+### Overriding the Configuration
+
+Contributions to `config` **merge**: a later one only overrides what it sets, and anything it leaves out keeps the value of the earlier ones. To narrow the shipped configuration down to one document type, this is enough — `enabled`, the bounds and the xpaths are kept:
+
+```xml
+<require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+  <config enabled="true">
+    <docTypes>
+      <docType>Contract</docType>
+    </docTypes>
+  </config>
+</extension>
+```
+
+- A list (`docTypes`, `xpaths`) replaces the earlier one only when it is **not empty**. An empty element cannot widen a list back: list `*` instead.
+- `<docType>*</docType>` means every document type, as does an empty `docTypes` everywhere.
+- `<xpath>*</xpath>` means every blob xpath of the document type, discovered from its schemas. With no xpath configured anywhere, only `file:content` is diffed.
+- `<config enabled="false">` still switches the feature off: a value that is set always wins.
+
+The `extractors` and `imageExtractors` points merge the same way, by extractor name. An override only names the extractor and sets what it changes; its properties are added to the earlier ones, and its MIME types replace them only when it lists some:
+
+```xml
+<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+  <extractor name="converter">
+    <property name="minLineLength">2</property>
+  </extractor>
+</extension>
+```
 
 ### Bounding the Size of a Diff
 
@@ -536,7 +564,8 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestSpreadsheetStreaming | No | Streamed `.xlsx` reading: same values as POI's usermodel, shared formulas, bounded memory |
 | TestPlainTextExtractor | No | txt / json / xml / csv |
 | TestExtractedValueBounding | No | Long values bounded at extraction, still compared exactly |
-| TestExtractorSelection | No | MIME type matching |
+| TestExtractorSelection | No | MIME type matching, merging of extractor contributions |
+| TestBlobDiffConfigDescriptor | No | Image analysis level, merging of configuration contributions, `file:content` and `*` defaults |
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
 | TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |

@@ -21,6 +21,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.DOCX_MIME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.cells;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
@@ -30,11 +31,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
 
 import jakarta.inject.Inject;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
@@ -100,6 +103,24 @@ public class TestBlobDiffService {
         assertEquals(200, blobDiffService.getConfig().getMaxValueLength());
         assertEquals(1, content.size());
         assertTrue(content.lines().get(0).value().length() <= 200);
+    }
+
+    /**
+     * API-01 (code review 2026-10): a partial contribution, through the real registry. It only sets
+     * {@code docTypes} and one property of the {@code converter} extractor; the feature must stay on,
+     * the bounds and xpaths of the earlier contribution must survive, and DOCX must stay supported.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-partial-config.xml")
+    public void testAPartialContributionOnlyChangesWhatItSets() {
+        BlobDiffConfigDescriptor config = blobDiffService.getConfig();
+
+        assertTrue(config.isEnabled());
+        assertEquals(List.of("File"), config.getDocTypes());
+        assertEquals(List.of("file:content"), config.getXPaths());
+        assertEquals(1048576, config.getMaxBlobSize());
+        assertEquals(1000, config.getMaxLines());
+        assertTrue(((BlobDiffComponent) blobDiffService).findExtractor(DOCX_MIME) instanceof ConverterTextExtractor);
     }
 
     /**

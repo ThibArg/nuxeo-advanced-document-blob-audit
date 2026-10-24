@@ -12,6 +12,9 @@
     <documentation>
       Global switch and guardrails. Disabled by default on purpose: diffing binaries is costly and
       copies business content into a separate, differently secured document.
+      Contributions merge: a later one only overrides what it sets. A list (docTypes, xpaths)
+      replaces the earlier one only when it is not empty; list "*" for every document type or
+      every blob xpath. With no xpath configured anywhere, only file:content is diffed.
     </documentation>
   </extension-point>
 
@@ -20,6 +23,8 @@
     <documentation>
       Registers a BlobTextExtractor for a set of mime types. Lowest "order" wins, so a specialised
       extractor overrides a catch-all one. Supporting a new format means contributing here.
+      Contributions with the same name merge: a later one only overrides what it sets, and its
+      properties are added to the earlier ones.
     </documentation>
   </extension-point>
 
@@ -54,7 +59,10 @@
       <maxValueLength>4096</maxValueLength>
       <!-- Optional; omitted is equivalent to 0. Level 1 support is implemented separately. -->
       <imageAnalysisLevel>0</imageAnalysisLevel>
-      <!-- Empty docTypes means "every type". Narrow this down in production. -->
+      <!--
+        Empty docTypes means "every type". Narrow this down in production. An override cannot widen
+        a list back by leaving it empty, it keeps the earlier one: list "*" instead.
+      -->
       <docTypes />
       <xpaths>
         <xpath>file:content</xpath>

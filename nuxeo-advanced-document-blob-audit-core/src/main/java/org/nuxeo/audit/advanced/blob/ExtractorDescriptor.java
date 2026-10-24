@@ -29,11 +29,17 @@ import org.nuxeo.runtime.model.Descriptor;
 
 /**
  * Registration of a {@link BlobTextExtractor} for a set of mime types.
+ * <p>
+ * Contributions with the same name <b>merge</b>: a later one only overrides what it sets, its
+ * properties are added to the earlier ones, and its mime types replace them only when it lists some.
  *
  * @since 2025.1
  */
 @XObject("extractor")
 public class ExtractorDescriptor implements Descriptor {
+
+    /** @since 2025.1 */
+    public static final int DEFAULT_ORDER = 100;
 
     @XNode("@name")
     protected String name;
@@ -42,11 +48,11 @@ public class ExtractorDescriptor implements Descriptor {
     protected Class<? extends BlobTextExtractor> klass;
 
     @XNode("@enabled")
-    protected boolean enabled = true;
+    protected Boolean enabled;
 
     /** Lower runs first; lets a specialised extractor win over a catch-all one. */
     @XNode("@order")
-    protected int order = 100;
+    protected Integer order;
 
     @XNodeList(value = "mimeTypes/mimeType", type = ArrayList.class, componentType = String.class)
     protected List<String> mimeTypes = new ArrayList<>();
@@ -59,12 +65,37 @@ public class ExtractorDescriptor implements Descriptor {
         return name;
     }
 
+    /**
+     * Overlays a later contribution on this one. The default merge returned the later contribution
+     * alone, so an override re-declaring a single property lost the class, and the format became
+     * unsupported.
+     *
+     * @since 2025.1
+     */
+    @Override
+    public Descriptor merge(Descriptor o) {
+        ExtractorDescriptor other = (ExtractorDescriptor) o;
+        ExtractorDescriptor merged = new ExtractorDescriptor();
+        merged.name = either(other.name, name);
+        merged.klass = either(other.klass, klass);
+        merged.enabled = either(other.enabled, enabled);
+        merged.order = either(other.order, order);
+        merged.mimeTypes = Descriptor.getIfEmpty(other.mimeTypes, mimeTypes);
+        merged.properties = new HashMap<>(properties);
+        merged.properties.putAll(other.properties);
+        return merged;
+    }
+
+    protected static <T> T either(T value, T fallback) {
+        return value != null ? value : fallback;
+    }
+
     public boolean isEnabled() {
-        return enabled;
+        return enabled == null || enabled;
     }
 
     public int getOrder() {
-        return order;
+        return order == null ? DEFAULT_ORDER : order;
     }
 
     public List<String> getMimeTypes() {

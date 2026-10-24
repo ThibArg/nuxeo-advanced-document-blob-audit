@@ -77,6 +77,19 @@ Coverage: `TestBlobDiffVersionPairing`.
 Any change to `handleEvent` must keep these checks first, before any I/O.
 Coverage: `TestBlobDiffListenerDisabling`.
 
+**Contributions merge, they do not replace** (item 40). `BlobDiffConfigDescriptor` and
+`ExtractorDescriptor` implement `Descriptor#merge`, whose default returns the later contribution
+alone. Their scalar fields are boxed so that "not set" (`null`) can be told from a value, the
+getters apply the defaults, and `merge` returns a new instance: a set value wins, an omitted one
+keeps the earlier value, a list replaces the earlier one only when it is not empty
+(`Descriptor.getIfEmpty`), extractor properties are overlaid. XMap cannot tell `<xpaths/>` from an
+absent element, so an empty list can no longer carry a meaning of its own: "every blob xpath" is
+`<xpath>*</xpath>` (`isEveryXPath`), "every type" is an empty `docTypes` or `*`, and an empty
+`xpaths` means `file:content`, what the shipped contribution lists. A new field on either
+descriptor must be boxed and added to `merge`, or a partial override resets it.
+Coverage: `TestBlobDiffConfigDescriptor`, `TestExtractorSelection`,
+`TestBlobDiffService#testAPartialContributionOnlyChangesWhatItSets`.
+
 **Skip reporting: the order of the checks in `BlobDiffTrigger#scheduleIfNeeded` is significant.**
 Eligibility (`DiffEligibility`) is evaluated, then `sameContent`, then the skip is reported. Moving
 `sameContent` back after the eligibility branch would audit every new version of an over-sized
@@ -344,7 +357,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 252 tests (26 test classes)
+mvn -o install                                     # full build, 259 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -357,7 +370,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -371,9 +384,11 @@ this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-co
 the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`),
 `blobaudit-test-passthrough-contrib.xml` to make the converter output exactly the input
 (`PassThroughConverter`, contributed to the `ConversionService` as `blobauditPassThrough`),
-`blobaudit-test-smallvalue-config.xml` to set `maxValueLength` to 200, and
+`blobaudit-test-smallvalue-config.xml` to set `maxValueLength` to 200,
 `blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
-xpaths.
+xpaths with `<xpath>*</xpath>`, and `blobaudit-test-partial-config.xml` (used by
+`TestBlobDiffService`) to override nothing but `docTypes` and one property of the `converter`
+extractor.
 `blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
 `template-vocabulary`, which the platform ships in `org.nuxeo.ecm.default.config` — a bundle nothing
 in this test stack deploys, and without which the `eventTypes` directory never registers.
@@ -401,7 +416,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 39 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 40 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1065,6 +1080,27 @@ cited here as "code review 2026-10".
     `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`. Five of the six
     were checked to fail against the unpatched code, the equal-values one passes on both, as it
     must. 246 tests → 252.
+
+40. *(code review 2026-10, finding `API-01`, S2)* Neither descriptor implemented
+    `Descriptor#merge`, whose default returns the later contribution alone. A deployment override
+    setting nothing but `<docTypes>` therefore replaced the whole configuration: `enabled` fell back
+    to `false`, switching the feature off in silence, and `xpaths` to an empty list, which meant
+    "every blob xpath" and widened the scope it was meant to narrow. An extractor override
+    re-declaring one property lost its class, failed to instantiate, was skipped, and its formats
+    became unsupported.
+
+    Both descriptors now merge: boxed scalars, defaults in the getters, `getIfEmpty` for lists,
+    properties overlaid, a new instance every time. The meaning of an empty `xpaths` had to change
+    with it, since an override can no longer reset a list by leaving it empty: "every blob xpath"
+    is now `<xpath>*</xpath>`, and an empty list means `file:content`, the shipped value. `*` is
+    also accepted in `docTypes`, for symmetry. Nothing shipped used the empty-xpaths meaning; the
+    one test configuration that did, `blobaudit-test-allxpaths-config.xml`, now lists `*`.
+
+    Coverage: `TestBlobDiffConfigDescriptor` (a partial override, an explicit value still wins, the
+    `file:content` default, `*`), `TestExtractorSelection` (one property overridden, an extractor
+    disabled by name) and `TestBlobDiffService#testAPartialContributionOnlyChangesWhatItSets`, which
+    goes through the real registry. Six of the seven were checked to fail against the unpatched
+    code; `testAnExplicitValueStillWins` passes on both, as it must. 252 tests → 259.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

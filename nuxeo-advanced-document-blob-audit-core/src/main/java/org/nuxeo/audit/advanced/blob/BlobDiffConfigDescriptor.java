@@ -28,6 +28,10 @@ import org.nuxeo.runtime.services.config.ConfigurationService;
 /**
  * Global configuration. Everything is opt-in and bounded on purpose: diffing binaries is expensive
  * and copies business content outside of the source document.
+ * <p>
+ * Contributions <b>merge</b>: a later one only overrides what it sets, and an omitted element keeps
+ * the value of the earlier ones. A list replaces the earlier one only when it is not empty; list
+ * {@value #ANY} to mean every document type, or every blob xpath.
  *
  * @since 2025.1
  */
@@ -36,12 +40,24 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public static final String DEFAULT_ID = "default";
 
+    /** @since 2025.1 */
+    public static final String ANY = "*";
+
+    /** @since 2025.1 */
+    public static final String DEFAULT_XPATH = "file:content";
+
+    /** @since 2025.1 */
+    public static final long DEFAULT_MAX_BLOB_SIZE = 10L * 1024 * 1024;
+
+    /** @since 2025.1 */
+    public static final int DEFAULT_MAX_LINES = 10000;
+
     @XNode("@enabled")
-    protected boolean enabled = false;
+    protected Boolean enabled;
 
     /** Blobs bigger than this (bytes) are never extracted. */
     @XNode("maxBlobSize")
-    protected long maxBlobSize = 10L * 1024 * 1024;
+    protected Long maxBlobSize;
 
     /**
      * Hard cap on extracted units.
@@ -52,11 +68,11 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * while keeping the worst case near one second per work.
      */
     @XNode("maxLines")
-    protected int maxLines = 10000;
+    protected Integer maxLines;
 
     /** Hard cap on reported differences. */
     @XNode("maxDiffEntries")
-    protected int maxDiffEntries = 5000;
+    protected Integer maxDiffEntries;
 
     /**
      * Hard cap on the size of the produced unified diff, in characters.
@@ -69,7 +85,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * @since 2025.1
      */
     @XNode("maxDiffChars")
-    protected int maxDiffChars = TextDiffer.DEFAULT_MAX_DIFF_CHARS;
+    protected Integer maxDiffChars;
 
     /**
      * A single extracted unit longer than this is elided in the diff body.
@@ -77,14 +93,14 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * @since 2025.1
      */
     @XNode("maxValueLength")
-    protected int maxValueLength = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+    protected Integer maxValueLength;
 
     /**
      * Image analysis level. Level 0 disables image processing; level 1 enables digest-based image
      * inventory. Higher levels are reserved for future, more expensive analysis modes.
      */
     @XNode("imageAnalysisLevel")
-    protected int imageAnalysisLevel = 0;
+    protected Integer imageAnalysisLevel;
 
     public static final int MIN_IMAGE_ANALYSIS_LEVEL = 0;
 
@@ -99,11 +115,11 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     @XNode("auditorsGroup")
     protected String auditorsGroup;
 
-    /** Empty means "every document type". */
+    /** Empty or {@value #ANY} means "every document type". */
     @XNodeList(value = "docTypes/docType", type = ArrayList.class, componentType = String.class)
     protected List<String> docTypes = new ArrayList<>();
 
-    /** Empty means "every blob xpath". */
+    /** Empty means {@value #DEFAULT_XPATH}, {@value #ANY} means "every blob xpath". */
     @XNodeList(value = "xpaths/xpath", type = ArrayList.class, componentType = String.class)
     protected List<String> xpaths = new ArrayList<>();
 
@@ -112,34 +128,62 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return DEFAULT_ID;
     }
 
+    /**
+     * Overlays a later contribution on this one. The default merge returned the later contribution
+     * alone, so an override setting only {@code docTypes} silently disabled the feature and emptied
+     * {@code xpaths}, which then meant "every blob xpath".
+     *
+     * @since 2025.1
+     */
+    @Override
+    public Descriptor merge(Descriptor o) {
+        BlobDiffConfigDescriptor other = (BlobDiffConfigDescriptor) o;
+        BlobDiffConfigDescriptor merged = new BlobDiffConfigDescriptor();
+        merged.enabled = either(other.enabled, enabled);
+        merged.maxBlobSize = either(other.maxBlobSize, maxBlobSize);
+        merged.maxLines = either(other.maxLines, maxLines);
+        merged.maxDiffEntries = either(other.maxDiffEntries, maxDiffEntries);
+        merged.maxDiffChars = either(other.maxDiffChars, maxDiffChars);
+        merged.maxValueLength = either(other.maxValueLength, maxValueLength);
+        merged.imageAnalysisLevel = either(other.imageAnalysisLevel, imageAnalysisLevel);
+        merged.auditorsGroup = either(other.auditorsGroup, auditorsGroup);
+        merged.docTypes = Descriptor.getIfEmpty(other.docTypes, docTypes);
+        merged.xpaths = Descriptor.getIfEmpty(other.xpaths, xpaths);
+        return merged;
+    }
+
+    protected static <T> T either(T value, T fallback) {
+        return value != null ? value : fallback;
+    }
+
     public boolean isEnabled() {
-        return enabled;
+        return Boolean.TRUE.equals(enabled);
     }
 
     public long getMaxBlobSize() {
-        return maxBlobSize;
+        return either(maxBlobSize, DEFAULT_MAX_BLOB_SIZE);
     }
 
     public int getMaxLines() {
-        return maxLines;
+        return either(maxLines, DEFAULT_MAX_LINES);
     }
 
     public int getMaxDiffEntries() {
-        return maxDiffEntries;
+        return either(maxDiffEntries, TextDiffer.DEFAULT_MAX_DIFF_ENTRIES);
     }
 
     /** @since 2025.1 */
     public int getMaxDiffChars() {
-        return maxDiffChars;
+        return either(maxDiffChars, TextDiffer.DEFAULT_MAX_DIFF_CHARS);
     }
 
     /** @since 2025.1 */
     public int getMaxValueLength() {
-        return maxValueLength;
+        return either(maxValueLength, TextDiffer.DEFAULT_MAX_VALUE_LENGTH);
     }
 
     public int getImageAnalysisLevel() {
-        return imageAnalysisLevel;
+        return either(imageAnalysisLevel, 0);
     }
 
     /**
@@ -154,7 +198,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * "configured value differs from the normalized one" warning in {@code start()} a one-shot.
      */
     public int normalizeImageAnalysisLevel() {
-        return Math.max(MIN_IMAGE_ANALYSIS_LEVEL, Math.min(MAX_IMAGE_ANALYSIS_LEVEL, imageAnalysisLevel));
+        return Math.max(MIN_IMAGE_ANALYSIS_LEVEL, Math.min(MAX_IMAGE_ANALYSIS_LEVEL, getImageAnalysisLevel()));
     }
 
     public List<String> getDocTypes() {
@@ -181,15 +225,25 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return property == null || property.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP : property.trim();
     }
 
+    /** The blob xpaths diffed, {@value #DEFAULT_XPATH} when none is configured. */
     public List<String> getXPaths() {
-        return xpaths;
+        return xpaths.isEmpty() ? List.of(DEFAULT_XPATH) : xpaths;
+    }
+
+    /**
+     * Whether every blob xpath of the document type is diffed.
+     *
+     * @since 2025.1
+     */
+    public boolean isEveryXPath() {
+        return xpaths.contains(ANY);
     }
 
     public boolean acceptsDocType(String docType) {
-        return docTypes.isEmpty() || docTypes.contains(docType);
+        return docTypes.isEmpty() || docTypes.contains(ANY) || docTypes.contains(docType);
     }
 
     public boolean acceptsXPath(String xpath) {
-        return xpaths.isEmpty() || xpaths.contains(xpath);
+        return isEveryXPath() || getXPaths().contains(xpath);
     }
 }

@@ -15,15 +15,19 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
+import org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor;
 
 /**
- * Unit tests for mime type matching in {@link ExtractorDescriptor}. No runtime needed.
+ * Unit tests for mime type matching and merging in {@link ExtractorDescriptor}. No runtime needed.
  * <p>
  * Getting this wrong is silent: a mistyped mime type simply means no extractor is found and the
  * change is logged without a diff, with no error anywhere.
@@ -91,5 +95,50 @@ public class TestExtractorSelection {
         assertTrue(descriptor.accepts("application/vnd.ms-excel"));
         assertTrue(descriptor.accepts("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
         assertFalse(descriptor.accepts("application/msword"));
+    }
+
+    /**
+     * API-01 (code review 2026-10): re-declaring one property of an extractor must not lose the
+     * rest of it. The default merge returned the override alone, with no class: the extractor
+     * failed to instantiate, was skipped, and its formats became unsupported.
+     */
+    @Test
+    public void testOverridingOnePropertyKeepsTheRestOfTheExtractor() {
+        ExtractorDescriptor shipped = descriptor("application/pdf");
+        shipped.name = "converter";
+        shipped.klass = ConverterTextExtractor.class;
+        shipped.order = 90;
+        shipped.properties = new HashMap<>(Map.of("converter", "any2text", "minLineLength", "1"));
+
+        ExtractorDescriptor override = new ExtractorDescriptor();
+        override.name = "converter";
+        override.properties = new HashMap<>(Map.of("minLineLength", "2"));
+
+        ExtractorDescriptor merged = (ExtractorDescriptor) shipped.merge(override);
+
+        assertEquals(ConverterTextExtractor.class, merged.getKlass());
+        assertEquals(90, merged.getOrder());
+        assertTrue(merged.isEnabled());
+        assertEquals(List.of("application/pdf"), merged.getMimeTypes());
+        assertEquals(Map.of("converter", "any2text", "minLineLength", "2"), merged.getProperties());
+        assertEquals("merge must not mutate the earlier contribution", "1",
+                shipped.getProperties().get("minLineLength"));
+    }
+
+    /** Disabling an extractor by name, the documented way to turn one off, still works. */
+    @Test
+    public void testDisablingAnExtractorKeepsItsDefinition() {
+        ExtractorDescriptor shipped = descriptor("application/pdf");
+        shipped.name = "converter";
+        shipped.klass = ConverterTextExtractor.class;
+
+        ExtractorDescriptor override = new ExtractorDescriptor();
+        override.name = "converter";
+        override.enabled = false;
+
+        ExtractorDescriptor merged = (ExtractorDescriptor) shipped.merge(override);
+
+        assertFalse(merged.isEnabled());
+        assertEquals(ConverterTextExtractor.class, merged.getKlass());
     }
 }

@@ -303,11 +303,11 @@ public class BlobModificationListener implements EventListener {
     /**
      * The blob xpaths to inspect on this document type.
      * <p>
-     * When {@code <xpaths>} is configured - the shipped default is {@code file:content} - it is
-     * used verbatim: a path holding no blob simply yields {@code null} in {@link #safeGetBlob} and
-     * is skipped downstream, so there is nothing to pre-filter.
+     * Unless {@code <xpaths>} lists {@code *}, the configured paths - {@code file:content} by
+     * default - are used verbatim: a path holding no blob simply yields {@code null} in
+     * {@link #safeGetBlob} and is skipped downstream, so there is nothing to pre-filter.
      * <p>
-     * Otherwise the paths are derived from the <b>document type</b> and cached. The previous
+     * With {@code *}, the paths are derived from the <b>document type</b> and cached. The previous
      * implementation walked every schema and every property of both version documents and called
      * {@code property.getValue()} on each, forcing the load of every complex and list property
      * inside the user transaction, on every single check-in. A document type does not change
@@ -315,7 +315,7 @@ public class BlobModificationListener implements EventListener {
      */
     protected List<String> blobXPaths(DocumentModel liveDoc, DocumentModel version,
             BlobDiffConfigDescriptor config) {
-        if (!config.getXPaths().isEmpty()) {
+        if (!config.isEveryXPath()) {
             return config.getXPaths();
         }
         List<String> templates = BLOB_XPATH_TEMPLATES.computeIfAbsent(liveDoc.getType(),

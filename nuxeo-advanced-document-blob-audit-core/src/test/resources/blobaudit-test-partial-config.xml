@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.partial">
+
+  <require>org.nuxeo.audit.advanced.blob.test.config</require>
+
+  <!--
+    API-01 (code review 2026-10): the typical "narrow it down" override. It sets nothing but what it
+    means to change, and everything else must keep the value of the earlier contributions.
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config>
+      <docTypes>
+        <docType>File</docType>
+      </docTypes>
+    </config>
+  </extension>
+
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+    <extractor name="converter">
+      <property name="minLineLength">2</property>
+    </extractor>
+  </extension>
+
+</component>
