@@ -112,7 +112,8 @@ public class BlobDiffRetryOp {
                 str(diff, XP_NEW_VERSION_ID),
                 str(diff, XP_NEW_VERSION_LABEL),
                 str(diff, XP_VERSION_SERIES_ID));
-        BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), diff.getTitle(), str(diff, XP_XPATH),
+        BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), sourceTitle(diff),
+                str(diff, XP_XPATH),
                 oldProvider, oldKey, str(diff, XP_OLD_FILENAME), oldMime == null ? newMime : oldMime,
                 str(diff, XP_OLD_DIGEST), length(diff, XP_OLD_LENGTH), newProvider, newKey,
                 str(diff, XP_NEW_FILENAME), newMime, str(diff, XP_NEW_DIGEST), length(diff, XP_NEW_LENGTH),
@@ -179,6 +180,13 @@ public class BlobDiffRetryOp {
     protected String repo(DocumentModel diff) {
         String repo = str(diff, XP_SOURCE_REPO);
         return repo == null ? session.getRepositoryName() : repo;
+    }
+
+    /** The diff is titled {@code <source title> - <xpath>}; passed whole, every retry appended the xpath again. */
+    protected static String sourceTitle(DocumentModel diff) {
+        String title = diff.getTitle();
+        String suffix = " - " + str(diff, XP_XPATH);
+        return title != null && title.endsWith(suffix) ? title.substring(0, title.length() - suffix.length()) : null;
     }
 
     protected static String str(DocumentModel doc, String xpath) {

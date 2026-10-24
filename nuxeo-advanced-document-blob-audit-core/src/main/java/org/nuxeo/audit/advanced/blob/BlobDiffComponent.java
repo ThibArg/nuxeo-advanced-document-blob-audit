@@ -482,12 +482,12 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         calendar.setTime(date);
         diffDoc.setPropertyValue(XP_DATE, calendar);
         diffDoc.setPropertyValue(XP_MIMETYPE, newBlob != null ? newBlob.getMimeType() : null);
-        diffDoc.setPropertyValue(XP_OLD_FILENAME, oldBlob != null ? oldBlob.getFilename() : null);
-        diffDoc.setPropertyValue(XP_NEW_FILENAME, newBlob != null ? newBlob.getFilename() : null);
-        diffDoc.setPropertyValue(XP_OLD_DIGEST, oldBlob != null ? oldBlob.getDigest() : null);
-        diffDoc.setPropertyValue(XP_NEW_DIGEST, newBlob != null ? newBlob.getDigest() : null);
-        diffDoc.setPropertyValue(XP_STATUS, status);
         FrozenBlobs keys = frozen == null ? FrozenBlobs.NONE : frozen;
+        diffDoc.setPropertyValue(XP_OLD_FILENAME, oldBlob != null ? oldBlob.getFilename() : keys.oldFilename());
+        diffDoc.setPropertyValue(XP_NEW_FILENAME, newBlob != null ? newBlob.getFilename() : keys.newFilename());
+        diffDoc.setPropertyValue(XP_OLD_DIGEST, oldBlob != null ? oldBlob.getDigest() : keys.oldDigest());
+        diffDoc.setPropertyValue(XP_NEW_DIGEST, newBlob != null ? newBlob.getDigest() : keys.newDigest());
+        diffDoc.setPropertyValue(XP_STATUS, status);
         diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_PROVIDER, keys.oldProviderId());
         diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, keys.oldKey());
         diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_MIMETYPE, keys.oldMimeType());

@@ -390,7 +390,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 272 tests (26 test classes)
+mvn -o install                                     # full build, 274 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -449,7 +449,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 46 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 47 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1246,6 +1246,22 @@ cited here as "code review 2026-10".
     `#testACellFilledBeforeTheCutDoesNotReportAPhantomRemoval` and
     `#testChangesBeforeTheCutAreStillReported`, all four checked to fail against the unpatched code,
     and `#testATrailingRemovalIsReportedWhenNothingIsCut`, which passes on both. 267 tests → 272.
+
+47. *(code review 2026-10, finding `COR-06`, S3)* A diff filed in error without readable blobs
+    (frozen pair unreadable, source deleted) was stored without the filenames and digests the work
+    held, since `createDiffDocument` read them off `null` blobs. A retry, rebuilt from the diff,
+    could not recover them, so even a successful retry produced a diff without filenames. The
+    retry also passed the diff title, `<source title> - <xpath>`, as the source title, and the
+    source-missing branch appended the xpath again on every retry.
+
+    `FrozenBlobs` now carries both filenames and digests (an 8-argument constructor is kept for the
+    storage identity alone), `createDiffDocument` falls back to them when a blob is `null`, and
+    `BlobDiffRetryOp#sourceTitle` strips the ` - <xpath>` suffix. The review suggested passing
+    `null` instead; stripping keeps the title readable when the source is gone.
+
+    Coverage: `TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests` and
+    `#testARetryKeepsTheTitleAndTheFilenames`, both checked to fail against the unpatched code.
+    272 tests → 274.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

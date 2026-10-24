@@ -56,6 +56,7 @@ import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.io.registry.MarshallerHelper;
 import org.nuxeo.ecm.core.io.registry.context.RenderingContext;
 import org.nuxeo.ecm.core.test.CoreFeature;
+import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
@@ -535,6 +536,56 @@ public class TestBlobDiffManagement {
         assertEquals(1, diffs.size());
         assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
         assertFalse(session.exists(stuck.getRef()));
+    }
+
+    /**
+     * COR-06 (code review 2026-10): a diff filed in error because its blobs could not be read was
+     * stored without the filenames and digests the work held, and a retry, rebuilt from the diff,
+     * could never get them back.
+     */
+    @Test
+    public void testAnErrorDiffKeepsTheFilenamesAndDigests() throws Exception {
+        DocumentModel source = file("unreadable", textBlob("x", "text/plain", "x.txt"));
+        txFeature.nextTransaction();
+        BlobDiffWork work = new BlobDiffWork(session.getRepositoryName(), source.getId(), "Source", "file:content",
+                "no-such-provider", "k1", "before.txt", "text/plain", "d1", 1, "no-such-provider", "k2",
+                "after.txt", "text/plain", "d2", 1, "jdoe", System.currentTimeMillis(),
+                UUID.randomUUID().toString(), VersionContext.NONE);
+        Framework.getService(WorkManager.class).schedule(work, true);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(source.getId());
+        assertEquals(1, diffs.size());
+        DocumentModel diff = diffs.get(0);
+        assertEquals(BlobAuditConstants.STATUS_ERROR, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals("before.txt", diff.getPropertyValue(BlobAuditConstants.XP_OLD_FILENAME));
+        assertEquals("after.txt", diff.getPropertyValue(BlobAuditConstants.XP_NEW_FILENAME));
+        assertEquals("d1", diff.getPropertyValue(BlobAuditConstants.XP_OLD_DIGEST));
+        assertEquals("d2", diff.getPropertyValue(BlobAuditConstants.XP_NEW_DIGEST));
+    }
+
+    /**
+     * COR-06: the retry passed the title of the diff, {@code <source title> - <xpath>}, as the title
+     * of the source, so a source gone for good got the xpath appended again on every retry.
+     */
+    @Test
+    public void testARetryKeepsTheTitleAndTheFilenames() throws Exception {
+        FrozenBlobs keys = new FrozenBlobs("no-such-provider", "k1", "text/plain", 1, "no-such-provider", "k2",
+                "text/plain", 1, "before.txt", "after.txt", "d1", "d2");
+        DocumentModel failed = blobDiffService.createDiffDocument(session, "gone-source", session.getRepositoryName(),
+                "Report", "file:content", null, null, keys, "jdoe", new Date(), null, BlobAuditConstants.STATUS_ERROR,
+                UUID.randomUUID().toString());
+        session.save();
+        txFeature.nextTransaction();
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf("gone-source");
+        assertEquals(1, diffs.size());
+        assertEquals("Report - file:content", diffs.get(0).getTitle());
+        assertEquals("before.txt", diffs.get(0).getPropertyValue(BlobAuditConstants.XP_OLD_FILENAME));
+        assertEquals("after.txt", diffs.get(0).getPropertyValue(BlobAuditConstants.XP_NEW_FILENAME));
     }
 
     /** A diff with the given status on two stored text blobs one line apart. */

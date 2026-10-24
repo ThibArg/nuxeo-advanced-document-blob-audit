@@ -231,7 +231,7 @@ public class BlobDiffWork extends AbstractWork {
 
     protected FrozenBlobs frozen() {
         return new FrozenBlobs(oldBlobProviderId, oldBlobKey, oldMimeType, oldLength, newBlobProviderId, newBlobKey,
-                newMimeType, newLength);
+                newMimeType, newLength, oldFilename, newFilename, oldDigest, newDigest);
     }
 
     /**
