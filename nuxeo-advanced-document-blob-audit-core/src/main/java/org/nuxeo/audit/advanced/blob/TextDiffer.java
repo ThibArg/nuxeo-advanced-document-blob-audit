@@ -17,6 +17,7 @@ package org.nuxeo.audit.advanced.blob;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -132,11 +133,17 @@ public class TextDiffer {
                 : value.substring(0, maxValueLength) + ELLIPSIS + value.length() + " chars]";
     }
 
+    /**
+     * Compares two extractions.
+     * <p>
+     * Each side may be cut at {@code maxLines}, independently. Past the last unit the two windows
+     * share, a unit missing from a truncated side may simply lie beyond its cut: it is neither
+     * reported nor counted, rather than reported as an addition or a removal that never happened.
+     * Before that point, both windows cover the same part of the document, so the facts hold.
+     */
     public DiffResult diff(DiffableContent oldContent, DiffableContent newContent) {
         boolean keyed = oldContent.keyed() && newContent.keyed();
-        boolean truncated = oldContent.truncated() || newContent.truncated();
-        return keyed ? diffKeyed(oldContent, newContent, truncated)
-                : diffPositional(oldContent, newContent, truncated);
+        return keyed ? diffKeyed(oldContent, newContent) : diffPositional(oldContent, newContent);
     }
 
     /**
@@ -166,9 +173,12 @@ public class TextDiffer {
 
     /* ------------------------------------------------------------------ keyed */
 
-    protected DiffResult diffKeyed(DiffableContent oldContent, DiffableContent newContent, boolean truncated) {
+    protected DiffResult diffKeyed(DiffableContent oldContent, DiffableContent newContent) {
+        boolean truncated = oldContent.truncated() || newContent.truncated();
         Map<String, String> oldMap = toMap(oldContent);
         Map<String, String> newMap = toMap(newContent);
+        Set<String> oldUnknown = newContent.truncated() ? pastLastShared(oldMap, newMap) : Set.of();
+        Set<String> newUnknown = oldContent.truncated() ? pastLastShared(newMap, oldMap) : Set.of();
 
         Set<String> keys = new LinkedHashSet<>(oldMap.keySet());
         keys.addAll(newMap.keySet());
@@ -183,7 +193,7 @@ public class TextDiffer {
         for (String key : keys) {
             String oldValue = oldMap.get(key);
             String newValue = newMap.get(key);
-            if (Objects.equals(oldValue, newValue)) {
+            if (Objects.equals(oldValue, newValue) || oldUnknown.contains(key) || newUnknown.contains(key)) {
                 continue;
             }
             if (oldValue == null) {
@@ -228,12 +238,30 @@ public class TextDiffer {
         return map;
     }
 
+    /**
+     * Keys of {@code side}, in extraction order, that come after the last one {@code other} also
+     * holds, and that {@code other} does not hold. Both windows follow the order of the document, so
+     * a key before a shared one would have been extracted on both sides.
+     */
+    protected static Set<String> pastLastShared(Map<String, String> side, Map<String, String> other) {
+        Set<String> past = new HashSet<>();
+        for (String key : side.keySet()) {
+            if (other.containsKey(key)) {
+                past.clear();
+            } else {
+                past.add(key);
+            }
+        }
+        return past;
+    }
+
     /* ------------------------------------------------------------- positional */
 
-    protected DiffResult diffPositional(DiffableContent oldContent, DiffableContent newContent, boolean truncated) {
+    protected DiffResult diffPositional(DiffableContent oldContent, DiffableContent newContent) {
+        boolean truncated = oldContent.truncated() || newContent.truncated();
         List<String> a = render(oldContent);
         List<String> b = render(newContent);
-        List<Edit> edits = coalesce(positionalEdits(a, b));
+        List<Edit> edits = coalesce(positionalEdits(a, b, oldContent.truncated(), newContent.truncated()));
 
         int added = 0;
         int removed = 0;
@@ -309,8 +337,12 @@ public class TextDiffer {
      * alignment that pairs those two lines, so {@code LCS(a, b) = prefix + LCS(middle) + suffix}:
      * trimming preserves optimality, which {@code TestTextDifferScaling} asserts against a
      * brute-force oracle.
+     * <p>
+     * Past the last aligned line, a removal is unknown when the new side is truncated and an
+     * addition when the old side is: the line may lie beyond the cut. Those edits are dropped.
      */
-    protected List<Edit> positionalEdits(List<String> a, List<String> b) {
+    protected List<Edit> positionalEdits(List<String> a, List<String> b, boolean oldTruncated,
+            boolean newTruncated) {
         int n = a.size();
         int m = b.size();
         int max = Math.min(n, m);
@@ -326,22 +358,19 @@ public class TextDiffer {
             suffix++;
         }
 
-        if (prefix == 0 && suffix == 0) {
-            return lcsEdits(a, b);
-        }
-        return lcsEdits(a.subList(prefix, n - suffix), b.subList(prefix, m - suffix));
-    }
-
-    /**
-     * Computes the edit script between two sequences using Hirschberg's algorithm.
-     * <p>
-     * Memory is O(min(n,m)); time stays O(n*m). The produced alignment is optimal, i.e. it preserves
-     * exactly as many lines as the longest common subsequence.
-     */
-    protected List<Edit> lcsEdits(List<String> a, List<String> b) {
         List<Edit> edits = new ArrayList<>();
-        new Alignment(a, b, edits).align(0, a.size(), 0, b.size());
-        return edits;
+        Alignment alignment = new Alignment(a.subList(prefix, n - suffix), b.subList(prefix, m - suffix), edits);
+        alignment.align(0, n - prefix - suffix, 0, m - prefix - suffix);
+        if (suffix > 0 || !(oldTruncated || newTruncated)) {
+            return edits;
+        }
+        List<Edit> known = new ArrayList<>(edits.subList(0, alignment.tailStart));
+        for (Edit edit : edits.subList(alignment.tailStart, edits.size())) {
+            if (edit.type == EditType.REMOVE ? !newTruncated : !oldTruncated) {
+                known.add(edit);
+            }
+        }
+        return known;
     }
 
     /**
@@ -363,6 +392,9 @@ public class TextDiffer {
         protected final int[] b;
 
         protected final List<Edit> out;
+
+        /** Index in {@link #out} of the first edit after the last aligned pair of lines. */
+        protected int tailStart;
 
         protected Alignment(List<String> aValues, List<String> bValues, List<Edit> out) {
             this.aValues = aValues;
@@ -429,6 +461,7 @@ public class TextDiffer {
                     for (int j = bStart; j < match; j++) {
                         out.add(new Edit(EditType.ADD, null, bValues.get(j)));
                     }
+                    tailStart = out.size();
                     for (int j = match + 1; j < bEnd; j++) {
                         out.add(new Edit(EditType.ADD, null, bValues.get(j)));
                     }

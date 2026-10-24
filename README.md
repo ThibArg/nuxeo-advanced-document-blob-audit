@@ -371,6 +371,8 @@ Four options bound the work, at two different stages, and they are not interchan
 
 When either cap is reached, the counters `bdiff:added`, `bdiff:removed` and `bdiff:changed` stay **exact** — counting continues past the budget — and `bdiff:truncated` is set. Only the rendering is shortened, never the accounting.
 
+`maxLines` cuts each side on its own, so the two windows do not end at the same place in the document. Past the last unit both windows share, a unit missing from a cut side may simply lie beyond its cut: it is neither reported nor counted. A cell filled near the top of a large workbook is therefore reported as one addition, not as one addition plus the removal of the cell it pushed out of the window. Before that point, both windows cover the same part of the document and every reported change is a fact.
+
 > [!NOTE]
 > A value longer than `maxValueLength` is shown as its beginning, followed by its length and a short SHA-256 of the whole (`X… [32767 chars, sha256:…]`). Two values that only differ past the beginning are still reported as a modification, and their digests tell them apart in the report.
 

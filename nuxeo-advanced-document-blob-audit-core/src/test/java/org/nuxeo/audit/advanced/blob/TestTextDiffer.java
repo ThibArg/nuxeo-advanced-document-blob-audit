@@ -265,4 +265,67 @@ public class TestTextDiffer {
         // ContentLine.render() emits "key = value", so both sides align
         assertTrue(result.isEmpty());
     }
+
+    /* ------------------------------------------------ COR-04: truncated windows */
+
+    protected static DiffableContent cut(DiffableContent content) {
+        return new DiffableContent(content.lines(), content.keyed(), true);
+    }
+
+    /**
+     * COR-04 (code review 2026-10): both sides are cut at {@code maxLines}. A line inserted before
+     * the cut pushes the last line of the old window out of the new one, which was reported as a
+     * removal that never happened.
+     */
+    @Test
+    public void testALineInsertedBeforeTheCutDoesNotReportAPhantomRemoval() {
+        DiffResult result = differ.diff(cut(positional("L1", "L2", "L3", "L4")),
+                cut(positional("L1", "NEW", "L2", "L3")));
+
+        assertEquals(1, result.added());
+        assertEquals(0, result.removed());
+        assertEquals(0, result.changed());
+        assertTrue(result.truncated());
+    }
+
+    /** COR-04, the other way round: a line removed before the cut pulls in one never seen before. */
+    @Test
+    public void testALineRemovedBeforeTheCutDoesNotReportAPhantomAddition() {
+        DiffResult result = differ.diff(cut(positional("L1", "L2", "L3", "L4")),
+                cut(positional("L1", "L3", "L4", "L5")));
+
+        assertEquals(0, result.added());
+        assertEquals(1, result.removed());
+        assertEquals(0, result.changed());
+    }
+
+    /** COR-04, keyed: a cell filled before the cut does not make the last cell of the window vanish. */
+    @Test
+    public void testACellFilledBeforeTheCutDoesNotReportAPhantomRemoval() {
+        DiffResult result = differ.diff(cut(keyed("S!A1", "a", "S!A3", "c", "S!A4", "d")),
+                cut(keyed("S!A1", "a", "S!A2", "b", "S!A3", "c")));
+
+        assertEquals(1, result.added());
+        assertEquals(0, result.removed());
+        assertTrue(result.unified().contains("+ S!A2 = b"));
+    }
+
+    /** Before the last shared unit, both windows cover the same part: a change there is a fact. */
+    @Test
+    public void testChangesBeforeTheCutAreStillReported() {
+        DiffResult result = differ.diff(cut(keyed("S!A1", "a", "S!A2", "b", "S!A3", "c")),
+                cut(keyed("S!A1", "A", "S!A3", "c", "S!A4", "d")));
+
+        assertEquals(1, result.changed());
+        assertEquals(1, result.removed());
+        assertEquals(0, result.added());
+    }
+
+    /** Without a cut, a unit gone from the end is a real removal. */
+    @Test
+    public void testATrailingRemovalIsReportedWhenNothingIsCut() {
+        DiffResult result = differ.diff(positional("L1", "L2", "L3"), positional("L1", "L2"));
+
+        assertEquals(1, result.removed());
+    }
 }

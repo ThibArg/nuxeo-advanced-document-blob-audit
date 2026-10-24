@@ -279,6 +279,14 @@ monotone, and `added` / `removed` / `changed` keep counting past the budget so t
 Any change to `diffKeyed` or `diffPositional` must preserve all three properties.
 Coverage: `TestTextDifferBounding`.
 
+**A unit missing from a cut side is unknown past the last shared unit** (item 46). Each side is cut
+at `maxLines` on its own. Keyed: `TextDiffer#pastLastShared` drops, on each side, the keys after
+the last one both windows hold when the other side is cut. Positional: `Alignment#tailStart` marks
+the first edit after the last aligned pair, and `positionalEdits` drops the removals there when the
+new side is cut and the additions when the old side is. Both rely on extraction following document
+order on both versions, which every built-in extractor does. Coverage: `TestTextDiffer`, the four
+`COR-04` cases.
+
 **Extracted values are bounded when they are created** (item 39). `BlobDiffComponent#resolve`
 hands the configured `maxValueLength` to every extractor through `init()`, as the
 `maxValueLength` property, and the four text extractors build every value through
@@ -382,7 +390,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 267 tests (26 test classes)
+mvn -o install                                     # full build, 272 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -441,7 +449,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 45 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 46 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1220,6 +1228,24 @@ cited here as "code review 2026-10".
     `#testAChangeInAListThatAlsoLostAnEntryIsAuditedWithoutADiff` (all three checked to fail against
     the unpatched code) and `#testReplacingAnAttachmentInPlaceIsStillDiffed`, which passes on both,
     as it must. 263 tests → 267.
+
+46. *(code review 2026-10, finding `COR-04`, S3)* A truncated extraction window yielded phantom
+    deletions and additions. Each side is cut at `maxLines` independently and both windows were
+    compared as if complete, so a cell filled before the cut pushed the last cell of the old window
+    out of the new one, reported and counted as removed: "1 addition, 1 deletion (truncated)" for
+    one filled cell. The `truncated` flag said the diff was partial, not that some of its facts
+    were false.
+
+    Past the last unit both windows share, a unit missing from a cut side is now unknown: neither
+    reported nor counted (see the invariant above). Before it, both windows cover the same part of
+    the document, so removals and additions there are still reported. `lcsEdits` was folded into
+    `positionalEdits`, which now needs the `Alignment` to read `tailStart`.
+
+    Coverage: `TestTextDiffer#testALineInsertedBeforeTheCutDoesNotReportAPhantomRemoval`,
+    `#testALineRemovedBeforeTheCutDoesNotReportAPhantomAddition`,
+    `#testACellFilledBeforeTheCutDoesNotReportAPhantomRemoval` and
+    `#testChangesBeforeTheCutAreStillReported`, all four checked to fail against the unpatched code,
+    and `#testATrailingRemovalIsReportedWhenNothingIsCut`, which passes on both. 267 tests → 272.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
