@@ -57,27 +57,48 @@
         _lines: { type: Array, value: function () { return []; } },
         _visible: { type: Array, value: function () { return []; } }
       },
+      /*
+        A request still in flight belongs to the previous diff: it is aborted, and whatever it
+        returns is ignored, so its lines can never be rendered under the metadata of the new one.
+        Same rule as nuxeo-resource, which aborts superseded requests.
+      */
       _load: function (url) {
+        if (this._controller) {
+          this._controller.abort();
+          this._controller = null;
+        }
         this.set('_lines', []);
         this.set('_visible', []);
         this.error = false;
+        this.loading = false;
         if (!url) {
           return;
         }
+        var controller = new AbortController();
+        this._controller = controller;
+        var current = function () { return this._controller === controller; }.bind(this);
         this.loading = true;
-        fetch(url, { credentials: 'include' })
+        fetch(url, { credentials: 'include', signal: controller.signal })
           .then(function (response) {
             if (!response.ok) { throw new Error(response.status); }
             return response.text();
           })
           .then(function (text) {
+            if (!current()) { return; }
             var lines = text.split(/\r?\n/);
             if (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
             this.set('_lines', lines);
             this.set('_visible', lines.slice(0, this.pageSize));
           }.bind(this))
-          .catch(function () { this.error = true; }.bind(this))
-          .then(function () { this.loading = false; }.bind(this));
+          .catch(function () {
+            if (current()) { this.error = true; }
+          }.bind(this))
+          .then(function () {
+            if (current()) {
+              this.loading = false;
+              this._controller = null;
+            }
+          }.bind(this));
       },
       _more: function () {
         this.set('_visible', this._lines.slice(0, this._visible.length + this.pageSize));

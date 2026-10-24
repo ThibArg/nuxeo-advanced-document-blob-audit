@@ -450,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 52 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 53 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1316,6 +1316,17 @@ cited here as "code review 2026-10".
     No automated coverage. Manual check: filter the audit on a user, open a document whose diffs
     come from several users, click "Open in the content changes audit": the result count must
     match the tab.
+
+53. *(code review 2026-10, finding `WEB-05`, S3)* `nuxeo-blobdiff-viewer` never aborted nor
+    discarded the previous request when its `url` changed: a large diff still downloading when the
+    viewer was handed the next one could render its lines under the metadata of the other, and
+    clear `loading` while the second one was still loading. Masked today by item 26, which keeps
+    the layout from receiving the new document; reachable as soon as item 26 is fixed. `_load` now
+    aborts the request in flight through an `AbortController` and ignores any response that is not
+    the current one, as `nuxeo-resource` does.
+
+    No automated coverage. Manual check, once item 26 is fixed: open a large diff, move to the next
+    one within a second; only the second diff's lines must show.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
