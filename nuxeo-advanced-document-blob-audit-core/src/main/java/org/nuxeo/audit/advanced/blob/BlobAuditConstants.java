@@ -176,6 +176,14 @@ public class BlobAuditConstants {
 
     public static final String STATUS_ERROR = "error";
 
+    /**
+     * An {@code error} diff whose replay {@code BlobDiff.Retry} has scheduled. Put back to
+     * {@link #STATUS_ERROR} if the replay fails for good; the diff is replaced otherwise.
+     *
+     * @since 2025.1
+     */
+    public static final String STATUS_RETRYING = "retrying";
+
     /** Summary of an error BlobDiff whose source was deleted before the diff could run. */
     public static final String SUMMARY_SOURCE_MISSING = "Source document no longer exists";
 

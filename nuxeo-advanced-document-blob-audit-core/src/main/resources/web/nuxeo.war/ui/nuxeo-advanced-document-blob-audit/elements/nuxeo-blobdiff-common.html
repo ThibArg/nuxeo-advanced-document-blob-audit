@@ -79,6 +79,12 @@
         }
       },
 
+      // "retrying" too: a replay lost with a restarted node must be requestable again. The server
+      // refuses a second one while the first is still queued or running.
+      isRetryable: function (status) {
+        return status === 'error' || status === 'retrying';
+      },
+
       /** "+ added", "- removed", "~ changed" and "# section" lines of the unified diff. */
       lineClass: function (line) {
         if (!line) { return 'same'; }

@@ -99,7 +99,8 @@
       },
       _canRetry: function (doc) {
         var p = doc && doc.properties;
-        return !!p && p['bdiff:status'] === 'error' && !!p['bdiff:oldBlobKey'] && !!p['bdiff:newBlobKey'];
+        return !!p && Nuxeo.BlobAudit.isRetryable(p['bdiff:status']) && !!p['bdiff:oldBlobKey'] &&
+          !!p['bdiff:newBlobKey'];
       },
       _retry: function () {
         this.$.retryOp.input = this.document.uid;

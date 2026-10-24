@@ -161,7 +161,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
-| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, error (see the note above on how the two skip statuses are reached) |
+| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, error (see the note above on how the two skip statuses are reached), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
@@ -195,6 +195,8 @@ The synchronous side must stay cheap, and the asynchronous side must be safe to 
 
 **Retries.** `getRetryCount()` returns 2. Transient failures are the common case here (an S3 read timing out, a converter momentarily unavailable, a concurrent update on the dated container), and retrying is only safe because of the idempotence guard above.
 
+**Replays.** The work scheduled by `BlobDiff.Retry` runs under an id of its own. Under the id of the run that recorded the error, the stream WorkManager (Kafka deployments) took it for a duplicate of that run and skipped it in silence. While it is pending, the diff is `retrying` and a second retry is refused (HTTP 409). A replay that fails for good puts the diff back in `error`. A `retrying` diff whose replay the WorkManager no longer holds, lost with the in-memory queue of a node that restarted, can be retried again.
+
 **Bounded version lookup.** On each version creation the listener fetches only the **two** most recent versions of the series, with a **privileged** session. Fetching them all made the cost grow quadratically over the life of a document; using the user session silently dropped versions the caller cannot read, so the "previous version" could be the wrong one. Nothing leaks: only ids, labels and blobs of the two versions are used, and the result lands in the restricted container.
 
 ### Page Providers
@@ -216,7 +218,7 @@ Available to members of `administrators` and of the auditors group only.
 
 - **"Content changes audit" search**, reached from its own drawer entry. It is a *named search*, built exactly like the platform ones: the **search form sits in the drawer on the left**, the **results fill the main area on the right**. Filters: date range, source document (`nuxeo-document-suggestion`), user, truncated only. Facets: status, format, field, user. Clicking the drawer icon opens the form and brings the results to the front in one go.
 
-  The results table is a standard `nuxeo-results`, so it comes with the platform sort selector, the selection toolbar, CSV export, and **per-user column preferences** (show/hide, resize, reorder) persisted in local storage. Row actions: open, go to the source, filter on the source, download the diff, retry (errors only). Selection action: **permanent deletion**. Toolbar action: **purge** before a date, optionally for one status.
+  The results table is a standard `nuxeo-results`, so it comes with the platform sort selector, the selection toolbar, CSV export, and **per-user column preferences** (show/hide, resize, reorder) persisted in local storage. Row actions: open, go to the source, filter on the source, download the diff, retry (errors and pending retries only). Selection action: **permanent deletion**. Toolbar action: **purge** before a date, optionally for one status.
 
   Saved searches work as they do everywhere else: an auditor can store a set of filters from the drawer header and share it.
 - **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search with the source pre-filtered.
@@ -238,7 +240,7 @@ Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the s
 | `BlobDiff.PurgeStatus(commandId)` | Progress of a purge: `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}`. Any id that is not a purge command answers `UNKNOWN` |
 | `BlobDiff.PurgeAbort(commandId)` | Stops a running purge. Already deleted diffs are not restored. Any other bulk command is left alone |
 | `BlobDiff.CleanEmptyFolders` | Removes the dated folders left empty under `/change-diff`. Returns `{"folders": n}` |
-| `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The new diff keeps user, date and correlation id, and replaces the failed one once created |
+| `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The diff is `retrying` until the new one, which keeps user, date and correlation id, replaces it. Refused with 409 while a replay of the same diff is still queued or running |
 | `blobDiffSource` enricher | `{uid, exists, trashed, readable, title, path, type}` of the source; title/path/type only when the current user can read it |
 
 Every operation is refused (`DocumentSecurityException`) to anyone who is not an administrator, a member of `administrators` or of the auditors group.
@@ -577,7 +579,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
-| TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, blobDiffSource enricher |
+| TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, retry single-flight and recovery, blobDiffSource enricher |
 | TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |
 | TestBlobDiffHardening | Yes | Full-text exclusion, dedicated work queue, deterministic work id, work idempotence, bounded version lookup |
 | TestBlobDiffListenerDisabling | Yes | Per-operation context data flag, thread-scoped `runDisabled`, no leak between operations |

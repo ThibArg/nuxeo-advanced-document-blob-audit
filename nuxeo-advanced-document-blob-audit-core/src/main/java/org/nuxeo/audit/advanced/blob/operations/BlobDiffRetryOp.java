@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob.operations;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_RETRYING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_MIMETYPE;
@@ -51,9 +52,11 @@ import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
 import org.nuxeo.ecm.automation.core.annotations.OperationMethod;
+import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.NuxeoException;
+import org.nuxeo.ecm.core.work.api.Work;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
 
@@ -61,6 +64,10 @@ import org.nuxeo.runtime.api.Framework;
  * Replays a {@code BlobDiff} in {@code error}, using the storage keys persisted on it. The new diff
  * keeps the original user, date and correlation id (so the audit entry still points to it) and
  * replaces the failed one once created.
+ * <p>
+ * The diff is {@code retrying} until then, and a second retry is refused while the WorkManager still
+ * holds the first one. A {@code retrying} diff whose replay it no longer knows - lost with the queue
+ * of a node that restarted - can be retried again.
  *
  * @since 2025.1
  */
@@ -84,7 +91,8 @@ public class BlobDiffRetryOp {
         if (!DIFF_DOCTYPE.equals(diff.getType())) {
             throw new NuxeoException("Not a BlobDiff document: " + diff.getId(), 400);
         }
-        if (!STATUS_ERROR.equals(diff.getPropertyValue(XP_STATUS))) {
+        Object status = diff.getPropertyValue(XP_STATUS);
+        if (!STATUS_ERROR.equals(status) && !STATUS_RETRYING.equals(status)) {
             throw new NuxeoException("Only a BlobDiff in error can be retried", 400);
         }
         String oldKey = str(diff, XP_OLD_BLOB_KEY);
@@ -111,8 +119,31 @@ public class BlobDiffRetryOp {
                 str(diff, XP_USER), date == null ? System.currentTimeMillis() : date.getTimeInMillis(),
                 str(diff, XP_CORRELATION_ID), versions);
         work.withReplaceDiffId(diff.getId());
-        Framework.getService(WorkManager.class).schedule(work, true);
-        return diff;
+        WorkManager workManager = Framework.getService(WorkManager.class);
+        if (isPending(workManager.getWorkState(work.getId()))) {
+            throw new NuxeoException("A retry of this BlobDiff is already pending", 409);
+        }
+        markRetrying(diff);
+        workManager.schedule(work, true);
+        return session.getDocument(diff.getRef());
+    }
+
+    /**
+     * A {@code null} state is not proof that nothing runs: the stream WorkManager only knows states
+     * when it stores them. Two replays are then harmless, though, as they run one after the other on
+     * the same partition and the second finds the diff of the first.
+     */
+    protected static boolean isPending(Work.State state) {
+        return state == Work.State.SCHEDULED || state == Work.State.RUNNING;
+    }
+
+    /** Written as system: the auditors group holds Read and Remove on the container, not Write. */
+    protected void markRetrying(DocumentModel diff) {
+        CoreInstance.doPrivileged(session, s -> {
+            DocumentModel doc = s.getDocument(diff.getRef());
+            doc.setPropertyValue(XP_STATUS, STATUS_RETRYING);
+            s.saveDocument(doc);
+        });
     }
 
     /**

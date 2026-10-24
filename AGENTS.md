@@ -128,6 +128,19 @@ The eligibility recheck in the work is *not* a substitute: the length it compare
 Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
 `#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
+**A replay has a work id of its own, and one replay at a time** (item 42). `withReplaceDiffId`
+appends `:retry:<diffId>` to the nominal id: under the nominal one, `WorkComputation` skips an
+idempotent work whose id is among the last 50 its thread processed, and the retry vanished. The
+operation sets `bdiff:status` to `retrying` (as system: auditors hold no Write on the container)
+and refuses a second retry while `WorkManager#getWorkState` reports the replay `SCHEDULED` or
+`RUNNING`. A `null` state lets it through on purpose: it is what a replay lost with a restarted
+node looks like, and on the stream WorkManager without `nuxeo.stream.work.storestate.enabled` it
+is all there is. Two replays are harmless there, since they share the partition of the source
+document and run one after the other. `BlobDiffWork#workFailed` puts the diff back in `error`;
+every other outcome removes it. Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn`,
+`#testASecondRetryIsRefusedWhileTheFirstIsRunning`, `#testARetryThatFailsForGoodPutsTheDiffBackInError`,
+`#testARetryLostWithItsQueueCanBeRequestedAgain`.
+
 **A `BlobDiff` lives under `/change-diff`, and nothing leaves it** (item 31). Two layers, keep
 both. `BlobDiffLocationListener` (synchronous, `aboutToCreate` / `aboutToMove` / `aboutToCopy`)
 refuses, for every principal including system, a `BlobDiff` destined anywhere else and any move or
@@ -360,7 +373,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 259 tests (26 test classes)
+mvn -o install                                     # full build, 263 tests (26 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -419,7 +432,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 41 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 42 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1127,6 +1140,28 @@ cited here as "code review 2026-10".
     relying on `collaborative-save`, not written. Making the flag survive those paths would mean
     carrying it outside the option map (the live document's context data is not re-read by
     `AbstractSession#checkIn`), which is what `runDisabled` already does.
+
+42. *(code review 2026-10, finding `COR-02`, S2)* `BlobDiff.Retry` scheduled its replay under the
+    id of the run that recorded the error, the version pair. On the stream WorkManager, the default
+    as soon as Kafka is enabled, the replay lands on the same partition (the source document) and
+    `WorkComputation` skips an idempotent work whose id is among the last 50 its thread processed:
+    the operation answered "Retry scheduled" and nothing ran. On the in-memory WorkManager, a second
+    click while the first replay ran enqueued another one, and with `maxThreads=2` both could record
+    a diff for one correlation id - the duplicate item 5 exists to prevent.
+
+    The replay now has an id of its own, and the diff goes through a new status, `retrying`: the
+    operation sets it, refuses a second retry while the WorkManager still holds the first, and
+    accepts it again once it no longer does. `BlobDiffWork#workFailed` restores `error` when the
+    replay fails for good. The review proposed refusing any `retrying` diff; that would have left a
+    diff stuck for good whenever its replay was lost, which a restart does to the in-memory queue.
+    Web UI labels the status and keeps the Retry action on it, the server deciding.
+
+    Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn` (the stream skip cannot
+    be reproduced on the in-memory WorkManager of the tests, so the id is checked),
+    `#testASecondRetryIsRefusedWhileTheFirstIsRunning` (the probe hook of item 36 issues the second
+    retry during the extraction of the first), `#testARetryThatFailsForGoodPutsTheDiffBackInError`
+    and `#testARetryLostWithItsQueueCanBeRequestedAgain`. All four were checked to fail against the
+    unpatched code. 259 tests → 263.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

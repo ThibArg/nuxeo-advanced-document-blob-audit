@@ -18,6 +18,7 @@
   "label.blobaudit.truncated": "Truncated",
   "label.blobaudit.status.ok": "OK",
   "label.blobaudit.status.error": "Error",
+  "label.blobaudit.status.retrying": "Retry pending",
   "label.blobaudit.status.skippedTooLarge": "Too large",
   "label.blobaudit.status.skippedUnsupportedType": "Unsupported format",
   "label.blobaudit.status.skippedNotManaged": "Blob not managed",

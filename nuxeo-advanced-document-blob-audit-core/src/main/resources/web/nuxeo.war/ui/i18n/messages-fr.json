@@ -18,6 +18,7 @@
   "label.blobaudit.truncated": "Tronqué",
   "label.blobaudit.status.ok": "OK",
   "label.blobaudit.status.error": "Erreur",
+  "label.blobaudit.status.retrying": "Relance en cours",
   "label.blobaudit.status.skippedTooLarge": "Trop volumineux",
   "label.blobaudit.status.skippedUnsupportedType": "Format non supporté",
   "label.blobaudit.status.skippedNotManaged": "Binaire non géré",

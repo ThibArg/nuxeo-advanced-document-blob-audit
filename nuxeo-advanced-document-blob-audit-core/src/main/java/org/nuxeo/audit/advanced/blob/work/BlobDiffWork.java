@@ -19,10 +19,12 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_RETRYING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.SUMMARY_SOURCE_MISSING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.WORK_CATEGORY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_STATUS;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 
 import java.io.IOException;
@@ -36,6 +38,7 @@ import org.nuxeo.audit.advanced.blob.DiffResult;
 import org.nuxeo.audit.advanced.blob.FrozenBlobs;
 import org.nuxeo.audit.advanced.blob.VersionContext;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.blob.BlobInfo;
@@ -44,6 +47,7 @@ import org.nuxeo.ecm.core.blob.BlobProvider;
 import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.work.AbstractWork;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.transaction.TransactionHelper;
 
 /**
  * Asynchronous side of the blob diff: extraction and comparison run in no transaction at all, neither
@@ -139,9 +143,18 @@ public class BlobDiffWork extends AbstractWork {
         this.versions = versions == null ? VersionContext.NONE : versions;
     }
 
-    /** @since 2025.1 */
+    /**
+     * Makes this work the replay of the {@code BlobDiff} {@code diffId}, under an id of its own.
+     * <p>
+     * Under the nominal id, the WorkManager took the replay for a duplicate of the run that recorded
+     * the error: the stream implementation skips an idempotent work whose id is among the last ones
+     * its thread processed, so the retry was dropped in silence.
+     *
+     * @since 2025.1
+     */
     public BlobDiffWork withReplaceDiffId(String diffId) {
         this.replaceDiffId = diffId;
+        id = id + ":retry:" + diffId;
         return this;
     }
 
@@ -182,6 +195,38 @@ public class BlobDiffWork extends AbstractWork {
     @Override
     public int getRetryCount() {
         return 2;
+    }
+
+    /**
+     * Puts the replaced diff back in {@code error} when a replay fails for good, so that it can be
+     * retried again rather than staying {@code retrying}.
+     *
+     * @since 2025.1
+     */
+    @Override
+    public void workFailed(RuntimeException exception) {
+        if (replaceDiffId != null) {
+            restoreReplacedStatus();
+        }
+        super.workFailed(exception);
+    }
+
+    protected void restoreReplacedStatus() {
+        try {
+            TransactionHelper.runInTransaction(() -> CoreInstance.doPrivileged(repositoryName, s -> {
+                IdRef ref = new IdRef(replaceDiffId);
+                if (!s.exists(ref)) {
+                    return;
+                }
+                DocumentModel diff = s.getDocument(ref);
+                if (STATUS_RETRYING.equals(diff.getPropertyValue(XP_STATUS))) {
+                    diff.setPropertyValue(XP_STATUS, STATUS_ERROR);
+                    s.saveDocument(diff);
+                }
+            }));
+        } catch (RuntimeException e) {
+            log.warn("Cannot put BlobDiff {} back in error after its retry failed", replaceDiffId, e);
+        }
     }
 
     protected FrozenBlobs frozen() {

@@ -17,6 +17,7 @@ package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -29,6 +30,7 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.inject.Inject;
 
@@ -38,13 +40,16 @@ import org.nuxeo.audit.advanced.blob.io.BlobDiffSourceEnricher;
 import org.nuxeo.audit.advanced.blob.operations.BlobDiffDeleteOp;
 import org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeOp;
 import org.nuxeo.audit.advanced.blob.operations.BlobDiffRetryOp;
+import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.automation.AutomationService;
 import org.nuxeo.ecm.automation.OperationContext;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CloseableCoreSession;
+import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
@@ -440,6 +445,113 @@ public class TestBlobDiffManagement {
         assertEquals("the retry must replace the failed diff, not duplicate it", 1, replayed.size());
         assertEquals(BlobAuditConstants.STATUS_ERROR,
                 replayed.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /**
+     * COR-02 (code review 2026-10): a replay ran under the id of the run that recorded the error,
+     * and the stream WorkManager skips an idempotent work whose id is among the last ones its thread
+     * processed. The in-memory WorkManager of the tests does not, so the id itself is checked.
+     */
+    @Test
+    public void testARetryRunsUnderAWorkIdOfItsOwn() {
+        BlobDiffWork replay = replayableWork().withReplaceDiffId("failed-diff");
+
+        assertNotEquals(replayableWork().getId(), replay.getId());
+        assertEquals("the same replay must keep one id", replay.getId(),
+                replayableWork().withReplaceDiffId("failed-diff").getId());
+    }
+
+    /**
+     * COR-02: a second retry while the first was running was scheduled again, and on the in-memory
+     * WorkManager both ran at once. It is now refused while the WorkManager holds the first one. The
+     * probe hook issues it during the extraction of the first replay.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-txprobe-contrib.xml")
+    public void testASecondRetryIsRefusedWhileTheFirstIsRunning() throws Exception {
+        DocumentModel failed = diffOnTextPair("pending", BlobAuditConstants.STATUS_ERROR);
+        String sourceId = (String) failed.getPropertyValue(BlobAuditConstants.XP_SOURCE_ID);
+        String repository = session.getRepositoryName();
+        txFeature.nextTransaction();
+        AtomicReference<Exception> second = new AtomicReference<>();
+        TransactionProbeExtractor.reset(() -> TransactionHelper.runInNewTransaction(() -> {
+            CoreSession other = CoreInstance.getCoreSessionSystem(repository);
+            try {
+                run(other, BlobDiffRetryOp.ID, other.getDocument(failed.getRef()), null);
+            } catch (Exception e) {
+                second.set(e);
+            }
+        }));
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        assertEquals(BlobAuditConstants.STATUS_RETRYING,
+                session.getDocument(failed.getRef()).getPropertyValue(BlobAuditConstants.XP_STATUS));
+        txFeature.nextTransaction();
+
+        assertNotNull("the retry requested while the first one ran must be refused", second.get());
+        assertRefusedBecause(second.get(), "already pending");
+        List<DocumentModel> diffs = diffsOf(sourceId);
+        assertEquals(1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /** COR-02: a replay that fails for good must leave its diff retryable, not {@code retrying}. */
+    @Test
+    public void testARetryThatFailsForGoodPutsTheDiffBackInError() throws Exception {
+        DocumentModel source = file("failing-replay", textBlob("x", "text/plain", "x.txt"));
+        DocumentModel diff = diff(source, new Date(), BlobAuditConstants.STATUS_RETRYING, FrozenBlobs.NONE);
+        txFeature.nextTransaction();
+        BlobDiffWork replay = replayableWork().withReplaceDiffId(diff.getId());
+
+        // the WorkManager calls workFailed once the attempts are exhausted, with no transaction open
+        TransactionHelper.commitOrRollbackTransaction();
+        try {
+            replay.workFailed(new NuxeoException("extraction kept failing"));
+            fail("workFailed must still report the failure");
+        } catch (NuxeoException e) {
+            // expected
+        } finally {
+            TransactionHelper.startTransaction();
+        }
+
+        assertEquals(BlobAuditConstants.STATUS_ERROR,
+                session.getDocument(diff.getRef()).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /**
+     * COR-02: a {@code retrying} diff whose replay the WorkManager no longer holds, lost with the
+     * queue of a node that restarted, can be retried again instead of staying stuck.
+     */
+    @Test
+    public void testARetryLostWithItsQueueCanBeRequestedAgain() throws Exception {
+        DocumentModel stuck = diffOnTextPair("lost", BlobAuditConstants.STATUS_RETRYING);
+        String sourceId = (String) stuck.getPropertyValue(BlobAuditConstants.XP_SOURCE_ID);
+        txFeature.nextTransaction();
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(stuck.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(sourceId);
+        assertEquals(1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertFalse(session.exists(stuck.getRef()));
+    }
+
+    /** A diff with the given status on two stored text blobs one line apart. */
+    protected DocumentModel diffOnTextPair(String name, String status) throws Exception {
+        DocumentModel v1 = file(name + "-v1", textBlob("alpha\nbeta", "text/plain", "notes.txt"));
+        DocumentModel v2 = file(name + "-v2", textBlob("alpha\nBETA", "text/plain", "notes.txt"));
+        ManagedBlob b1 = storedBlob(v1);
+        ManagedBlob b2 = storedBlob(v2);
+        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
+                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
+        return diff(v2, new Date(), status, keys);
+    }
+
+    protected BlobDiffWork replayableWork() {
+        return new BlobDiffWork(session.getRepositoryName(), "source", "Source", "file:content", "default", "k1",
+                "a.txt", "text/plain", "d1", 1, "default", "k2", "a.txt", "text/plain", "d2", 1, "jdoe", 0L,
+                "correlation", new VersionContext("v1", "1.0", "v2", "1.1", "series"));
     }
 
     /** An .xlsx by mime type and filename only: the extractor is found, then fails on the bytes. */
