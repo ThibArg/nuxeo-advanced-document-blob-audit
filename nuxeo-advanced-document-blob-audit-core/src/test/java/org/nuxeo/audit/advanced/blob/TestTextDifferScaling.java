@@ -18,11 +18,14 @@ package org.nuxeo.audit.advanced.blob;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
 import org.junit.Test;
+
+import com.sun.management.ThreadMXBean;
 
 /**
  * Scaling tests for the positional diff, guarding the property that motivated the use of
@@ -58,31 +61,28 @@ public class TestTextDifferScaling {
     }
 
     /**
-     * The headline case: two 4 900 line documents differing by a single paragraph. A quadratic
-     * implementation would allocate ~92 MB here; this must run in a few tens of kilobytes of
-     * working memory.
+     * Two 4 900 line documents sharing no line, so that the alignment runs on the whole of both:
+     * a textbook LCS table would allocate ~92 MB here, Hirschberg two rows per half-matrix.
+     * <p>
+     * BLD-02 (code review 2026-10): this used to change a single paragraph, which the prefix/suffix
+     * trimming of item 6 reduces to a 1x1 alignment, and it read the heap delta, which a GC during
+     * the diff shrinks. A regression to a full matrix passed. The input is now fully rewritten, and
+     * the bytes allocated by this thread are counted, whatever the GC does.
      */
     @Test
     public void testRealWorldSizedDocumentStaysWithinMemoryBudget() {
-        List<String> before = paragraphs(REAL_WORLD_LINES, "");
-        List<String> after = new ArrayList<>(before);
-        after.set(2500, "Paragraph 2500 of the contract AMENDED");
+        DiffableContent before = lines(paragraphs(REAL_WORLD_LINES, ""));
+        DiffableContent after = lines(paragraphs(REAL_WORLD_LINES, " REWRITTEN"));
 
-        Runtime runtime = Runtime.getRuntime();
-        System.gc();
-        long usedBefore = runtime.totalMemory() - runtime.freeMemory();
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long start = threads.getCurrentThreadAllocatedBytes();
+        DiffResult result = differ.diff(before, after);
+        long allocated = threads.getCurrentThreadAllocatedBytes() - start;
 
-        DiffResult result = differ.diff(lines(before), lines(after));
-
-        long allocated = (runtime.totalMemory() - runtime.freeMemory()) - usedBefore;
-
-        assertEquals(1, result.changed());
-        assertEquals(0, result.added());
-        assertEquals(0, result.removed());
-        // Generous bound: a quadratic implementation needs ~92 MB for this exact input, so any
-        // regression to a full matrix would blow past 32 MB immediately.
+        assertEquals(REAL_WORLD_LINES, result.removed() + result.changed());
+        // A full matrix needs 4 * 4901 * 4901 bytes, ~92 MB, for this exact input.
         assertTrue("positional diff must not allocate a quadratic matrix, allocated=" + allocated,
-                allocated < 32L * 1024 * 1024);
+                allocated < 24L * 1024 * 1024);
     }
 
     /**

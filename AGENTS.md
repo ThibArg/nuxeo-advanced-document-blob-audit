@@ -450,7 +450,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 54 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 55 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1335,6 +1335,14 @@ cited here as "code review 2026-10".
     `TestBlobDiffLocationAndSecurity#testConcurrentContainerCreationStaysUnderASingleRoot`. Both
     `date(...)` helpers now build the instant in UTC. Checked by running both classes with
     `TZ=Pacific/Auckland`, where the three failed before, and `TZ=America/Los_Angeles`.
+
+55. *(code review 2026-10, finding `BLD-02`, S3)* `TestTextDifferScaling#testRealWorldSized
+    DocumentStaysWithinMemoryBudget` guarded nothing: it changed a single paragraph, which the
+    prefix/suffix trimming of item 6 reduces to a 1x1 alignment, and it read the heap delta, which
+    a GC during the diff shrinks. Replacing Hirschberg by a full LCS table left it green. It now
+    compares two fully rewritten 4 900-line documents and counts the bytes the thread allocates
+    (`ThreadMXBean#getCurrentThreadAllocatedBytes`), under 24 MB. Checked by adding a full
+    `int[n+1][m+1]` table to `positionalEdits` for one run: 101 MB allocated, the test failed.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.
