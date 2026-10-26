@@ -24,10 +24,12 @@
     <extendedInfo event="blobContentModified" key="xpath" expression="${message.properties.xpath}" />
     <extendedInfo event="blobContentModified" key="oldFilename" expression="${message.properties.oldFilename}" />
     <extendedInfo event="blobContentModified" key="newFilename" expression="${message.properties.newFilename}" />
+    <extendedInfo event="blobContentModified" key="oldMimeType" expression="${message.properties.oldMimeType}" />
+    <extendedInfo event="blobContentModified" key="newMimeType" expression="${message.properties.newMimeType}" />
     <extendedInfo event="blobContentModified" key="diffCorrelationId"
       expression="${message.properties.diffCorrelationId}" />
-    <!-- Set only when the binary changed but could not be diffed (too large, unsupported format).
-         Mutually exclusive with diffCorrelationId; absent on the nominal path. -->
+    <!-- Set only when the binary changed but could not be diffed (too large, unsupported format,
+         format changed...). Mutually exclusive with diffCorrelationId; absent on the nominal path. -->
     <extendedInfo event="blobContentModified" key="skipReason" expression="${message.properties.skipReason}" />
   </extension>
 

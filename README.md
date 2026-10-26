@@ -13,11 +13,11 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 | Extraction + diff | BlobDiffWork, asynchronous | Outside any transaction, so no transaction timeout applies to it |
 | Result storage | Dedicated BlobDiff document | Blob stored outside the source document |
 
-The audit log never contains business content. It stores only the xpath, file names, and a `diffCorrelationId` pointing to the BlobDiff document.
+The audit log never contains business content. It stores only the xpath, file names and MIME types, and a `diffCorrelationId` pointing to the BlobDiff document.
 
 ### Binary Changes That Cannot Be Diffed
 
-A binary that changed but cannot be compared — larger than `maxBlobSize`, or in a format no extractor handles — is **still audited**. For an audit tool, staying silent would be the worst possible behaviour: the absence of an entry would be indistinguishable from the absence of a change.
+A binary that changed but cannot be compared — larger than `maxBlobSize`, in a format no extractor handles, or replaced by a file of another format — is **still audited**. For an audit tool, staying silent would be the worst possible behaviour: the absence of an entry would be indistinguishable from the absence of a change.
 
 In that case the plugin writes the `blobContentModified` entry **only**, and creates no BlobDiff document:
 
@@ -25,20 +25,25 @@ In that case the plugin writes the `blobContentModified` entry **only**, and cre
 |------|---------------|----------------------------|----------|
 | Blob over `maxBlobSize` | `file:content : binary changed (too large)` | `skippedTooLarge` | none |
 | No extractor for the mime type | `file:content : binary changed (unsupported format)` | `skippedUnsupportedType` | none |
+| Previous and new blob read by different extractors (an `.xlsx` replaced by a `.docx`, a Word document by its PDF rendition) | `file:content : binary changed (format changed)` | `skippedFormatChanged` | none |
 | Blobs not both managed by a provider | `file:content : binary changed (blob not managed by a provider)` | `skippedNotManaged` | none |
 | A blob of a list changed while other entries were removed or moved | `files:files/0/file : binary changed (list entries also removed or moved, previous file unknown)` | `skippedListChanged` | none |
 | Diffable change | `file:content : binary content modified between versions` | absent | created |
 
-The third case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
+Every entry also carries the `oldFilename`, `newFilename`, `oldMimeType` and `newMimeType` extended infos, so a format change can be read from the entry alone.
 
-The fourth case only happens with `<xpath>*</xpath>`, the only mode in which blobs inside lists (such as `files:files`) are watched. A list index is not an identity, so the entries are paired **by content**: a file present in both versions, wherever it sits, is unchanged; a new file is compared with the one it replaces only when the list kept its shape and that file is gone. Removing, adding or reordering attachments is therefore not audited, as an added or removed blob never is; a file that changed in a list that also lost an entry is audited without a diff, since which file it replaces cannot be told.
+The format change case exists because two extractors do not cut a document into lines the same way. A spreadsheet is read cell by cell, a Word document paragraph by paragraph, a PDF one rendered line at a time: comparing the extractions of a `.docx` and of its PDF rendition would report every line as removed and every line as added — a diff as large as both documents, which says nothing an auditor can use and copies all of their content into `/change-diff`. Each extractor contribution is therefore a **comparability class** (see "One Contribution, One Comparability Class" below). A conversion inside one class is still diffed: an `.xls` saved as `.xlsx`, a `.doc` saved as `.docx`, or a `.txt` saved as `.json` — every text format belongs to the `plainText` contribution, which reads raw lines whatever the MIME type. When one side has no extractor at all, `skippedUnsupportedType` wins.
+
+The "not both managed" case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
+
+The list case only happens with `<xpath>*</xpath>`, the only mode in which blobs inside lists (such as `files:files`) are watched. A list index is not an identity, so the entries are paired **by content**: a file present in both versions, wherever it sits, is unchanged; a new file is compared with the one it replaces only when the list kept its shape and that file is gone. Removing, adding or reordering attachments is therefore not audited, as an added or removed blob never is; a file that changed in a list that also lost an entry is audited without a diff, since which file it replaces cannot be told.
 
 `skipReason` and `diffCorrelationId` are mutually exclusive: a skipped entry carries no correlation id, because no BlobDiff will ever exist to point at.
 
-Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent.
+Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent, and so do the same bytes uploaded again under another file name or MIME type.
 
 > [!NOTE]
-> Both skip reasons are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated blobs before extracting, so a `BlobDiff.Retry`, or a work outliving a `maxBlobSize` change, can be filed as `skippedTooLarge` or `skippedUnsupportedType`. `skippedUnsupportedType` is also what the work records when the two blobs no longer share a mime type an extractor handles. `skippedNotManaged` and `skippedListChanged`, on the other hand, are skip reasons only: no `BlobDiff` is ever created in those cases.
+> `skippedTooLarge`, `skippedUnsupportedType` and `skippedFormatChanged` are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated pair before extracting, so a `BlobDiff.Retry`, or a work outliving a configuration change (a lower `maxBlobSize`, a disabled extractor, a MIME type moved to another contribution), can be filed with any of the three. `skippedUnsupportedType` is also what the work records if a side has no extractor left when the diff runs. `skippedNotManaged` and `skippedListChanged`, on the other hand, are skip reasons only: no `BlobDiff` is ever created in those cases.
 
 ### How the Version Pair Is Established
 
@@ -77,9 +82,9 @@ No external diff library is required.
 | SpreadsheetExtractor | xlsx, xlsm, xls | keyed, cell-based | Excellent — Sheet1!B12: 100 → 120 |
 | PlainTextExtractor | txt, json, xml, csv, yaml, source files | positional, line-based | Excellent |
 | PresentationExtractor | pptx, pptm, ppsx, potx | positional, paragraph-based, slide-aware | Good — text boxes, tables, notes |
-| ConverterTextExtractor | docx, doc, odt, rtf, **pdf**, ppt (legacy) | positional, paragraph-based | Good (Word), indicative (PDF) |
+| ConverterTextExtractor | docx, doc, odt, rtf (`converter`); **pdf** (`pdf`); ppt, legacy (`legacyPresentation`) | positional, paragraph-based | Good (Word), indicative (PDF) |
 
-`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`.
+`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`. It is contributed three times, under three names, for the reason explained in the next section.
 
 ### Adding a Format
 
@@ -94,6 +99,21 @@ No external diff library is required.
 ```
 
 The extractor with the lowest `order` wins. A specialized extractor overrides a generic one.
+
+### One Contribution, One Comparability Class
+
+A new version is only diffed against the previous one when **the same contribution** reads both blobs. When two different contributions do — an `.xlsx` replaced by a `.docx`, a Word document replaced by its PDF rendition — the change is audited as `skippedFormatChanged`, without a diff (see "Binary Changes That Cannot Be Diffed" above). The check compares contributions, not MIME types, so where a MIME type is contributed decides what can be compared with what:
+
+| Contribution | MIME types | Compared with each other |
+|---|---|---|
+| `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
+| `presentation` | pptx, pptm, ppsx, potx | yes |
+| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: the lines are read raw, whatever the MIME type |
+| `converter` | docx, doc, odt, rtf | yes: the converter cuts all of them into paragraphs |
+| `pdf` | pdf | — |
+| `legacyPresentation` | ppt | — |
+
+`pdf` and `legacyPresentation` use the very same class and properties as `converter`, and are contributions of their own for that reason alone: the converter produces one line per rendered line for a PDF and flat slide text for a `.ppt`, so diffing either against a Word document reports everything as changed. To compare two formats that sit in different contributions, move their MIME types into one; to stop comparing two that share one, split it.
 
 ### Image Inventory Extractors
 
@@ -164,7 +184,7 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
-| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, error (see the note above on how the two skip statuses are reached), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
+| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, skippedFormatChanged, error (see the note above on how the three skip statuses are reached), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
@@ -358,6 +378,8 @@ The `extractors` and `imageExtractors` points merge the same way, by extractor n
 </extension>
 ```
 
+PDF and legacy `.ppt` are read by contributions of their own, `pdf` and `legacyPresentation` (see "One Contribution, One Comparability Class"): an override of `converter` does not reach them, override them by name too.
+
 ### Bounding the Size of a Diff
 
 Four options bound the work, at two different stages, and they are not interchangeable:
@@ -515,6 +537,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 
 ### Text Extraction
 - **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared: restyling a Word paragraph or a PowerPoint text box produces no diff.
+- **A change of format is not diffed.** A new version read by another extractor contribution than the previous one (`.xlsx` → `.docx`, `.docx` → `.pdf`, `.ppt` → `.pptx`) is audited as `skippedFormatChanged`, with no diff. A conversion within one contribution (`.xls` → `.xlsx`, `.doc` → `.docx`, `.txt` → `.json`) is diffed; between two text formats, that diff shows the real textual change, which for `.json` → `.xml` of the same data is close to a full rewrite.
 - **Scanned PDFs / image-only content.** Without OCR, nothing is extracted: status stays `ok` with an empty diff.
 - **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
 - **Converted formats** (Word, PDF, OpenDocument, RTF...) are read line by line from the converter output, and reading stops at `maxLines`. The conversion itself still processes the whole document.
@@ -586,7 +609,8 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
 | TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
-| TestBlobDiffService | Yes | Guardrails, container, ACLs, persistence |
+| TestBlobDiffService | Yes | Guardrails, eligibility of a pair, container, ACLs, persistence |
+| TestBlobDiffSkipReporting | Yes | Non-diffable changes audited without a diff (too large, unsupported, format changed, not managed), silence when the bytes did not change |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
 | TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, retry single-flight and recovery, blobDiffSource enricher |
 | TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |

@@ -24,6 +24,12 @@ import org.nuxeo.runtime.test.runner.RunnerFeature;
  * <p>
  * Wraps the platform in-memory audit backend and deploys this bundle. The feature ships disabled in
  * production, so the test config contribution turns it on.
+ * <p>
+ * It also supplies {@code template-vocabulary}, which the platform's {@code eventTypes} directory
+ * extends and which ships in {@code org.nuxeo.ecm.default.config} - a bundle nothing in this stack
+ * deploys. Without it {@code eventTypes} never registers, {@code DirectoryRegistry} says so at
+ * {@code DEBUG} only, and {@link BlobDiffInitComponent#registerAuditEventType()} has no vocabulary
+ * to add its row to.
  *
  * @since 2025.1
  */
@@ -32,5 +38,6 @@ import org.nuxeo.runtime.test.runner.RunnerFeature;
 @Deploy("nuxeo-advanced-document-blob-audit-core")
 @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-config.xml")
 @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-pageprovider-contrib.xml")
+@Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-vocabulary-template-contrib.xml")
 public class BlobAuditFeature implements RunnerFeature {
 }

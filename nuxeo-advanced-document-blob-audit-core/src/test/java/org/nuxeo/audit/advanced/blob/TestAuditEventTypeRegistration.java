@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.ecm.directory.Session;
 import org.nuxeo.ecm.directory.api.DirectoryService;
-import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 
@@ -47,16 +46,15 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * {@code directories-contrib.xml} of {@code org.nuxeo.ecm.platform.audit}, so the platform rows are
  * genuinely loaded here; without them the size assertion below would pass vacuously. The
  * {@code template-vocabulary} those directories extend ships in {@code org.nuxeo.ecm.default.config},
- * which no feature in this stack deploys, hence the test contribution. Reaching this row at all also
- * proves the {@code Long} typing of {@code obsolete} and {@code ordering}: a mistyped value makes
- * {@code createEntry} throw, and the throw is swallowed on purpose so that a vocabulary row never
- * breaks startup.
+ * which no feature in this stack deploys, so {@link BlobAuditFeature} supplies it. Reaching this row
+ * at all also proves the {@code Long} typing of {@code obsolete} and {@code ordering}: a mistyped
+ * value makes {@code createEntry} throw, and the throw is swallowed on purpose so that a vocabulary
+ * row never breaks startup.
  *
  * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)
-@Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-vocabulary-template-contrib.xml")
 public class TestAuditEventTypeRegistration {
 
     @Inject

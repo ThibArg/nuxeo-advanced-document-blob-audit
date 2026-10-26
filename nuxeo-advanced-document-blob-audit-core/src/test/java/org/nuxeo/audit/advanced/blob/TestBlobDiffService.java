@@ -241,6 +241,10 @@ public class TestBlobDiffService {
                 DiffEligibility.combine(DiffEligibility.UNSUPPORTED_TYPE, DiffEligibility.TOO_LARGE));
         assertEquals(DiffEligibility.UNSUPPORTED_TYPE,
                 DiffEligibility.combine(DiffEligibility.ELIGIBLE, DiffEligibility.UNSUPPORTED_TYPE));
+        assertEquals(DiffEligibility.UNSUPPORTED_TYPE,
+                DiffEligibility.combine(DiffEligibility.FORMAT_CHANGED, DiffEligibility.UNSUPPORTED_TYPE));
+        assertEquals(DiffEligibility.FORMAT_CHANGED,
+                DiffEligibility.combine(DiffEligibility.ELIGIBLE, DiffEligibility.FORMAT_CHANGED));
         assertEquals(DiffEligibility.ELIGIBLE,
                 DiffEligibility.combine(DiffEligibility.ELIGIBLE, DiffEligibility.ELIGIBLE));
 
@@ -248,6 +252,36 @@ public class TestBlobDiffService {
         assertFalse(DiffEligibility.NOT_APPLICABLE.isReportable());
         assertTrue(DiffEligibility.TOO_LARGE.isReportable());
         assertTrue(DiffEligibility.UNSUPPORTED_TYPE.isReportable());
+        assertTrue(DiffEligibility.FORMAT_CHANGED.isReportable());
+    }
+
+    /**
+     * Each extractor contribution is a comparability class: a pair read by two of them is not
+     * compared, a pair read by one is, whatever the mime types. The verdicts of the sides come first.
+     */
+    @Test
+    public void testThePairEligibilityComparesTheExtractorContributions() throws Exception {
+        assertEquals(DiffEligibility.FORMAT_CHANGED, pairEligibility(BlobAuditTestHelper.XLSX_MIME, DOCX_MIME));
+        assertEquals("a PDF rendition is not comparable with its Word source", DiffEligibility.FORMAT_CHANGED,
+                pairEligibility(DOCX_MIME, "application/pdf"));
+        assertEquals(DiffEligibility.FORMAT_CHANGED, pairEligibility("application/vnd.ms-powerpoint", DOCX_MIME));
+        assertEquals(DiffEligibility.FORMAT_CHANGED, pairEligibility("text/csv", BlobAuditTestHelper.XLSX_MIME));
+
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("application/msword", DOCX_MIME));
+        assertEquals(DiffEligibility.ELIGIBLE,
+                pairEligibility("application/vnd.ms-excel", BlobAuditTestHelper.XLSX_MIME));
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("text/plain", "application/json"));
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("application/pdf", "application/pdf"));
+
+        assertEquals("an unsupported side wins over the format change", DiffEligibility.UNSUPPORTED_TYPE,
+                pairEligibility("application/x-unknown-binary", DOCX_MIME));
+        assertEquals(DiffEligibility.NOT_APPLICABLE, blobDiffService.getEligibility("File", "files:files/0/file",
+                textBlob("x", "text/plain", "f.txt"), textBlob("y", DOCX_MIME, "f.docx")));
+    }
+
+    protected DiffEligibility pairEligibility(String oldMimeType, String newMimeType) throws Exception {
+        return blobDiffService.getEligibility("File", "file:content", textBlob("old", oldMimeType, "old.bin"),
+                textBlob("new", newMimeType, "new.bin"));
     }
 
     /* -------------------------------------------------------------- container */

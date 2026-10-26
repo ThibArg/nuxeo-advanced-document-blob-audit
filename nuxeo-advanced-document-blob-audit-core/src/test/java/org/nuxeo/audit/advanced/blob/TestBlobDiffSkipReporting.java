@@ -20,11 +20,19 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_ID;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_MIME_TYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.DOCX_MIME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.XLSX_MIME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.cells;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +40,7 @@ import java.util.Map;
 
 import jakarta.inject.Inject;
 
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.api.LogEntry;
@@ -62,6 +71,10 @@ public class TestBlobDiffSkipReporting {
 
     protected static final String UNSUPPORTED_MIME = "application/x-unknown-binary";
 
+    protected static final String PDF_MIME = "application/pdf";
+
+    protected static final String XLS_MIME = "application/vnd.ms-excel";
+
     @Inject
     protected CoreSession session;
 
@@ -83,8 +96,12 @@ public class TestBlobDiffSkipReporting {
     }
 
     protected DocumentModel createVersionedFile(String name, String content, String mimeType) throws Exception {
+        return createVersionedFile(name, textBlob(content, mimeType, "notes.bin"));
+    }
+
+    protected DocumentModel createVersionedFile(String name, Blob blob) throws Exception {
         DocumentModel doc = session.createDocumentModel("/", name, "File");
-        doc.setPropertyValue("file:content", (Serializable) textBlob(content, mimeType, "notes.bin"));
+        doc.setPropertyValue("file:content", (Serializable) blob);
         doc = session.createDocument(doc);
         session.save();
         session.checkIn(doc.getRef(), VersioningOption.MAJOR, "initial");
@@ -94,8 +111,12 @@ public class TestBlobDiffSkipReporting {
     }
 
     protected DocumentModel newVersion(DocumentModel doc, String content, String mimeType) throws Exception {
+        return newVersion(doc, textBlob(content, mimeType, "notes.bin"));
+    }
+
+    protected DocumentModel newVersion(DocumentModel doc, Blob blob) throws Exception {
         DocumentModel updated = session.getDocument(doc.getRef());
-        updated.setPropertyValue("file:content", (Serializable) textBlob(content, mimeType, "notes.bin"));
+        updated.setPropertyValue("file:content", (Serializable) blob);
         updated.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
         session.saveDocument(updated);
         session.save();
@@ -153,6 +174,89 @@ public class TestBlobDiffSkipReporting {
         assertNull(extended(entry, EXT_CORRELATION_ID));
         assertTrue("file:content : binary changed (unsupported format)".equals(entry.getComment()));
         assertTrue("no BlobDiff must be created", diffsFor(doc.getId()).isEmpty());
+    }
+
+    /* ------------------------------------------------------- format changes */
+
+    /**
+     * Two supported formats read by different extractor contributions cannot be compared: the
+     * extractions do not cut the content the same way, and the diff would report everything as
+     * removed and added. The skip is decided on the mime types alone, before any extraction, so the
+     * payloads need not be real workbooks or documents.
+     */
+    @Test
+    public void testASpreadsheetReplacedByAWordDocumentIsAuditedWithoutADiff() throws Exception {
+        DocumentModel doc = createVersionedFile("xlsx-to-docx", "spreadsheet bytes", XLSX_MIME);
+        newVersion(doc, "word bytes", DOCX_MIME);
+
+        List<LogEntry> entries = auditEntries(doc.getId());
+        assertEquals("exactly one audit entry", 1, entries.size());
+        LogEntry entry = entries.get(0);
+        assertEquals(STATUS_SKIPPED_FORMAT_CHANGED, extended(entry, EXT_SKIP_REASON));
+        assertNull(extended(entry, EXT_CORRELATION_ID));
+        assertEquals("file:content : binary changed (format changed)", entry.getComment());
+        assertEquals(XLSX_MIME, extended(entry, EXT_OLD_MIME_TYPE));
+        assertEquals(DOCX_MIME, extended(entry, EXT_NEW_MIME_TYPE));
+        assertTrue("no BlobDiff must be created", diffsFor(doc.getId()).isEmpty());
+    }
+
+    /**
+     * The case the {@code pdf} contribution exists for: Word and PDF are both read through the
+     * converter, but a PDF comes out one line per rendered line and Word one line per paragraph.
+     * Under a single contribution, a PDF rendition stored as a new version was diffed line by line.
+     */
+    @Test
+    public void testAWordDocumentReplacedByItsPdfRenditionIsAuditedWithoutADiff() throws Exception {
+        DocumentModel doc = createVersionedFile("docx-to-pdf", "word bytes", DOCX_MIME);
+        newVersion(doc, "pdf bytes", PDF_MIME);
+
+        List<LogEntry> entries = auditEntries(doc.getId());
+        assertEquals(1, entries.size());
+        assertEquals(STATUS_SKIPPED_FORMAT_CHANGED, extended(entries.get(0), EXT_SKIP_REASON));
+        assertTrue(diffsFor(doc.getId()).isEmpty());
+    }
+
+    /** The digest check still comes first: the same bytes under another mime type are no change. */
+    @Test
+    public void testTheSameBytesUnderAnotherFormatAreNotAudited() throws Exception {
+        DocumentModel doc = createVersionedFile("relabelled", "same payload", XLSX_MIME);
+        newVersion(doc, "same payload", DOCX_MIME);
+
+        assertTrue(auditEntries(doc.getId()).isEmpty());
+        assertTrue(diffsFor(doc.getId()).isEmpty());
+    }
+
+    /**
+     * A conversion within one contribution is still compared: an {@code .xls} saved as
+     * {@code .xlsx} is the case where "converted, one cell changed" is exactly what the auditor needs.
+     */
+    @Test
+    public void testAConversionWithinOneExtractorIsStillDiffed() throws Exception {
+        DocumentModel doc = createVersionedFile("xls-to-xlsx", xls("A1", "hello", "B2", "100"));
+        newVersion(doc, xlsx("Sheet1", cells("A1", "hello", "B2", "120"), "book.xlsx"));
+
+        List<LogEntry> entries = auditEntries(doc.getId());
+        assertEquals(1, entries.size());
+        LogEntry entry = entries.get(0);
+        assertNull(extended(entry, EXT_SKIP_REASON));
+        assertEquals(XLS_MIME, extended(entry, EXT_OLD_MIME_TYPE));
+        assertEquals(XLSX_MIME, extended(entry, EXT_NEW_MIME_TYPE));
+        List<DocumentModel> diffs = diffsFor(doc.getId());
+        assertEquals(1, diffs.size());
+        DocumentModel diff = diffs.get(0);
+        assertEquals(BlobAuditConstants.STATUS_OK, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals(Long.valueOf(1), diff.getPropertyValue(BlobAuditConstants.XP_CHANGED));
+        assertEquals(Long.valueOf(0), diff.getPropertyValue(BlobAuditConstants.XP_ADDED));
+        assertEquals(Long.valueOf(0), diff.getPropertyValue(BlobAuditConstants.XP_REMOVED));
+    }
+
+    /** A single-sheet binary {@code .xls}, from {@code "A1", value} pairs. */
+    protected Blob xls(String... keyValuePairs) throws Exception {
+        try (HSSFWorkbook workbook = new HSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            BlobAuditTestHelper.fillSheet(workbook.createSheet("Sheet1"), cells(keyValuePairs));
+            workbook.write(out);
+            return BlobAuditTestHelper.blob(out.toByteArray(), XLS_MIME, "book.xls");
+        }
     }
 
     /* ------------------------------------------------------ silent cases */

@@ -42,6 +42,19 @@ public interface BlobDiffService {
      */
     DiffEligibility getEligibility(String docType, String xpath, Blob blob);
 
+    /**
+     * Whether the change from {@code oldBlob} to {@code newBlob} can be content-diffed.
+     * <p>
+     * Combines the verdict of each side, then returns {@link DiffEligibility#FORMAT_CHANGED} when
+     * both are eligible but resolve to different extractor contributions. Each contribution is a
+     * comparability class: two blobs read by the same one are cut into lines the same way, and two
+     * blobs read by different ones are not, so their diff would report everything as removed and
+     * added. The check-in path and {@code BlobDiffWork} both call this, so they cannot drift apart.
+     *
+     * @since 2025.1
+     */
+    DiffEligibility getEligibility(String docType, String xpath, Blob oldBlob, Blob newBlob);
+
     /** {@code true} if the given document/xpath/blob is eligible for a content diff. */
     default boolean isDiffable(String docType, String xpath, Blob blob) {
         return getEligibility(docType, xpath, blob) == DiffEligibility.ELIGIBLE;

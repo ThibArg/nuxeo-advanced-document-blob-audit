@@ -57,12 +57,22 @@ public class BlobDiffInitComponent extends DefaultComponent {
      * {@code BaseDirectoryDescriptor#merge} overwrites it, and {@code DirectoryRegistry} restarts the
      * effective descriptor from the template for every contribution carrying {@code extends}. A
      * greenfield instance would end up with this single row and lose the platform's 51.
+     * <p>
+     * A runtime with no {@code eventTypes} directory is skipped in silence, because the directory is
+     * genuinely absent rather than merely late: {@code DirectoryServiceImpl} starts at order 97 and
+     * this component at the default 1000, so the registry is populated and initialized by the time
+     * this runs, and {@code getDirectory} answers {@code null} instead of throwing. That happens on a
+     * distribution without {@code org.nuxeo.ecm.default.config}, which is where the
+     * {@code template-vocabulary} the platform's {@code eventTypes} extends comes from. The only
+     * consequence is a missing label in the audit filter, which is not worth an error.
      *
      * @since 2025.1
      */
     protected void registerAuditEventType() {
         DirectoryService ds = Framework.getService(DirectoryService.class);
-        if (ds == null) {
+        if (ds == null || ds.getDirectory(EVENT_TYPES_DIRECTORY) == null) {
+            log.debug("No {} directory on this runtime; {} will not appear in the audit filter",
+                    EVENT_TYPES_DIRECTORY, EVENT_BLOB_MODIFIED);
             return;
         }
         try {

@@ -37,6 +37,15 @@ public enum DiffEligibility {
     UNSUPPORTED_TYPE(BlobAuditConstants.STATUS_SKIPPED_TYPE),
 
     /**
+     * Both sides are supported, but by different extractor contributions: report the change, do not
+     * diff it. A <b>pair-level</b> verdict, returned by the two-blob variant of
+     * {@code BlobDiffService#getEligibility} only, never by the evaluation of a single blob.
+     *
+     * @since 2025.1
+     */
+    FORMAT_CHANGED(BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED),
+
+    /**
      * Out of scope entirely - feature disabled, document type or xpath not covered, no blob. Stays
      * silent: nothing is audited, nothing is scheduled.
      */
@@ -65,9 +74,11 @@ public enum DiffEligibility {
      * Combines the verdicts of the two sides of a comparison.
      * <p>
      * Precedence is {@code NOT_APPLICABLE} > {@code TOO_LARGE} > {@code UNSUPPORTED_TYPE} >
-     * {@code ELIGIBLE}. {@code NOT_APPLICABLE} wins because it does not depend on the blob at all -
-     * it means the feature is off or the property is out of scope - and must never be turned into a
-     * reported skip by the state of the other side.
+     * {@code FORMAT_CHANGED} > {@code ELIGIBLE}. {@code NOT_APPLICABLE} wins because it does not
+     * depend on the blob at all - it means the feature is off or the property is out of scope - and
+     * must never be turned into a reported skip by the state of the other side.
+     * {@code FORMAT_CHANGED} comes last: it only means something once both sides are known to be
+     * supported.
      */
     public static DiffEligibility combine(DiffEligibility left, DiffEligibility right) {
         if (left == NOT_APPLICABLE || right == NOT_APPLICABLE) {
@@ -78,6 +89,9 @@ public enum DiffEligibility {
         }
         if (left == UNSUPPORTED_TYPE || right == UNSUPPORTED_TYPE) {
             return UNSUPPORTED_TYPE;
+        }
+        if (left == FORMAT_CHANGED || right == FORMAT_CHANGED) {
+            return FORMAT_CHANGED;
         }
         return ELIGIBLE;
     }

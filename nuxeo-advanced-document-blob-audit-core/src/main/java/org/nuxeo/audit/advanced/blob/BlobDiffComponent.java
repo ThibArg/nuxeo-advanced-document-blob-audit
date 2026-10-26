@@ -178,6 +178,24 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return DiffEligibility.ELIGIBLE;
     }
 
+    /**
+     * Extractor instances are compared by identity, on one snapshot of the list: there is one instance
+     * per contribution, and a concurrent {@link #start} replacing the list must not make two lookups
+     * of the same contribution look different.
+     */
+    @Override
+    public DiffEligibility getEligibility(String docType, String xpath, Blob oldBlob, Blob newBlob) {
+        List<ResolvedExtractor> candidates = extractors;
+        DiffEligibility eligibility = DiffEligibility.combine(getEligibility(docType, xpath, oldBlob),
+                getEligibility(docType, xpath, newBlob));
+        if (eligibility != DiffEligibility.ELIGIBLE) {
+            return eligibility;
+        }
+        BlobTextExtractor oldExtractor = findExtractor(candidates, oldBlob.getMimeType());
+        BlobTextExtractor newExtractor = findExtractor(candidates, newBlob.getMimeType());
+        return oldExtractor == newExtractor ? DiffEligibility.ELIGIBLE : DiffEligibility.FORMAT_CHANGED;
+    }
+
     protected BlobTextExtractor findExtractor(String mimeType) {
         return findExtractor(extractors, mimeType);
     }

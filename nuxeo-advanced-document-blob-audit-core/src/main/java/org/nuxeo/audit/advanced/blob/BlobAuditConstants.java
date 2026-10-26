@@ -150,9 +150,24 @@ public class BlobAuditConstants {
     public static final String EXT_CORRELATION_ID = "diffCorrelationId";
 
     /**
-     * Extended info carrying why a binary change was audited without a diff. Holds
-     * {@link #STATUS_SKIPPED_SIZE} or {@link #STATUS_SKIPPED_TYPE}; absent on the nominal path,
-     * where {@link #EXT_CORRELATION_ID} is set instead. The two are mutually exclusive.
+     * Extended info carrying the mime type of the previous blob. Metadata only, like the filenames,
+     * and what makes a {@link #STATUS_SKIPPED_FORMAT_CHANGED} entry self-explanatory.
+     *
+     * @since 2025.1
+     */
+    public static final String EXT_OLD_MIME_TYPE = "oldMimeType";
+
+    /**
+     * Extended info carrying the mime type of the new blob.
+     *
+     * @since 2025.1
+     */
+    public static final String EXT_NEW_MIME_TYPE = "newMimeType";
+
+    /**
+     * Extended info carrying why a binary change was audited without a diff. Holds one of the
+     * {@code STATUS_SKIPPED_*} values; absent on the nominal path, where {@link #EXT_CORRELATION_ID}
+     * is set instead. The two are mutually exclusive.
      *
      * @since 2025.1
      */
@@ -164,6 +179,17 @@ public class BlobAuditConstants {
     public static final String STATUS_SKIPPED_SIZE = "skippedTooLarge";
 
     public static final String STATUS_SKIPPED_TYPE = "skippedUnsupportedType";
+
+    /**
+     * Both blobs are supported, but by different extractor contributions: a {@code .xlsx} replaced by
+     * a {@code .docx}, a Word document replaced by its PDF rendition. The two extractions do not cut
+     * the content the same way, so their diff would report everything as removed and added. Reported
+     * like the other skips, and reachable as a {@code bdiff:status} when the work re-evaluates the
+     * pair.
+     *
+     * @since 2025.1
+     */
+    public static final String STATUS_SKIPPED_FORMAT_CHANGED = "skippedFormatChanged";
 
     /**
      * The two version blobs are not both {@code ManagedBlob}, so the pair cannot be frozen and

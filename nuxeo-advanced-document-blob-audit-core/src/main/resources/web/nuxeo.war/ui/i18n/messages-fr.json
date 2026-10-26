@@ -21,6 +21,7 @@
   "label.blobaudit.status.retrying": "Relance en cours",
   "label.blobaudit.status.skippedTooLarge": "Trop volumineux",
   "label.blobaudit.status.skippedUnsupportedType": "Format non supporté",
+  "label.blobaudit.status.skippedFormatChanged": "Format modifié",
   "label.blobaudit.status.skippedNotManaged": "Binaire non géré",
   "label.blobaudit.status.skippedListChanged": "Liste remaniée",
   "label.blobaudit.source.trashed": "Dans la corbeille",

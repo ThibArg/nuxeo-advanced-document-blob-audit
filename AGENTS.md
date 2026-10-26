@@ -14,14 +14,14 @@ Pipeline:
 1. `BlobModificationListener` (synchronous, on `aboutToCheckIn` + `documentCheckedIn`, both fired
    on the live document) compares the digests of the blob on the previous and the new version.
 2. If they differ, it fires a `blobContentModified` audit entry (**no business data**: only xpath,
-   filenames and a `diffCorrelationId`) and schedules a `BlobDiffWork`.
+   filenames, mime types and a `diffCorrelationId`) and schedules a `BlobDiffWork`.
 3. `BlobDiffWork` (asynchronous, queue `blobDiff`) extracts and compares the two binaries, then
    stores the unified diff as a **blob** on a dedicated `BlobDiff` document under the
    ACL-restricted `/change-diff/YYYY/MM/DD/` container.
 
-A binary that changed but cannot be diffed (over `maxBlobSize`, or no extractor for the mime type)
-produces the **audit entry only**, with a `skipReason` extended info and no `diffCorrelationId`.
-See the "Skip reporting" invariant below.
+A binary that changed but cannot be diffed (over `maxBlobSize`, no extractor for the mime type, or
+the two versions read by different extractor contributions) produces the **audit entry only**, with
+a `skipReason` extended info and no `diffCorrelationId`. See the "Skip reporting" invariant below.
 
 Formats are supported by contributing `BlobTextExtractor` implementations to the `extractors`
 extension point. The diff engine (`TextDiffer`) is format-agnostic.
@@ -97,8 +97,27 @@ Coverage: `TestBlobDiffConfigDescriptor`, `TestExtractorSelection`,
 Eligibility (`DiffEligibility`) is evaluated, then `sameContent`, then the skip is reported. Moving
 `sameContent` back after the eligibility branch would audit every new version of an over-sized
 document as a binary change even when the binary never moved. `NOT_APPLICABLE` short-circuits
-before `sameContent` and stays fully silent; `TOO_LARGE` and `UNSUPPORTED_TYPE` only produce an
-entry once the digests are known to differ. Coverage: `TestBlobDiffSkipReporting`.
+before `sameContent` and stays fully silent; `TOO_LARGE`, `UNSUPPORTED_TYPE` and `FORMAT_CHANGED`
+only produce an entry once the digests are known to differ, so the same bytes re-uploaded under
+another mime type stay silent. Coverage: `TestBlobDiffSkipReporting`.
+
+**One extractor contribution is one comparability class** (item 61). The pair-level
+`BlobDiffService#getEligibility(docType, xpath, oldBlob, newBlob)` combines the two per-blob
+verdicts, then returns `FORMAT_CHANGED` (`skippedFormatChanged`) when both are eligible but resolve
+to different extractor instances — one per contribution, compared by identity on one snapshot of
+the list. It is the **only** eligibility call of `BlobDiffTrigger` and of
+`BlobDiffWork#ineligibleStatus`: do not inline `DiffEligibility.combine` back into either, they
+would drift apart. Precedence is `NOT_APPLICABLE` > `TOO_LARGE` > `UNSUPPORTED_TYPE` >
+`FORMAT_CHANGED` > `ELIGIBLE`. The check compares contributions, not mime types, so the shipped
+contributions *are* the comparability rules: `ConverterTextExtractor` is contributed three times
+(`converter` for docx/doc/odt/rtf, `pdf`, `legacyPresentation` for `.ppt`) precisely so that a Word
+document replaced by its PDF rendition or by a deck is not diffed, while `.doc` → `.docx` still is.
+Do not fold `pdf` or `legacyPresentation` back into `converter`. Every text format is in
+`plainText` on purpose: `PlainTextExtractor` reads raw lines whatever the mime type, so
+`.txt` → `.json` is a genuine diff; whether `.json` → `.xml` should be split out is an open product
+decision. Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
+the four format cases of `TestBlobDiffSkipReporting`,
+`TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`.
 
 **Blobs inside a list are paired by content, never by index alone** (item 45).
 `BlobModificationListener#pairListEntries` expands a list template on each version separately: a
@@ -109,12 +128,14 @@ matches the other side, which degrades to index pairing when the shape is kept. 
 xpaths (`files:files/0/file`) are an explicit choice and stay compared by index.
 Coverage: `TestBlobDiffVersionPairing`, the four `COR-01` cases.
 
-Both skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
+Three skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
 `BlobDiffWork` when `service.diff()` returns `null` at work time; `skippedTooLarge` **became**
-reachable with SEC-01, because the work now re-evaluates `getEligibility` on the rehydrated blobs
+reachable with SEC-01, because the work now re-evaluates the eligibility of the rehydrated pair
 (`BlobDiffWork#ineligibleStatus`) — a retry, or a work outliving a `maxBlobSize` change, can fail
-it. The purge dialog offers both. This reverses an earlier note claiming `skippedTooLarge` could
-never be persisted; that was true only of the check-in path.
+it; `skippedFormatChanged` is reachable the same way (item 61), by a retry or a work outliving a
+mime type moved to another contribution. The purge dialog offers all three. This reverses an
+earlier note claiming `skippedTooLarge` could never be persisted; that was true only of the
+check-in path.
 
 **`BlobDiffWork` extracts with no transaction open** (item 36). `work()` reads in the work
 transaction, calls `commitOrRollbackTransaction()`, runs `service.diff`, then `startTransaction()`
@@ -202,6 +223,10 @@ platform's 51 were gone.
 `TransactionHelper.runInTransaction` + `Framework.doPrivileged`, and with any `RuntimeException`
 logged rather than propagated, because a vocabulary row must never break startup. The same rule
 applies to `eventCategories`, `nature`, `subject` and every other platform vocabulary.
+A runtime with **no** `eventTypes` directory returns before that block, at `DEBUG`: the component
+starts at the default order 1000 and `DirectoryServiceImpl` at 97, so `getDirectory` answering
+`null` means the directory is genuinely absent, not late. Keep that pre-check — `ds.open` throws a
+`DirectoryException`, and the `ERROR` must stay reserved for a real failure.
 Coverage: `TestAuditEventTypeRegistration`.
 
 **The audit search is a *named search*, and its two halves are wired by string, not by nesting.**
@@ -396,7 +421,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 284 tests (27 test classes)
+mvn -o install                                     # full build, 290 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -415,7 +440,8 @@ mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
-this bundle plus `blobaudit-test-config.xml` and `blobaudit-test-pageprovider-contrib.xml`).
+this bundle plus `blobaudit-test-config.xml`, `blobaudit-test-pageprovider-contrib.xml` and
+`blobaudit-test-vocabulary-template-contrib.xml`).
 `blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
 `blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on,
 `blobaudit-test-noimagepdf-config.xml` to disable a single image extractor,
@@ -431,9 +457,11 @@ xpaths with `<xpath>*</xpath>`, and `blobaudit-test-partial-config.xml` (used by
 `TestBlobDiffService`) to override nothing but `docTypes` and one property of the `converter`
 extractor, and `blobaudit-test-dynamicfacet-contrib.xml` (used by `TestBlobDiffVersionPairing`,
 with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a blob.
-`blobaudit-test-vocabulary-template-contrib.xml` (used by `TestAuditEventTypeRegistration`) supplies
-`template-vocabulary`, which the platform ships in `org.nuxeo.ecm.default.config` — a bundle nothing
-in this test stack deploys, and without which the `eventTypes` directory never registers.
+`blobaudit-test-vocabulary-template-contrib.xml` is deployed by the feature itself, for every
+runtime test: it supplies `template-vocabulary`, which the platform ships in
+`org.nuxeo.ecm.default.config` — a bundle nothing in this test stack deploys, and without which the
+`eventTypes` directory never registers. `DirectoryRegistry` reports that at `DEBUG` only, so the
+symptom was `BlobDiffInitComponent` logging a `DirectoryException` at `ERROR` once per test class.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 `TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
 `BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`. Its abort test deploys
@@ -461,7 +489,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 60 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 61 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1411,6 +1439,32 @@ cited here as "code review 2026-10".
     `xmlbeans`, PDFBox and `pdfbox-io` are now `provided`, with a comment saying why and that no
     version may be pinned here. `dependency:analyze` reports nothing used but undeclared, and the
     package still holds the bundle alone. README, "Deployment", says so.
+
+61. *(product request)* A new version holding a file of another format — an `.xlsx` replaced by a
+    `.docx`, a Word document by its PDF rendition — was diffed like any other. The two extractions
+    cut the content differently (cells, paragraphs, rendered lines), so the diff reported everything
+    as removed and added: noise for the auditor, misleading counters, and up to `maxDiffChars` of
+    both documents copied into `/change-diff` for nothing. docx → pdf was not even caught by a
+    "different extractor" test, since a single `converter` contribution read both.
+
+    Such a change is now audited as `skippedFormatChanged`, without a diff (see the "comparability
+    class" invariant). New pair-level `BlobDiffService#getEligibility`, used by the trigger and the
+    work alike; `DiffEligibility.FORMAT_CHANGED`; `pdf` and `legacyPresentation` split out of
+    `converter`, same class and properties; `oldMimeType` / `newMimeType` extended infos on every
+    `blobContentModified` entry; audit comment `binary changed (format changed)`; status label
+    (EN/FR) and purge dialog entry. Rejected: diffing anyway with a "format changed" header line in
+    the body — the counters would still be wrong, the noise would still be stored, and a header in
+    a blob cannot be searched where a status can. Text formats were left in one class on purpose
+    (see the invariant).
+
+    Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
+    `TestBlobDiffSkipReporting#testASpreadsheetReplacedByAWordDocumentIsAuditedWithoutADiff`,
+    `#testAWordDocumentReplacedByItsPdfRenditionIsAuditedWithoutADiff`,
+    `#testTheSameBytesUnderAnotherFormatAreNotAudited`, `#testAConversionWithinOneExtractorIsStillDiffed`
+    and `TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`. With the format
+    check neutralised, the pair test, the two skip tests and the retry test failed, and the
+    same-bytes and `.xls` → `.xlsx` tests passed, as they must; with `application/pdf` folded back
+    into `converter`, the PDF test failed. 284 tests → 290.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

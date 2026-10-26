@@ -19,9 +19,12 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.AUDIT_CATEGORY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EVENT_BLOB_MODIFIED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_LIST_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
@@ -519,6 +522,8 @@ public class BlobModificationListener implements EventListener {
         ctx.setProperty(EXT_XPATH, xpath);
         ctx.setProperty(EXT_OLD_FILENAME, filenameOf(oldBlob));
         ctx.setProperty(EXT_NEW_FILENAME, filenameOf(newBlob));
+        ctx.setProperty(EXT_OLD_MIME_TYPE, mimeTypeOf(oldBlob));
+        ctx.setProperty(EXT_NEW_MIME_TYPE, mimeTypeOf(newBlob));
         if (outcome.skipReason() != null) {
             ctx.setProperty(EXT_SKIP_REASON, outcome.skipReason());
         } else {
@@ -534,6 +539,9 @@ public class BlobModificationListener implements EventListener {
         if (STATUS_SKIPPED_TYPE.equals(outcome.skipReason())) {
             return "binary changed (unsupported format)";
         }
+        if (STATUS_SKIPPED_FORMAT_CHANGED.equals(outcome.skipReason())) {
+            return "binary changed (format changed)";
+        }
         if (STATUS_SKIPPED_NOT_MANAGED.equals(outcome.skipReason())) {
             return "binary changed (blob not managed by a provider)";
         }
@@ -545,6 +553,11 @@ public class BlobModificationListener implements EventListener {
 
     protected String filenameOf(Blob blob) {
         return blob != null && blob.getFilename() != null ? blob.getFilename() : "";
+    }
+
+    /** @since 2025.1 */
+    protected String mimeTypeOf(Blob blob) {
+        return blob != null && blob.getMimeType() != null ? blob.getMimeType() : "";
     }
 
 }

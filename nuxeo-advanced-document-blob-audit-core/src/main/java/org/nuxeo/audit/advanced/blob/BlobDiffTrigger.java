@@ -78,6 +78,8 @@ public final class BlobDiffTrigger {
      * <b>The order of the checks is significant.</b> Eligibility used to be evaluated before
      * {@link #sameContent}; reporting a skip requires the opposite, otherwise every new version of
      * an over-sized document would be audited as a binary change even when the binary did not move.
+     * The same holds for a format change: identical bytes re-uploaded under another mime type stay
+     * silent.
      *
      * @return never {@code null}; see {@link Outcome}
      */
@@ -92,9 +94,7 @@ public final class BlobDiffTrigger {
         if (service == null) {
             return Outcome.none();
         }
-        DiffEligibility eligibility = DiffEligibility.combine(
-                service.getEligibility(liveDoc.getType(), xpath, oldBlob),
-                service.getEligibility(liveDoc.getType(), xpath, newBlob));
+        DiffEligibility eligibility = service.getEligibility(liveDoc.getType(), xpath, oldBlob, newBlob);
         if (eligibility == DiffEligibility.NOT_APPLICABLE) {
             return Outcome.none();
         }

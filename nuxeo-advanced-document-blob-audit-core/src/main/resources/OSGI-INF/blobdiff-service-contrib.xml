@@ -25,6 +25,8 @@
       extractor overrides a catch-all one. Supporting a new format means contributing here.
       Contributions with the same name merge: a later one only overrides what it sets, and its
       properties are added to the earlier ones.
+      Each contribution is also a comparability class: a new version whose blob is read by another
+      contribution than the previous one is audited as skippedFormatChanged, without a diff.
     </documentation>
   </extension-point>
 
@@ -111,7 +113,13 @@
       <property name="skipBlankLines">true</property>
     </extractor>
 
-    <!-- Word, PDF, ODT, RTF... via the platform any2text converter: no new code. -->
+    <!--
+      Word processing formats via the platform any2text converter: no new code. One contribution is
+      one comparability class: a .doc, .docx, .odt or .rtf replacing one another is diffed, since
+      the converter cuts all of them into paragraphs. PDF and legacy .ppt use the same class but
+      contributions of their own, so that a Word document replaced by its PDF rendition, or by a
+      deck, is audited as skippedFormatChanged instead of producing a diff where every line differs.
+    -->
     <extractor name="converter" order="90"
                class="org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor">
       <mimeTypes>
@@ -119,8 +127,25 @@
         <mimeType>application/msword</mimeType>
         <mimeType>application/vnd.oasis.opendocument.text</mimeType>
         <mimeType>application/rtf</mimeType>
+      </mimeTypes>
+      <property name="converter">any2text</property>
+      <property name="minLineLength">1</property>
+    </extractor>
+
+    <!-- PDF: one line per rendered line, not per paragraph, hence a class of its own. -->
+    <extractor name="pdf" order="90"
+               class="org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor">
+      <mimeTypes>
         <mimeType>application/pdf</mimeType>
-        <!-- legacy binary .ppt: text only, no image inventory -->
+      </mimeTypes>
+      <property name="converter">any2text</property>
+      <property name="minLineLength">1</property>
+    </extractor>
+
+    <!-- Legacy binary .ppt: flat slide text, no image inventory. -->
+    <extractor name="legacyPresentation" order="90"
+               class="org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor">
+      <mimeTypes>
         <mimeType>application/vnd.ms-powerpoint</mimeType>
       </mimeTypes>
       <property name="converter">any2text</property>

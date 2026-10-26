@@ -418,6 +418,31 @@ public class TestBlobDiffManagement {
     }
 
     /**
+     * The work re-evaluates the format of the pair too: a replay, or a work outliving a change of
+     * the extractor contributions, must not compare two blobs read by different extractors.
+     */
+    @Test
+    public void testARetryOnAPairThatChangedFormatIsFiledAsSuch() throws Exception {
+        DocumentModel v1 = file("format-v1", textBlob("alpha\nbeta", "text/plain", "notes.txt"));
+        DocumentModel v2 = file("format-v2", textBlob("alpha\nBETA", BlobAuditTestHelper.XLSX_MIME, "book.xlsx"));
+        ManagedBlob b1 = storedBlob(v1);
+        ManagedBlob b2 = storedBlob(v2);
+        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
+                b2.getProviderId(), b2.getKey(), BlobAuditTestHelper.XLSX_MIME, b2.getLength());
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        txFeature.nextTransaction();
+
+        run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(v2.getId());
+        assertEquals("the failed diff must still be replaced, not duplicated", 1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED,
+                diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertNull(diffs.get(0).getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB));
+    }
+
+    /**
      * COR-01, end to end: an extraction that <b>fails</b> must be filed as {@code error}, not as
      * {@code skippedUnsupportedType}.
      * <p>

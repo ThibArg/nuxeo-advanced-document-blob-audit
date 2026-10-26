@@ -41,12 +41,14 @@
           <paper-item key="">[[i18n('label.blobaudit.purge.anyStatus')]]</paper-item>
           <paper-item key="ok">[[i18n('label.blobaudit.status.ok')]]</paper-item>
           <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
-          <!-- Both skip statuses are reachable on a BlobDiff. skippedUnsupportedType is set by
-               BlobDiffWork when a side has no extractor at diff time; skippedTooLarge since the
-               work re-evaluates getEligibility on the rehydrated blobs, which a retry and a work
-               outliving a maxBlobSize change can both fail (SEC-01). -->
+          <!-- The three skip statuses are reachable on a BlobDiff, through BlobDiffWork, which
+               re-evaluates the eligibility of the rehydrated pair before extracting: a retry, or a
+               work outliving a configuration change, can find it too large (SEC-01), unsupported,
+               or read by two different extractor contributions. skippedUnsupportedType is also set
+               when a side has no extractor left at diff time. -->
           <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
           <paper-item key="skippedTooLarge">[[i18n('label.blobaudit.status.skippedTooLarge')]]</paper-item>
+          <paper-item key="skippedFormatChanged">[[i18n('label.blobaudit.status.skippedFormatChanged')]]</paper-item>
         </nuxeo-select>
         <div class="blobdiff-warning">
           <iron-icon icon="icons:warning"></iron-icon>
