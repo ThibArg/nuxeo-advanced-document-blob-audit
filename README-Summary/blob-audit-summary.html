@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nuxeo-advanced-document-blob-audit — Developer summary</title>
+<style>
+  :root{
+    --sync:#1565c0; --sync-bg:#e8f1fb;
+    --async:#ef6c00; --async-bg:#fff4e8;
+    --audit:#6a1b9a; --audit-bg:#f5ecfa;
+    --ok:#2e7d32; --ok-bg:#e9f5ea;
+    --warn:#b26a00; --warn-bg:#fff8e1;
+    --restricted:#c62828; --restricted-bg:#fdecec;
+    --muted:#666; --border:#d9dde3;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#222;background:#fafbfc;margin:0;line-height:1.5}
+  main{max-width:1080px;margin:0 auto;padding:32px 24px 64px}
+  h1{font-size:1.9em;margin:0 0 4px}
+  h2{font-size:1.35em;margin:44px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--border)}
+  h2 .num{color:var(--muted);font-weight:400;margin-right:6px}
+  h3{font-size:1.05em;margin:18px 0 6px}
+  .subtitle{color:var(--muted);margin:0 0 20px}
+  nav.toc{font-size:.9em;color:var(--muted);margin:0 0 20px}
+  nav.toc a{color:var(--sync);text-decoration:none;margin-right:12px;white-space:nowrap}
+  code{font-family:Menlo,Consolas,monospace;font-size:.88em;background:#eef0f3;padding:1px 5px;border-radius:4px}
+  pre{font-family:Menlo,Consolas,monospace;font-size:.85em;background:#fff;border:1px solid var(--border);border-radius:6px;padding:12px 14px;overflow-x:auto;line-height:1.45;margin:8px 0}
+  pre code{background:none;padding:0}
+  .card{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 20px;margin:12px 0}
+  .tldr{background:#fff;border-left:5px solid var(--sync);border-radius:6px;padding:14px 22px}
+  .tldr li{margin:4px 0}
+  .figure{background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px;margin:14px 0}
+  .figure svg{width:100%;height:auto;display:block}
+  .caption{color:var(--muted);font-size:.88em;text-align:center;margin-top:4px}
+  table{border-collapse:collapse;width:100%;background:#fff;margin:10px 0;font-size:.92em}
+  th,td{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:#f1f3f6}
+  .yes{color:var(--ok);font-weight:600}
+  .no{color:var(--restricted);font-weight:600}
+  .legend span{display:inline-block;margin-right:16px;font-size:.88em}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .two-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:800px){.two-cols{grid-template-columns:1fr}}
+  .pipeline{display:flex;align-items:stretch;flex-wrap:wrap;margin:12px 0}
+  .step{flex:1 1 200px;background:#fff;border:2px solid var(--async);border-radius:8px;padding:10px 12px;font-size:.9em}
+  .step h4{margin:0 0 4px;font-size:.95em;color:var(--async)}
+  .step.tx{border-color:var(--sync)} .step.tx h4{color:var(--sync)}
+  .step.store{border-color:var(--ok)} .step.store h4{color:var(--ok)}
+  .arrow{display:flex;align-items:center;padding:0 6px;font-size:1.5em;color:#999}
+  .callout{border-left:4px solid var(--warn);background:var(--warn-bg);padding:10px 14px;border-radius:4px;margin:12px 0}
+  .callout.red{border-color:var(--restricted);background:var(--restricted-bg)}
+  .callout.blue{border-color:var(--sync);background:var(--sync-bg)}
+  .badge{display:inline-block;font-size:.75em;font-weight:700;letter-spacing:.04em;padding:1px 8px;border-radius:10px;vertical-align:1px}
+  .badge.k{color:#1b5e20;background:#d6ecd8} .badge.p{color:#0d47a1;background:#d9e7f7}
+  .badge.s{color:#0d47a1;background:#d9e7f7} .badge.a{color:#b34700;background:#ffe2c4} .badge.r{color:#b71c1c;background:#f9d6d6}
+  .diff .add{color:#1b5e20;background:rgba(46,125,50,.12);display:block}
+  .diff .rem{color:#b71c1c;background:rgba(198,40,40,.10);display:block}
+  .diff .chg{color:#e65100;background:rgba(239,108,0,.12);display:block}
+  footer{margin-top:48px;color:var(--muted);font-size:.85em}
+</style>
+</head>
+<body>
+<main>
+
+<h1>nuxeo-advanced-document-blob-audit</h1>
+<p class="subtitle">Developer summary · Nuxeo LTS 2025 · standalone plugin. Based on a read-only review of the sources (October 2026).</p>
+
+<nav class="toc">
+  <a href="#s1">1 Big picture</a><a href="#s2">2 Trigger</a><a href="#s3">3 Sync decision</a><a href="#s4">4 Audit entry</a>
+  <a href="#s5">5 Background job</a><a href="#s6">6 Extractors</a><a href="#s7">7 Diff engine</a><a href="#s8">8 BlobDiff &amp; links</a>
+  <a href="#s9">9 Security</a><a href="#s10">10 Web UI</a><a href="#s11">11 Configuration</a><a href="#s12">12 Code map</a><a href="#s13">13 Good to know</a>
+</nav>
+
+<div class="tldr">
+  <strong>In a nutshell</strong>
+  <ul>
+    <li>When a document gets a <strong>new version</strong> and the bytes of a watched file have <strong>really changed</strong>, the plugin compares that file with the one in the previous version.</li>
+    <li><strong>Now</strong> (inside the user's transaction): a small audit entry <code>blobContentModified</code>, holding <strong>no business content</strong>, only the xpath, the file names and a <em>correlation id</em>.</li>
+    <li><strong>Later</strong> (background job): both files are read, an extractor chosen by <strong>MIME type</strong> turns each into comparable units, one generic engine diffs them, and the result is stored in a <code>BlobDiff</code> document.</li>
+    <li>Every <code>BlobDiff</code> lives in a locked-down folder, <code>/change-diff/yyyy/MM/dd</code>, readable only by the <strong>auditors group</strong> (default <code>administrators</code>). Nothing is ever written on the source document.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ 1 -->
+<h2 id="s1"><span class="num">1.</span>The big picture</h2>
+<div class="legend">
+  <span><i class="dot" style="background:var(--sync)"></i>synchronous, inside the user's transaction</span>
+  <span><i class="dot" style="background:var(--async)"></i>asynchronous, after commit</span>
+  <span><i class="dot" style="background:var(--audit)"></i>audit log</span>
+  <span><i class="dot" style="background:var(--ok)"></i>stored result</span>
+</div>
+<div class="figure">
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
+  <rect x="0" y="0" width="472" height="340" fill="#e8f1fb"/>
+  <rect x="478" y="0" width="522" height="340" fill="#fff4e8"/>
+  <text x="14" y="24" font-size="12" font-weight="700" fill="#1565c0">SYNCHRONOUS (user's transaction)</text>
+  <text x="492" y="24" font-size="12" font-weight="700" fill="#ef6c00">AFTER COMMIT (asynchronous)</text>
+  <rect x="18" y="130" width="172" height="90" rx="10" fill="#fff" stroke="#1565c0" stroke-width="2"/>
+  <text x="104" y="160" font-size="13" text-anchor="middle" font-weight="700">User creates a</text>
+  <text x="104" y="178" font-size="13" text-anchor="middle" font-weight="700">new version</text>
+  <text x="104" y="200" font-size="12" text-anchor="middle">(check-in: v1.0 → v1.1)</text>
+  <rect x="230" y="115" width="222" height="120" rx="10" fill="#fff" stroke="#1565c0" stroke-width="2"/>
+  <text x="341" y="142" font-size="13" text-anchor="middle" font-weight="700">BlobModificationListener</text>
+  <text x="341" y="166" font-size="12.5" text-anchor="middle">finds the exact pair</text>
+  <text x="341" y="184" font-size="12.5" text-anchor="middle">v1.0 ↔ v1.1, compares the</text>
+  <text x="341" y="202" font-size="12.5" text-anchor="middle">two digests, decides (§3)</text>
+  <text x="341" y="258" font-size="11.5" text-anchor="middle" font-style="italic" fill="#555">never opens a file:</text>
+  <text x="341" y="274" font-size="11.5" text-anchor="middle" font-style="italic" fill="#555">size, MIME type, digest only</text>
+  <line x1="190" y1="175" x2="228" y2="175" stroke="#777" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="540" y="45" width="232" height="100" rx="10" fill="#fff" stroke="#6a1b9a" stroke-width="2"/>
+  <text x="656" y="72" font-size="13" text-anchor="middle" font-weight="700">Audit log entry</text>
+  <text x="656" y="93" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">blobContentModified</text>
+  <text x="656" y="112" font-size="12.5" text-anchor="middle">xpath, file names, link id</text>
+  <text x="656" y="130" font-size="12.5" text-anchor="middle" font-style="italic">no business content</text>
+  <text x="656" y="163" font-size="11.5" text-anchor="middle" font-style="italic" fill="#555">→ document History tab</text>
+  <rect x="540" y="205" width="232" height="100" rx="10" fill="#fff" stroke="#ef6c00" stroke-width="2"/>
+  <text x="656" y="232" font-size="13" text-anchor="middle" font-weight="700">BlobDiffWork</text>
+  <text x="656" y="252" font-size="12.5" text-anchor="middle">queue “blobDiff”, 2 threads</text>
+  <text x="656" y="270" font-size="12.5" text-anchor="middle">extractor chosen by MIME</text>
+  <text x="656" y="288" font-size="12.5" text-anchor="middle">type, reads, compares</text>
+  <rect x="800" y="205" width="186" height="100" rx="10" fill="#e9f5ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="893" y="232" font-size="13" text-anchor="middle" font-weight="700">BlobDiff document</text>
+  <text x="893" y="252" font-size="12" text-anchor="middle" font-family="Menlo, monospace">/change-diff/y/m/d</text>
+  <text x="893" y="270" font-size="12.5" text-anchor="middle">summary + counters</text>
+  <text x="893" y="288" font-size="12.5" text-anchor="middle">+ the diff as a .txt</text>
+  <text x="893" y="324" font-size="11.5" text-anchor="middle" font-style="italic" fill="#c62828">auditors only</text>
+  <line x1="452" y1="150" x2="538" y2="100" stroke="#777" stroke-width="2" marker-end="url(#a1)"/>
+  <line x1="452" y1="200" x2="538" y2="252" stroke="#777" stroke-width="2" marker-end="url(#a1)"/>
+  <line x1="772" y1="255" x2="798" y2="255" stroke="#777" stroke-width="2" marker-end="url(#a1)"/>
+  <text x="470" y="110" font-size="11" fill="#555" text-anchor="end">event</text>
+  <text x="470" y="250" font-size="11" fill="#555" text-anchor="end">job</text>
+  <path d="M772,95 L893,95 L893,203" fill="none" stroke="#6a1b9a" stroke-width="1.6" stroke-dasharray="6,4"/>
+  <text x="832" y="87" font-size="11.5" text-anchor="middle" fill="#6a1b9a">same correlation id</text>
+</svg>
+<div class="caption">One check-in, one decision per watched file property, two outputs: a lightweight audit entry now, a full diff document later.</div>
+</div>
+
+<!-- ============================================================ 2 -->
+<h2 id="s2"><span class="num">2.</span>What triggers it: versions, not saves</h2>
+<div class="two-cols">
+  <div class="card">
+    <h3>The trigger</h3>
+    <p style="margin:4px 0">Two events of a check-in, both fired on the <em>live</em> document:</p>
+    <ol>
+      <li><code>aboutToCheckIn</code>: which version is the last one <em>right now</em>? → v1.0</li>
+      <li><code>documentCheckedIn</code>: which version was just created (<code>checkedInVersionRef</code>)? → v1.1</li>
+    </ol>
+    <p style="margin:4px 0">The pair is exact, nothing is guessed from version labels. Any way of creating a version counts: manual, automatic versioning policy, restore, publish…</p>
+  </div>
+  <div class="card">
+    <h3>Ignored (no audit entry, no diff)</h3>
+    <ul>
+      <li>A plain save that creates <strong>no version</strong></li>
+      <li>The <strong>first</strong> version (nothing to compare with)</li>
+      <li>A file <strong>added</strong> or <strong>removed</strong>: only a <em>replaced</em> file is audited</li>
+      <li>Same <strong>digest</strong> on both sides, even if renamed</li>
+      <li>Document types / xpaths not configured</li>
+      <li>Everything, when the feature is <strong>disabled (the default)</strong></li>
+      <li>Code muted on purpose: context flag <code>disableBlobDiffListener</code> or <code>runDisabled(...)</code> (imports, migrations)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ 3 -->
+<h2 id="s3"><span class="num">3.</span>The synchronous decision (fast, no content read)</h2>
+<p>For each watched xpath, <code>BlobDiffTrigger</code> decides from metadata only. The order matters: the digest check comes <em>before</em> any skip is reported, so an over-sized file whose bytes did not move stays silent.</p>
+<div class="figure">
+<svg viewBox="0 0 1000 430" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
+  <rect x="40" y="20" width="430" height="70" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+  <text x="255" y="44" font-size="13.5" text-anchor="middle" font-weight="700">1. Is it in scope?</text>
+  <text x="255" y="63" font-size="12.5" text-anchor="middle">enabled · doc type &amp; xpath configured ·</text>
+  <text x="255" y="80" font-size="12.5" text-anchor="middle">a previous version exists · a file on both sides</text>
+  <line x1="470" y1="55" x2="558" y2="55" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="514" y="47" font-size="12" text-anchor="middle" fill="#c62828" font-weight="700">no</text>
+  <rect x="560" y="30" width="400" height="50" rx="10" fill="#f1f3f6" stroke="#999" stroke-width="1.5"/>
+  <text x="760" y="60" font-size="13" text-anchor="middle">Nothing happens (silent)</text>
+  <line x1="255" y1="90" x2="255" y2="123" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="265" y="112" font-size="12" fill="#2e7d32" font-weight="700">yes</text>
+  <rect x="40" y="125" width="430" height="60" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+  <text x="255" y="149" font-size="13.5" text-anchor="middle" font-weight="700">2. Did the bytes really change?</text>
+  <text x="255" y="169" font-size="12.5" text-anchor="middle">digest of v1.0 vs digest of v1.1</text>
+  <line x1="470" y1="155" x2="558" y2="155" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="514" y="147" font-size="12" text-anchor="middle" fill="#c62828" font-weight="700">no</text>
+  <rect x="560" y="130" width="400" height="50" rx="10" fill="#f1f3f6" stroke="#999" stroke-width="1.5"/>
+  <text x="760" y="160" font-size="13" text-anchor="middle">Nothing happens (same binary)</text>
+  <line x1="255" y1="185" x2="255" y2="218" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="265" y="207" font-size="12" fill="#2e7d32" font-weight="700">yes</text>
+  <rect x="40" y="220" width="430" height="88" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+  <text x="255" y="245" font-size="13.5" text-anchor="middle" font-weight="700">3. Can it be diffed?</text>
+  <text x="255" y="265" font-size="12.5" text-anchor="middle">size ≤ maxBlobSize · an extractor accepts the MIME type ·</text>
+  <text x="255" y="283" font-size="12.5" text-anchor="middle">file held by a blob provider · list blobs: entries</text>
+  <text x="255" y="300" font-size="12.5" text-anchor="middle">not moved / removed</text>
+  <line x1="470" y1="264" x2="558" y2="264" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="514" y="256" font-size="12" text-anchor="middle" fill="#c62828" font-weight="700">no</text>
+  <rect x="560" y="212" width="400" height="108" rx="10" fill="#fff8e1" stroke="#b26a00" stroke-width="2"/>
+  <text x="760" y="235" font-size="13.5" text-anchor="middle" font-weight="700">Audit entry WITH skipReason — no BlobDiff</text>
+  <text x="580" y="258" font-size="12" font-family="Menlo, monospace">skippedTooLarge</text>
+  <text x="780" y="258" font-size="12">blob &gt; maxBlobSize</text>
+  <text x="580" y="276" font-size="12" font-family="Menlo, monospace">skippedUnsupportedType</text>
+  <text x="780" y="276" font-size="12">no extractor (§6)</text>
+  <text x="580" y="294" font-size="12" font-family="Menlo, monospace">skippedNotManaged</text>
+  <text x="780" y="294" font-size="12">no provider / key</text>
+  <text x="580" y="312" font-size="12" font-family="Menlo, monospace">skippedListChanged</text>
+  <text x="780" y="312" font-size="12">list entries moved</text>
+  <line x1="255" y1="308" x2="255" y2="341" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="265" y="330" font-size="12" fill="#2e7d32" font-weight="700">yes</text>
+  <rect x="40" y="343" width="430" height="72" rx="10" fill="#e9f5ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="255" y="366" font-size="13.5" text-anchor="middle" font-weight="700">Audit entry WITH diffCorrelationId</text>
+  <text x="255" y="386" font-size="12.5" text-anchor="middle">+ BlobDiffWork scheduled, run only after commit</text>
+  <text x="255" y="404" font-size="12.5" text-anchor="middle">(rollback ⇒ no entry, no diff)</text>
+  <text x="760" y="362" font-size="12" text-anchor="middle" fill="#555" font-style="italic">Why audit a change that cannot be diffed?</text>
+  <text x="760" y="380" font-size="12" text-anchor="middle" fill="#555" font-style="italic">For an audit tool, "no entry" must always</text>
+  <text x="760" y="398" font-size="12" text-anchor="middle" fill="#555" font-style="italic">mean "no change", never "could not tell".</text>
+</svg>
+<div class="caption">A version that replaced two watched files produces two independent decisions: up to two entries and two BlobDiffs.</div>
+</div>
+
+<!-- ============================================================ 4 -->
+<h2 id="s4"><span class="num">4.</span>The audit entry</h2>
+<p>A regular Nuxeo audit entry, category <em>document</em>, so it shows up in the document's <strong>History</strong> tab. The plugin contributes the audit route that persists the event and adds it to the <code>eventTypes</code> vocabulary.</p>
+<pre>eventId     blobContentModified
+docUUID     &lt;id of the live document&gt;
+principal   jdoe                         (the user who created the version)
+extended    xpath             = file:content
+            oldFilename       = budget-v1.xlsx
+            newFilename       = budget-v2.xlsx
+            diffCorrelationId = 7f3c…    ← the BlobDiff will carry the same id
+            (or skipReason = skipped…, never both)</pre>
+<p>The correlation id is generated <strong>before</strong> the <code>BlobDiff</code> exists: it is a "promise" id that the background job stamps on the document it creates.</p>
+
+<!-- ============================================================ 5 -->
+<h2 id="s5"><span class="num">5.</span>The background job (<code>BlobDiffWork</code>)</h2>
+<div class="pipeline">
+  <div class="step tx"><h4>① Short read (transaction)</h4>Already a BlobDiff with this correlation id? → stop.<br>Source deleted? → <code>error</code> BlobDiff.<br>Re-check the configuration. Load both files <strong>by storage key</strong>.</div>
+  <div class="arrow">→</div>
+  <div class="step"><h4>② Heavy part (NO transaction)</h4>Materialise each file once to a local temp file, extract (§6), diff (§7).<br>No transaction is open, so no transaction timeout on big files.</div>
+  <div class="arrow">→</div>
+  <div class="step store"><h4>③ Write (new transaction)</h4>Check "already done?" again, create the dated folders if needed, then the <code>BlobDiff</code>, as <strong>system</strong>.</div>
+</div>
+<ul>
+  <li><strong>Frozen pair.</strong> The storage keys (provider + key) of both files are captured at check-in: a later edit cannot turn v1.0 → v1.1 into v1.0 → "whatever is current".</li>
+  <li><strong>Idempotent.</strong> Deterministic work id (a pair is never queued twice) and correlation-id check (a job that runs twice never creates two BlobDiffs). Transient failures are retried twice.</li>
+  <li><strong>Isolated.</strong> Dedicated <code>blobDiff</code> queue, 2 threads: a burst of large Office/PDF check-ins cannot starve other work.</li>
+  <li><strong>Always leaves a trace.</strong> Once the audit entry has a correlation id, the job ends with a <code>BlobDiff</code>: <code>ok</code>, <code>skipped…</code> (e.g. <code>maxBlobSize</code> lowered meanwhile) or <code>error</code> (retryable).</li>
+</ul>
+
+<!-- ============================================================ 6 -->
+<h2 id="s6"><span class="num">6.</span>Choosing the extractor: an ordered MIME-type ladder</h2>
+<p>No scoring, no lookup table: extractors are sorted by <code>order</code> and the <strong>first one that accepts the MIME type wins</strong> (lower-cased, <code>; charset=…</code> removed). <code>text/*</code> is the only wildcard; everything else is an exact match.</p>
+<div class="figure">
+<svg viewBox="0 0 1100 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
+  <rect x="40" y="8" width="420" height="44" rx="10" fill="#eef2f7" stroke="#333" stroke-width="2"/>
+  <text x="250" y="36" font-size="13" text-anchor="middle" font-weight="700">MIME type of the file</text>
+  <line x1="250" y1="52" x2="250" y2="70" stroke="#777" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- rungs -->
+  <g font-size="12">
+    <rect x="40" y="72" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+    <text x="56" y="96" font-weight="700" font-size="12.5">order 10 · spreadsheet</text>
+    <text x="56" y="120">.xlsx  .xlsm  .xls</text>
+    <rect x="40" y="160" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+    <text x="56" y="184" font-weight="700" font-size="12.5">order 15 · presentation</text>
+    <text x="56" y="208">.pptx  .ppsx  .potx  .pptm  .ppsm</text>
+    <rect x="40" y="248" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+    <text x="56" y="272" font-weight="700" font-size="12.5">order 20 · plainText</text>
+    <text x="56" y="296">text/* · json · xml · x-yaml · javascript · sql</text>
+    <rect x="40" y="336" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+    <text x="56" y="360" font-weight="700" font-size="12.5">order 90 · converter</text>
+    <text x="56" y="384">.docx  .doc  .odt  .rtf  .pdf  .ppt (legacy)</text>
+  </g>
+  <g stroke="#777" stroke-width="2">
+    <line x1="250" y1="138" x2="250" y2="158" marker-end="url(#a3)"/>
+    <line x1="250" y1="226" x2="250" y2="246" marker-end="url(#a3)"/>
+    <line x1="250" y1="314" x2="250" y2="334" marker-end="url(#a3)"/>
+    <line x1="250" y1="402" x2="250" y2="418" marker-end="url(#a3)"/>
+  </g>
+  <g font-size="10.5" fill="#c62828"><text x="260" y="153">no match</text><text x="260" y="241">no match</text><text x="260" y="329">no match</text><text x="260" y="414">no match</text></g>
+  <!-- match arrows -->
+  <g stroke="#2e7d32" stroke-width="2">
+    <line x1="460" y1="105" x2="537" y2="105" marker-end="url(#a3)"/>
+    <line x1="460" y1="193" x2="537" y2="193" marker-end="url(#a3)"/>
+    <line x1="460" y1="281" x2="537" y2="281" marker-end="url(#a3)"/>
+    <line x1="460" y1="369" x2="537" y2="369" marker-end="url(#a3)"/>
+  </g>
+  <!-- results -->
+  <g font-size="12">
+    <rect x="540" y="72" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
+    <rect x="950" y="80" width="96" height="20" rx="10" fill="#d6ecd8"/><text x="998" y="94" font-size="10.5" text-anchor="middle" font-weight="700" fill="#1b5e20">KEYED</text>
+    <text x="556" y="96" font-size="13" font-weight="700">SpreadsheetExtractor</text>
+    <text x="556" y="120">one non-empty cell (POI, streamed) · <tspan font-family="Menlo, monospace" font-size="11">Budget!B12 = 120</tspan></text>
+    <rect x="540" y="160" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
+    <rect x="950" y="168" width="96" height="20" rx="10" fill="#d9e7f7"/><text x="998" y="182" font-size="10.5" text-anchor="middle" font-weight="700" fill="#0d47a1">POSITIONAL</text>
+    <text x="556" y="184" font-size="13" font-weight="700">PresentationExtractor</text>
+    <text x="556" y="208">slide markers, paragraphs, table rows, notes · <tspan font-family="Menlo, monospace" font-size="11">## Slide: Q3</tspan></text>
+    <rect x="540" y="248" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
+    <rect x="950" y="256" width="96" height="20" rx="10" fill="#d9e7f7"/><text x="998" y="270" font-size="10.5" text-anchor="middle" font-weight="700" fill="#0d47a1">POSITIONAL</text>
+    <text x="556" y="272" font-size="13" font-weight="700">PlainTextExtractor</text>
+    <text x="556" y="296">one line (BOM stripped, trimmed, blank lines dropped)</text>
+    <rect x="540" y="336" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
+    <rect x="950" y="344" width="96" height="20" rx="10" fill="#d9e7f7"/><text x="998" y="358" font-size="10.5" text-anchor="middle" font-weight="700" fill="#0d47a1">POSITIONAL</text>
+    <text x="556" y="360" font-size="13" font-weight="700">ConverterTextExtractor</text>
+    <text x="556" y="384">platform converter <tspan font-family="Menlo, monospace" font-size="11">any2text</tspan>, then one line</text>
+  </g>
+  <rect x="40" y="420" width="1020" height="44" rx="10" fill="#fff8e1" stroke="#b26a00" stroke-width="2"/>
+  <text x="60" y="447" font-size="12.5" font-weight="700">No extractor accepts it</text>
+  <text x="232" y="447" font-size="12.5">(zip, jpg, mp4, octet-stream, no MIME type…) → no default, nothing guessed →</text>
+  <text x="1045" y="447" font-size="12.5" font-family="Menlo, monospace" text-anchor="end">skippedUnsupportedType</text>
+</svg>
+<div class="caption">Walked top to bottom; nothing below the first match is consulted.</div>
+</div>
+<div class="callout blue">
+  <strong>Extension point.</strong> Adding a format = contributing one extractor to the <code>extractors</code> point, with its MIME types and an <code>order</code> (lower to pre-empt a built-in, higher to catch what the built-ins miss). The diff engine does not change. Beware: a contribution at order 5 accepting <code>*</code> would shadow everything.
+</div>
+
+<h3>Optional: the image inventory (<code>imageAnalysisLevel = 1</code>)</h3>
+<p>Text extraction ignores pictures. At level 1 (default 0, off), a <strong>second ladder</strong> (the <code>imageExtractors</code> point: <code>imageWord</code>, <code>imageSpreadsheet</code>, <code>imagePresentation</code>, <code>imagePdf</code>, all backed by <code>ImageInventoryExtractor</code>) lists every placed image with a stable key and its SHA-256, e.g. <code>excel:image:Budget:B4:F18</code>, <code>powerpoint:slide:3:image:image1.png</code>, <code>pdf:page:2:image:1</code>. The result is a keyed diff appended under a <code># Images</code> heading. Images are compared by hash, not visually; PDF images are <strong>never decoded</strong> (raw stream hashed — protects against compression bombs), so a re-compressed identical-looking picture is reported as changed.</p>
+
+<!-- ============================================================ 7 -->
+<h2 id="s7"><span class="num">7.</span>The diff engine: one <code>TextDiffer</code> for every format</h2>
+<p>Every extractor produces a <code>DiffableContent</code>: a list of <code>ContentLine(key, value)</code>. Whether units carry a key decides the comparison mode. No external diff library.</p>
+<div class="figure">
+<svg viewBox="0 0 1100 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
+  <rect x="60" y="10" width="400" height="50" rx="10" fill="#fff" stroke="#333" stroke-width="1.8"/>
+  <text x="260" y="40" font-size="13" text-anchor="middle" font-weight="700">units from v1.0</text>
+  <rect x="640" y="10" width="400" height="50" rx="10" fill="#fff" stroke="#333" stroke-width="1.8"/>
+  <text x="840" y="40" font-size="13" text-anchor="middle" font-weight="700">units from v1.1</text>
+  <line x1="260" y1="60" x2="480" y2="98" stroke="#777" stroke-width="2" marker-end="url(#a4)"/>
+  <line x1="840" y1="60" x2="620" y2="98" stroke="#777" stroke-width="2" marker-end="url(#a4)"/>
+  <rect x="318" y="100" width="464" height="44" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+  <text x="550" y="127" font-size="13" text-anchor="middle" font-weight="700">TextDiffer — never knows what it is reading</text>
+  <line x1="470" y1="144" x2="300" y2="172" stroke="#777" stroke-width="2" marker-end="url(#a4)"/>
+  <line x1="630" y1="144" x2="800" y2="172" stroke="#777" stroke-width="2" marker-end="url(#a4)"/>
+  <text x="372" y="166" font-size="10.5" fill="#555" text-anchor="middle">both sides keyed</text>
+  <text x="730" y="166" font-size="10.5" fill="#555" text-anchor="middle">anything else</text>
+  <rect x="60" y="175" width="440" height="140" rx="10" fill="#e9f5ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="280" y="200" font-size="13" text-anchor="middle" font-weight="700">KEYED — map against map</text>
+  <text x="280" y="220" font-size="11.5" text-anchor="middle">cells, images · exact results</text>
+  <text x="80" y="250" font-size="11.5" font-family="Menlo, monospace" fill="#e65100">~ Budget!B12 : 100 -&gt; 120</text>
+  <text x="80" y="272" font-size="11.5" font-family="Menlo, monospace" fill="#1b5e20">+ Budget!C3 = Total</text>
+  <text x="80" y="294" font-size="11.5" font-family="Menlo, monospace" fill="#b71c1c">- Notes!A1 = Draft</text>
+  <rect x="600" y="175" width="440" height="140" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
+  <text x="820" y="200" font-size="13" text-anchor="middle" font-weight="700">POSITIONAL — sequence alignment</text>
+  <text x="820" y="220" font-size="11.5" text-anchor="middle">head/tail trimmed, middle aligned (Hirschberg LCS)</text>
+  <text x="620" y="250" font-size="11.5" font-family="Menlo, monospace" fill="#b71c1c">- The contract ends on June 30.</text>
+  <text x="620" y="272" font-size="11.5" font-family="Menlo, monospace" fill="#1b5e20">+ The contract ends on September 30.</text>
+  <text x="620" y="298" font-size="11" font-style="italic" fill="#555">removal + immediate addition = 1 modification</text>
+</svg>
+<div class="caption"><strong>Both</strong> sides must be keyed. An .xlsx replaced by a .csv is compared positionally — correct, rarely meaningful.</div>
+</div>
+<ul>
+  <li><strong>Everything is bounded</strong>: file size, units extracted, length of a unit, reported entries, diff size, bytes read per image. Past a bound, the diff is flagged <code>truncated</code>; the counters stay exact.</li>
+  <li>The result: counters (added / removed / changed), an English summary such as <em>"1 modification, 1 addition"</em> (the UI localises from the counters) and the diff text, rendered in colour in the UI.</li>
+</ul>
+
+<!-- ============================================================ 8 -->
+<h2 id="s8"><span class="num">8.</span>The BlobDiff document and how everything is linked</h2>
+<div class="figure">
+<svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
+  <rect x="20" y="30" width="252" height="80" rx="10" fill="#fff" stroke="#333" stroke-width="2"/>
+  <text x="146" y="58" font-size="13.5" text-anchor="middle" font-weight="700">Source document (live)</text>
+  <text x="146" y="78" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">uid = A</text>
+  <text x="146" y="97" font-size="12" text-anchor="middle" font-style="italic" fill="#555">nothing is written on it</text>
+  <rect x="20" y="200" width="116" height="60" rx="10" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="78" y="225" font-size="13" text-anchor="middle" font-weight="700">Version 1.0</text>
+  <text x="78" y="245" font-size="12" text-anchor="middle" font-family="Menlo, monospace">uid = V0</text>
+  <rect x="156" y="200" width="116" height="60" rx="10" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="214" y="225" font-size="13" text-anchor="middle" font-weight="700">Version 1.1</text>
+  <text x="214" y="245" font-size="12" text-anchor="middle" font-family="Menlo, monospace">uid = V1</text>
+  <line x1="78" y1="110" x2="78" y2="198" stroke="#999" stroke-width="1.5" stroke-dasharray="4,4"/>
+  <line x1="214" y1="110" x2="214" y2="198" stroke="#999" stroke-width="1.5" stroke-dasharray="4,4"/>
+  <text x="146" y="160" font-size="11.5" text-anchor="middle" fill="#777">its versions</text>
+  <rect x="372" y="20" width="280" height="105" rx="10" fill="#f5ecfa" stroke="#6a1b9a" stroke-width="2"/>
+  <text x="512" y="46" font-size="13.5" text-anchor="middle" font-weight="700">Audit entry</text>
+  <text x="512" y="66" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">blobContentModified</text>
+  <text x="512" y="86" font-size="12.5" text-anchor="middle">docUUID = A · xpath · file names</text>
+  <text x="512" y="106" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">diffCorrelationId = C</text>
+  <rect x="372" y="185" width="280" height="125" rx="10" fill="#e9f5ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="512" y="210" font-size="13.5" text-anchor="middle" font-weight="700">BlobDiff document</text>
+  <text x="512" y="232" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">sourceId = A</text>
+  <text x="512" y="252" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">previousVersionId = V0</text>
+  <text x="512" y="272" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">newVersionId = V1</text>
+  <text x="512" y="292" font-size="12.5" text-anchor="middle" font-family="Menlo, monospace">correlationId = C</text>
+  <line x1="372" y1="70" x2="274" y2="70" stroke="#6a1b9a" stroke-width="1.8" marker-end="url(#a5)"/>
+  <text x="323" y="62" font-size="11.5" text-anchor="middle" fill="#6a1b9a">docUUID</text>
+  <line x1="372" y1="215" x2="274" y2="102" stroke="#2e7d32" stroke-width="1.8" marker-end="url(#a5)"/>
+  <text x="300" y="178" font-size="11.5" text-anchor="middle" fill="#2e7d32">sourceId</text>
+  <line x1="372" y1="262" x2="274" y2="236" stroke="#2e7d32" stroke-width="1.8" marker-end="url(#a5)"/>
+  <text x="318" y="272" font-size="11.5" text-anchor="middle" fill="#2e7d32">version ids</text>
+  <line x1="512" y1="125" x2="512" y2="183" stroke="#6a1b9a" stroke-width="1.8" stroke-dasharray="6,4"/>
+  <text x="522" y="158" font-size="11.5" fill="#6a1b9a">same id C</text>
+  <rect x="722" y="30" width="262" height="80" rx="10" fill="#fff" stroke="#6a1b9a" stroke-width="1.5"/>
+  <text x="853" y="56" font-size="13" text-anchor="middle" font-weight="700">Document "History" tab</text>
+  <text x="853" y="76" font-size="12.5" text-anchor="middle">anyone allowed to see the</text>
+  <text x="853" y="94" font-size="12.5" text-anchor="middle">document's history</text>
+  <line x1="652" y1="70" x2="720" y2="70" stroke="#777" stroke-width="1.8" marker-end="url(#a5)"/>
+  <rect x="722" y="200" width="262" height="96" rx="10" fill="#fdecec" stroke="#c62828" stroke-width="1.5"/>
+  <text x="853" y="226" font-size="13" text-anchor="middle" font-weight="700">/change-diff (restricted)</text>
+  <text x="853" y="246" font-size="12.5" text-anchor="middle">auditors group + admins only,</text>
+  <text x="853" y="264" font-size="12.5" text-anchor="middle">even if they cannot read</text>
+  <text x="853" y="282" font-size="12.5" text-anchor="middle">the source document</text>
+  <line x1="652" y1="248" x2="720" y2="248" stroke="#777" stroke-width="1.8" marker-end="url(#a5)"/>
+</svg>
+<div class="caption">Document → diffs: query <code>BlobDiff</code> where <code>sourceId = A</code>. Audit entry → diff: join <code>diffCorrelationId</code> = <code>bdiff:correlationId</code> (no clickable link in History).</div>
+</div>
+<div class="two-cols">
+  <div class="card">
+    <h3>What it contains (<code>bdiff:*</code>)</h3>
+    <table>
+      <tr><td>What / where</td><td>sourceId, sourceRepository, xpath</td></tr>
+      <tr><td>Versions</td><td>previous/new VersionId &amp; Label, versionSeriesId</td></tr>
+      <tr><td>Who / when</td><td>user, date (= check-in time), correlationId</td></tr>
+      <tr><td>Files</td><td>old/new filename, digest, MIME type, length, storage key (used by Retry)</td></tr>
+      <tr><td>Result</td><td>status, summary, added, removed, changed, truncated</td></tr>
+      <tr><td>Diff</td><td><code>bdiff:diff</code>, a blob <code>&lt;name&gt;.diff.txt</code></td></tr>
+    </table>
+    <p style="font-size:.9em;color:var(--muted);margin:4px 0">Stored as a blob (not a DB field), type flagged <code>NotFulltextIndexable</code>, hidden in navigation and collections.</p>
+  </div>
+  <div class="card">
+    <h3>Where it lives</h3>
+<pre>/change-diff        hidden · local ACL: auditorsGroup →
+ │                   Read, Remove, RemoveChildren;
+ │                   inheritance BLOCKED
+ └── 2026/10/24      dated folders (UTC), inherit the ACL
+      └── &lt;sourceId&gt;-&lt;time&gt;-&lt;correlationId&gt;</pre>
+    <ul style="font-size:.92em">
+      <li>Root created at <strong>every startup</strong> (even when disabled); ACL checked and repaired.</li>
+      <li>Statuses: <code>ok</code>, <code>error</code> (retryable), <code>skippedTooLarge</code>, <code>skippedUnsupportedType</code>.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ 9 -->
+<h2 id="s9"><span class="num">9.</span>Who can see and do what</h2>
+<table>
+  <tr><th></th><th>Regular user</th><th>Auditor (auditors group)</th><th>Administrator</th></tr>
+  <tr><td><code>blobContentModified</code> in History</td><td class="yes">yes, if they can read the doc</td><td class="yes">same</td><td class="yes">yes</td></tr>
+  <tr><td>BlobDiffs and their content</td><td class="no">no</td><td class="yes">yes, for <em>all</em> documents</td><td class="yes">yes</td></tr>
+  <tr><td>"Content changes" drawer and tab</td><td class="no">no</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+  <tr><td>Source title/link from a BlobDiff</td><td>–</td><td>only if they can read the source</td><td class="yes">yes</td></tr>
+  <tr><td>Delete, purge, retry</td><td class="no">no</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+  <tr><td>Create / move / copy a BlobDiff outside <code>/change-diff</code></td><td class="no">refused</td><td class="no">refused</td><td class="no">refused (even system)</td></tr>
+</table>
+<div class="callout red">
+  <strong>Confidentiality.</strong> A BlobDiff holds <em>business content</em> copied out of the source and protected by a <em>different</em> ACL: an auditor can read the diff of a document they cannot open. By design — choose the group deliberately (<code>org.nuxeo.web.ui.blobaudit.auditorsGroup</code>, shared by server and Web UI).
+</div>
+<h3>The guards</h3>
+<ul>
+  <li><strong><code>BlobDiffLocationListener</code></strong>: a BlobDiff exists only under <code>/change-diff</code> and cannot leave it (no forged diffs elsewhere).</li>
+  <li><strong>Server-side <code>checkAuditor</code></strong> on every operation; hiding things in the UI is only cosmetic.</li>
+  <li><strong>Retry</strong> accepts only an <code>error</code> BlobDiff under <code>/change-diff</code>, so a forged document cannot make the server read arbitrary blobs.</li>
+  <li><strong>Purge</strong> runs as the caller (ACL applies), deletes only <code>BlobDiff</code> whatever the query, is not exposed through the generic bulk REST endpoint, one at a time.</li>
+</ul>
+
+<!-- ============================================================ 10 -->
+<h2 id="s10"><span class="num">10.</span>What auditors get in Web UI</h2>
+<div class="two-cols">
+  <div class="card"><h3>① Drawer: "Content changes audit"</h3>Search page: date range, source, user, "truncated only"; facets on status, format, xpath, user. Needs Elasticsearch/OpenSearch.</div>
+  <div class="card"><h3>② Document tab: "Content changes"</h3>On documents with the <code>file</code> or <code>files</code> schema: list of their diffs (date, v1.0 → v1.1, user, xpath, summary, status), plus "open all" to the pre-filtered search.</div>
+  <div class="card"><h3>③ BlobDiff page</h3>Metadata, the colour-coded diff (green +, red −, orange ~), and <em>Download</em>, <em>Retry</em> (error only), <em>Delete permanently</em>.</div>
+  <div class="card"><h3>④ Housekeeping</h3><em>Purge</em> older than a date (optionally by status), async bulk action with progress/abort, then empty folders cleaned. <strong>No automatic retention.</strong></div>
+</div>
+<p style="font-size:.92em;color:var(--muted)">Operations: <code>BlobDiff.Retry</code>, <code>.Delete</code>, <code>.Purge</code>, <code>.PurgeStatus</code>, <code>.PurgeAbort</code>, <code>.CleanEmptyFolders</code> — auditors only.</p>
+
+<!-- ============================================================ 11 -->
+<h2 id="s11"><span class="num">11.</span>Configuration</h2>
+<div class="two-cols">
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>enabled</code></td><td><strong>false</strong></td><td>Off until a contribution turns it on</td></tr>
+    <tr><td><code>docTypes</code></td><td>empty = all</td><td>Narrow it in production</td></tr>
+    <tr><td><code>xpaths</code></td><td><code>file:content</code></td><td><code>*</code> = every blob property</td></tr>
+    <tr><td><code>maxBlobSize</code></td><td>10 MB</td><td>Above: <code>skippedTooLarge</code></td></tr>
+    <tr><td><code>maxLines</code></td><td>10,000</td><td>Units extracted per file</td></tr>
+    <tr><td><code>maxDiffEntries</code> / <code>maxDiffChars</code> / <code>maxValueLength</code></td><td>5,000 / 4 MB / 4,096</td><td>Size of the stored diff</td></tr>
+    <tr><td><code>imageAnalysisLevel</code></td><td>0</td><td>1 = image inventory</td></tr>
+    <tr><td>auditors group</td><td><code>administrators</code></td><td>Who reads / manages diffs</td></tr>
+    <tr><td>queue <code>blobDiff</code></td><td>2 threads</td><td>Diff concurrency</td></tr>
+  </table>
+  <div>
+<pre><code>&lt;extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent"
+           point="config"&gt;
+  &lt;config enabled="true"&gt;
+    &lt;maxBlobSize&gt;20971520&lt;/maxBlobSize&gt;
+    &lt;docTypes&gt;&lt;docType&gt;Contract&lt;/docType&gt;&lt;/docTypes&gt;
+    &lt;xpaths&gt;&lt;xpath&gt;file:content&lt;/xpath&gt;&lt;/xpaths&gt;
+  &lt;/config&gt;
+&lt;/extension&gt;</code></pre>
+    <ul style="font-size:.9em">
+      <li>Contributions <strong>merge</strong>: values you set win, omitted ones are kept.</li>
+      <li>Three extension points: <code>config</code>, <code>extractors</code>, <code>imageExtractors</code>.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================================ 12 -->
+<h2 id="s12"><span class="num">12.</span>Code map</h2>
+<table>
+  <tr><th>Class / package</th><th>Role</th></tr>
+  <tr><td><code>BlobModificationListener</code> <span class="badge s">SYNC</span></td><td>Check-in hooks, exact version pairing</td></tr>
+  <tr><td><code>BlobDiffTrigger</code>, <code>DiffEligibility</code>, <code>FrozenBlobs</code> <span class="badge s">SYNC</span></td><td>Scope, digest check, skip or schedule; freeze the storage keys</td></tr>
+  <tr><td><code>work/BlobDiffWork</code> <span class="badge a">ASYNC</span></td><td>Read → extract + diff (no tx) → write BlobDiff</td></tr>
+  <tr><td><code>BlobDiffComponent</code> / <code>BlobDiffService</code></td><td>Config and extractor registries</td></tr>
+  <tr><td><code>extractor/*</code>, <code>image/ImageInventoryExtractor</code></td><td>Format → <code>DiffableContent</code></td></tr>
+  <tr><td><code>TextDiffer</code>, <code>DiffResult</code></td><td>Format-agnostic diff</td></tr>
+  <tr><td><code>BlobDiffRepositoryInit</code></td><td><code>/change-diff</code> creation and ACL repair</td></tr>
+  <tr><td><code>BlobDiffLocationListener</code>, <code>BlobDiffAccess</code> <span class="badge r">SECURITY</span></td><td>Keep diffs in the container, auditor checks</td></tr>
+  <tr><td><code>operations/*</code>, <code>bulk/BlobDiffPurgeAction</code></td><td>Retry, delete, purge</td></tr>
+</table>
+
+<!-- ============================================================ 13 -->
+<h2 id="s13"><span class="num">13.</span>Good to know</h2>
+<ul>
+  <li><strong>No version, no audit.</strong> A file replaced without versioning shows up at the next version, compared with the previous one.</li>
+  <li><strong>Text only.</strong> Formatting is not diffed; a scanned PDF without OCR gives <code>ok</code> with an empty diff.</li>
+  <li><strong>Excel is structurally sensitive.</strong> Inserting a row shifts every cell below; renaming a sheet = all cells removed then added.</li>
+  <li><strong>MIME matching is exact.</strong> <code>application/x-yaml</code> and <code>text/yaml</code> match, <code>application/yaml</code> does not.</li>
+  <li><strong>Image inventory quirks.</strong> The image reader is chosen from the <em>new</em> version's MIME type. Macro-enabled <code>.pptm/.ppsm</code> and a PDF MIME type with parameters yield an empty image inventory silently (text is unaffected).</li>
+  <li><strong>Imports and migrations</strong>: mute the listener, or every re-versioned document produces a diff.</li>
+  <li><strong>Retry</strong> works only while the old binaries are still in the blob store (the binary GC can remove them).</li>
+</ul>
+
+<footer>Merged from three summaries of the plugin sources (README.md, AGENTS.md, contributions, extractors, work, Web UI). No code was modified or built.</footer>
+</main>
+</body>
+</html>
