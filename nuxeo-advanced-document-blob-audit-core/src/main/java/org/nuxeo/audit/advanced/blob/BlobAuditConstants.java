@@ -74,6 +74,9 @@ public class BlobAuditConstants {
 
     public static final String XP_STATUS = "bdiff:status";
 
+    /** @since 2025.1 */
+    public static final String XP_SIMILARITY = "bdiff:similarity";
+
     public static final String XP_DIFF_BLOB = "bdiff:diff";
 
     /* Storage identity of the compared binaries, needed to replay a diff (since 1.2) */
@@ -207,6 +210,17 @@ public class BlobAuditConstants {
      * @since 2025.1
      */
     public static final String STATUS_SKIPPED_LIST_CHANGED = "skippedListChanged";
+
+    /**
+     * The pair changed mime type within one extractor contribution - a {@code .json} replaced by an
+     * {@code .xml} - and the two versions share less than the {@code minSimilarity} of that
+     * contribution. The counters and {@code bdiff:similarity} are stored, the body is not: it would
+     * list both files whole. Decided by {@code BlobDiffWork} once the diff is computed, so it is a
+     * {@code bdiff:status} only, never a skip reason of the audit entry.
+     *
+     * @since 2025.1
+     */
+    public static final String STATUS_SKIPPED_CONTENT_REPLACED = "skippedContentReplaced";
 
     public static final String STATUS_ERROR = "error";
 

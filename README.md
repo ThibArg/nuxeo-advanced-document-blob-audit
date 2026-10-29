@@ -32,7 +32,7 @@ In that case the plugin writes the `blobContentModified` entry **only**, and cre
 
 Every entry also carries the `oldFilename`, `newFilename`, `oldMimeType` and `newMimeType` extended infos, so a format change can be read from the entry alone.
 
-The format change case exists because two extractors do not cut a document into lines the same way. A spreadsheet is read cell by cell, a Word document paragraph by paragraph, a PDF one rendered line at a time: comparing the extractions of a `.docx` and of its PDF rendition would report every line as removed and every line as added — a diff as large as both documents, which says nothing an auditor can use and copies all of their content into `/change-diff`. Each extractor contribution is therefore a **comparability class** (see "One Contribution, One Comparability Class" below). A conversion inside one class is still diffed: an `.xls` saved as `.xlsx`, a `.doc` saved as `.docx`, or a `.txt` saved as `.json` — every text format belongs to the `plainText` contribution, which reads raw lines whatever the MIME type. When one side has no extractor at all, `skippedUnsupportedType` wins.
+The format change case exists because two extractors do not cut a document into lines the same way. A spreadsheet is read cell by cell, a Word document paragraph by paragraph, a PDF one rendered line at a time: comparing the extractions of a `.docx` and of its PDF rendition would report every line as removed and every line as added — a diff as large as both documents, which says nothing an auditor can use and copies all of their content into `/change-diff`. Each extractor contribution is therefore a **comparability class** (see "One Contribution, One Comparability Class" below). A conversion inside one class is still diffed: an `.xls` saved as `.xlsx`, a `.doc` saved as `.docx`, or a `.txt` saved as `.json` — every text format belongs to the `plainText` contribution, which reads raw lines whatever the MIME type (a text file replaced by an unrelated one of another format is the exception, see "A Text File Replaced by Another One" below). When one side has no extractor at all, `skippedUnsupportedType` wins.
 
 The "not both managed" case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
 
@@ -44,6 +44,44 @@ Nothing at all is written when the property is simply out of scope — feature d
 
 > [!NOTE]
 > `skippedTooLarge`, `skippedUnsupportedType` and `skippedFormatChanged` are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated pair before extracting, so a `BlobDiff.Retry`, or a work outliving a configuration change (a lower `maxBlobSize`, a disabled extractor, a MIME type moved to another contribution), can be filed with any of the three. `skippedUnsupportedType` is also what the work records if a side has no extractor left when the diff runs. `skippedNotManaged` and `skippedListChanged`, on the other hand, are skip reasons only: no `BlobDiff` is ever created in those cases.
+
+### A Text File Replaced by Another One
+
+Every text format — `.txt`, `.json`, `.xml`, `.csv`, `.yaml`... — is read by the single `plainText` contribution, line by line, whatever the MIME type. A `.json` replaced by an `.xml` is therefore no format change in the sense above, and it is diffed. When the new file is a conversion or an edit of the old one, that diff is exactly what the auditor needs: a `.txt` holding JSON, edited and saved as `.json`, shows the edited line. When the new file is simply **another file** — unrelated data in another format — the diff lists both files whole: every line removed, every line added, and all of their content copied into `/change-diff` for nothing.
+
+That second case is filed as **`skippedContentReplaced`**: the `BlobDiff` is created, with its counters and its similarity score, but **without the diff body**. Three conditions, all required:
+
+1. the MIME type changed (compared without case nor parameters: `text/plain; charset=UTF-8` is `text/plain`);
+2. both sides hold at least `minSimilarityLines` lines (5 by default), a percentage meaning little on a handful of lines;
+3. the **similarity** is under `minSimilarity` (`0.1` by default).
+
+The similarity is the share of the smaller version kept unchanged in the other one, **in characters**:
+
+```text
+similarity = characters of the lines kept unchanged / characters of the smaller version
+```
+
+- *Kept unchanged* is what the alignment of the diff already finds — common beginning, common end, matching lines — so measuring it costs nothing.
+- *Characters, not lines*: two unrelated JSON files share every `{` and `},` line, often half of their lines; counted in characters those weigh next to nothing.
+- *The smaller version*: a large addition, or a mass deletion, keeps the whole smaller side and scores 100 %. Only a pair where **both** sides are mostly new scores low.
+
+Typical scores: unrelated files 0 – 5 %, the same data converted from JSON to XML close to 0 % as well, a heavy edit keeping a third of the file about 33 %, an ordinary edit over 90 %. It is measured on the extracted windows (`maxLines`), like the counters, and stored as `bdiff:similarity` on every diff where it could be measured, so the threshold can be tuned on real data.
+
+A rewrite **in the same format** is never filed this way: the rule is about a file replaced by another one, not about how much an author changed. The decision is taken by `BlobDiffWork` once the diff is computed, so the `blobContentModified` entry of the check-in is the nominal one and carries its `diffCorrelationId`. Only `plainText` sets the rule; the other contributions do not, and a change between two of them is `skippedFormatChanged` anyway.
+
+**Keeping every full diff.** It is a setting: an override of the `plainText` contribution with `minSimilarity` set to `0` stores the body of every diff, as for any other format:
+
+```xml
+<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+  <extractor name="plainText">
+    <property name="minSimilarity">0</property>
+  </extractor>
+</extension>
+```
+
+The contributions merge (see "Overriding the Configuration"), so this changes nothing else. An invalid value is logged at `ERROR` and disables the rule rather than the extractor.
+
+**Recomputing a replaced diff later.** Nothing is lost by not storing the body. The two compared binaries are the blobs of two **versions**, which are immutable, and the `BlobDiff` keeps the storage identity of both (`bdiff:oldBlobProvider` / `oldBlobKey`, `bdiff:newBlobProvider` / `newBlobKey`) along with the ids of the two versions. The full diff can therefore be recomputed at any time, as long as the versions exist: `BlobDiffService#diff(oldBlob, newBlob)` on the blobs of the two versions returns the whole body — the result is only *flagged* `replaced()`, it is `BlobDiffWork` that leaves the body out. `BlobDiff.Retry` does not replay a `skippedContentReplaced` diff: it is not an incident, and replaying it under the same setting would file it the same way.
 
 ### How the Version Pair Is Established
 
@@ -108,7 +146,7 @@ A new version is only diffed against the previous one when **the same contributi
 |---|---|---|
 | `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
 | `presentation` | pptx, pptm, ppsx, potx | yes |
-| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: the lines are read raw, whatever the MIME type |
+| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: the lines are read raw, whatever the MIME type. A change of MIME type that keeps almost nothing is filed `skippedContentReplaced`, see "A Text File Replaced by Another One" |
 | `converter` | docx, doc, odt, rtf | yes: the converter cuts all of them into paragraphs |
 | `pdf` | pdf | — |
 | `legacyPresentation` | ppt | — |
@@ -184,7 +222,8 @@ Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
 | bdiff:user, bdiff:date | Who and when |
 | bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
 | bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
-| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, skippedFormatChanged, error (see the note above on how the three skip statuses are reached), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
+| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, skippedFormatChanged, error (see the note above on how the three skip statuses are reached), skippedContentReplaced (counters without body, see "A Text File Replaced by Another One"), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
+| bdiff:similarity | Share of the smaller version kept unchanged in the other one, in characters, `0` to `1`; absent when not measured |
 | bdiff:diff | **Blob containing the full diff** |
 | bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
 
@@ -245,7 +284,9 @@ Available to members of `administrators` and of the auditors group only.
 
   Saved searches work as they do everywhere else: an auditor can store a set of filters from the drawer header and share it.
 - **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search filtered on that document alone: the filters of an earlier audit search are dropped, so the search lists the same diffs as the tab.
-- **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
+- **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, similarity score, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
+
+Wherever a status is shown — results, tab, document view — a **"Format: json → xml"** badge follows it when the two versions do not hold the same MIME type, with both MIME types in its tooltip. It names the file extensions when they differ, the MIME subtypes otherwise.
 
 Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.
 
@@ -379,6 +420,8 @@ The `extractors` and `imageExtractors` points merge the same way, by extractor n
 ```
 
 PDF and legacy `.ppt` are read by contributions of their own, `pdf` and `legacyPresentation` (see "One Contribution, One Comparability Class"): an override of `converter` does not reach them, override them by name too.
+
+Two extractor properties are read by the service rather than by the extractor: `minSimilarity` and `minSimilarityLines`, which file a text file replaced by an unrelated one as `skippedContentReplaced`. Only `plainText` sets them (`0.1` and `5`); `minSimilarity` set to `0` keeps every full diff. See "A Text File Replaced by Another One".
 
 ### Bounding the Size of a Diff
 
@@ -537,7 +580,7 @@ Without the vocabulary entry, it does not appear in Web UI filters.
 
 ### Text Extraction
 - **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared: restyling a Word paragraph or a PowerPoint text box produces no diff.
-- **A change of format is not diffed.** A new version read by another extractor contribution than the previous one (`.xlsx` → `.docx`, `.docx` → `.pdf`, `.ppt` → `.pptx`) is audited as `skippedFormatChanged`, with no diff. A conversion within one contribution (`.xls` → `.xlsx`, `.doc` → `.docx`, `.txt` → `.json`) is diffed; between two text formats, that diff shows the real textual change, which for `.json` → `.xml` of the same data is close to a full rewrite.
+- **A change of format is not diffed.** A new version read by another extractor contribution than the previous one (`.xlsx` → `.docx`, `.docx` → `.pdf`, `.ppt` → `.pptx`) is audited as `skippedFormatChanged`, with no diff. A conversion within one contribution (`.xls` → `.xlsx`, `.doc` → `.docx`, `.txt` → `.json`) is diffed; between two text formats, that diff shows the real textual change. A text file replaced by an unrelated one of another format — or by the same data converted from `.json` to `.xml`, which shares almost no line — is filed `skippedContentReplaced`: counters and similarity, no body. Set `minSimilarity` to `0` to keep those bodies.
 - **Scanned PDFs / image-only content.** Without OCR, nothing is extracted: status stays `ok` with an empty diff.
 - **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
 - **Converted formats** (Word, PDF, OpenDocument, RTF...) are read line by line from the converter output, and reading stops at `maxLines`. The conversion itself still processes the whole document.
@@ -593,13 +636,14 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test
 Run only the fast tests (without a Nuxeo runtime):
 
 ```bash
-mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,TestTextDifferScaling,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection'
+mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection'
 ```
 
 | Class | Runtime? | Purpose |
 |--------|--------|--------|
 | TestTextDiffer | No | Diff engine: keyed, positional, coalescing, truncation |
 | TestTextDifferScaling | No | Alignment optimality and memory budget |
+| TestTextDifferSimilarity | No | Similarity score: characters kept unchanged over the smaller side |
 | TestExcelDiff | No | Complete Excel processing chain |
 | TestSpreadsheetStreaming | No | Streamed `.xlsx` reading: same values as POI's usermodel, shared formulas, bounded memory |
 | TestPlainTextExtractor | No | txt / json / xml / csv |
@@ -610,7 +654,7 @@ mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,
 | TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |
 | TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
 | TestBlobDiffService | Yes | Guardrails, eligibility of a pair, container, ACLs, persistence |
-| TestBlobDiffSkipReporting | Yes | Non-diffable changes audited without a diff (too large, unsupported, format changed, not managed), silence when the bytes did not change |
+| TestBlobDiffSkipReporting | Yes | Non-diffable changes audited without a diff (too large, unsupported, format changed, not managed), text content replaced under another format, silence when the bytes did not change |
 | TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
 | TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, retry single-flight and recovery, blobDiffSource enricher |
 | TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |

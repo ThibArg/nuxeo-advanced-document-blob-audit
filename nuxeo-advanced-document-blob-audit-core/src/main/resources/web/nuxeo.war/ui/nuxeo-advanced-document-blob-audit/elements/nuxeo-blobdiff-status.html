@@ -8,6 +8,10 @@
     <template is="dom-if" if="[[document.properties.bdiff:truncated]]">
       <span class="blobdiff-badge info">[[i18n('label.blobaudit.truncated')]]</span>
     </template>
+    <template is="dom-if" if="[[_formatChanged(document.properties.bdiff:oldMimeType, document.properties.bdiff:mimeType)]]">
+      <span class="blobdiff-badge info"
+            title$="[[document.properties.bdiff:oldMimeType]] → [[document.properties.bdiff:mimeType]]">[[_formatLabel(document.properties.bdiff:oldMimeType, document.properties.bdiff:mimeType, document.properties.bdiff:oldFilename, document.properties.bdiff:newFilename)]]</span>
+    </template>
     <template is="dom-if" if="[[!hideCounters]]">
       <span class="blobdiff-counters">
         <span class="change">~[[_n(document.properties.bdiff:changed)]]</span>
@@ -26,6 +30,13 @@
       },
       _class: function (status) { return Nuxeo.BlobAudit.statusClass(status); },
       _label: function (status) { return status ? this.i18n('label.blobaudit.status.' + status) : ''; },
+      _formatChanged: function (oldMimeType, newMimeType) {
+        return Nuxeo.BlobAudit.formatChanged(oldMimeType, newMimeType);
+      },
+      _formatLabel: function (oldMimeType, newMimeType, oldFilename, newFilename) {
+        var pair = Nuxeo.BlobAudit.formatPair(oldMimeType, newMimeType, oldFilename, newFilename);
+        return this.i18n('label.blobaudit.formatChange', pair[0], pair[1]);
+      },
       _n: function (value) { return value || 0; }
     });
   </script>

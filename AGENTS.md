@@ -114,10 +114,42 @@ contributions *are* the comparability rules: `ConverterTextExtractor` is contrib
 document replaced by its PDF rendition or by a deck is not diffed, while `.doc` → `.docx` still is.
 Do not fold `pdf` or `legacyPresentation` back into `converter`. Every text format is in
 `plainText` on purpose: `PlainTextExtractor` reads raw lines whatever the mime type, so
-`.txt` → `.json` is a genuine diff; whether `.json` → `.xml` should be split out is an open product
-decision. Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
+`.txt` → `.json` is a genuine diff. Whether `.json` → `.xml` should be split out was an open
+product decision, settled by item 62: it stays in one class, and a text file *replaced* by an
+unrelated one is caught by similarity instead (next invariant). Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
 the four format cases of `TestBlobDiffSkipReporting`,
 `TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`.
+
+**A text file replaced by another one is filed without its body, and only then** (item 62).
+`BlobDiffComponent#isReplaced` flags a result `replaced()` when the mime types differ (normalised
+by `ExtractorDescriptor#normalizeMimeType`: no case, no parameters), both sides hold at least
+`minSimilarityLines` units, and `DiffResult#similarity()` is under `minSimilarity` — two properties
+of the contribution reading the pair, parsed once in `resolve` into `ResolvedExtractor`, read by the
+service and ignored by the extractor. Only `plainText` sets them (`0.1`, `5`); `0` disables the
+rule. `BlobDiffWork` turns the flag into `skippedContentReplaced`, and `createDiffDocument` stores
+the counters and `bdiff:similarity` but no body, as for every status other than `ok`. Four points:
+
+- **The mime-change condition is the product decision, not an optimisation.** A rewrite in the same
+  format is an author's edit and is always diffed. Do not drop the check to "catch more noise".
+- **The service keeps the body.** `diff()` returns the whole `unified` and only *flags* the
+  result: the README tells integrators to recompute a replaced pair through
+  `BlobDiffService#diff` on the two version blobs. Emptying the body in the service would break
+  that. `BlobDiff.Retry` refuses the status on purpose (product decision): it is no incident.
+- **The score is in characters over the smaller side.** `TextDiffer` counts the characters of the
+  lines it keeps — positional: every old line minus the raw removals, computed *before* the
+  `tailStart` drop of item 46, since every old line is either kept or removed; keyed: entries with
+  equal key and value. Lines would let `{` / `},` make unrelated JSON files look half equal; the
+  larger side would make a big append look like a replacement. `null` when a side has no characters.
+- **Decided at work time.** The check-in audit entry is the nominal one, with its
+  `diffCorrelationId` and no `skipReason`, exactly like `skippedUnsupportedType` at work time.
+  Moving the decision to the listener would mean extracting in the user transaction.
+
+An invalid property value is logged and disables the rule, never the extractor: a `resolve` failure
+would make every text format unsupported. Coverage: `TestTextDifferSimilarity`,
+`TestBlobDiffService` (the six `replaced` / `minSimilarity` cases),
+`TestBlobDiffSkipReporting` (the four "replaced text content" cases),
+`TestExtractorSelection#testAnInvalidSimilarityRuleIsDisabledRatherThanFatal`,
+`TestBlobDiffManagement#testRetryRefusesAReplacedContent`.
 
 **Blobs inside a list are paired by content, never by index alone** (item 45).
 `BlobModificationListener#pairListEntries` expands a list template on each version separately: a
@@ -133,7 +165,8 @@ Three skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` 
 reachable with SEC-01, because the work now re-evaluates the eligibility of the rehydrated pair
 (`BlobDiffWork#ineligibleStatus`) — a retry, or a work outliving a `maxBlobSize` change, can fail
 it; `skippedFormatChanged` is reachable the same way (item 61), by a retry or a work outliving a
-mime type moved to another contribution. The purge dialog offers all three. This reverses an
+mime type moved to another contribution. The purge dialog offers all three, plus
+`skippedContentReplaced` (item 62), which is only ever a `bdiff:status`. This reverses an
 earlier note claiming `skippedTooLarge` could never be persisted; that was true only of the
 check-in path.
 
@@ -421,7 +454,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 290 tests (27 test classes)
+mvn -o install                                     # full build, 313 tests (28 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -436,7 +469,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
@@ -456,7 +489,9 @@ the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead 
 xpaths with `<xpath>*</xpath>`, and `blobaudit-test-partial-config.xml` (used by
 `TestBlobDiffService`) to override nothing but `docTypes` and one property of the `converter`
 extractor, and `blobaudit-test-dynamicfacet-contrib.xml` (used by `TestBlobDiffVersionPairing`,
-with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a blob.
+with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a blob, and
+`blobaudit-test-keepalldiffs-config.xml` (used by `TestBlobDiffService` and
+`TestBlobDiffSkipReporting`) to set nothing but `minSimilarity=0` on `plainText`.
 `blobaudit-test-vocabulary-template-contrib.xml` is deployed by the feature itself, for every
 runtime test: it supplies `template-vocabulary`, which the platform ships in
 `org.nuxeo.ecm.default.config` — a bundle nothing in this test stack deploys, and without which the
@@ -489,7 +524,7 @@ get the next free number in this same list. Product requests and bugs found in t
 numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
 `COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
 cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 61 are done** (regression coverage:
+**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 62 are done** (regression coverage:
 `TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
 `TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
 `TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
@@ -1465,6 +1500,42 @@ cited here as "code review 2026-10".
     check neutralised, the pair test, the two skip tests and the retry test failed, and the
     same-bytes and `.xls` → `.xlsx` tests passed, as they must; with `application/pdf` folded back
     into `converter`, the PDF test failed. 284 tests → 290.
+
+62. *(product request, follow-up of 61)* Item 61 left every text format in `plainText`, so a
+    `.json` replaced by an unrelated `.xml` was diffed: every line removed, every line added, both
+    files copied into `/change-diff`. Splitting `plainText` by mime type was rejected: text mime
+    types are unreliable (aliases, a `.txt` holding JSON renamed `.json`), and a genuine edit would
+    have lost its diff. Instead, a pair that changed mime type and keeps less than `minSimilarity`
+    of its smaller side, in characters, is filed as `skippedContentReplaced`: counters and
+    `bdiff:similarity`, no body (see the "replaced" invariant). Settings on `plainText` only,
+    `minSimilarity=0.1` and `minSimilarityLines=5`, on by default; `0` keeps every diff (product
+    decision: it must stay a setting).
+
+    Product decisions taken with it: the check only applies when the mime type changed (a rewrite
+    in one format is always diffed); no code to recompute a replaced pair — the README explains
+    that the versions and both blob keys persist and that `BlobDiffService#diff` on the version
+    blobs returns the full body, and `BlobDiff.Retry` refuses the status. Rejected: storing
+    the score only below the threshold (it is stored on every measured diff, to tune the
+    threshold on real data); skipping the image inventory for a replaced pair (no `plainText`
+    format has one).
+
+    New: `DiffResult#similarity()` / `#replaced()` (5-argument constructor kept),
+    `TextDiffer.Comparison`, `ExtractorDescriptor.MIN_SIMILARITY` / `MIN_SIMILARITY_LINES` /
+    `normalizeMimeType`, `bdiff:similarity` (`xs:double`), `STATUS_SKIPPED_CONTENT_REPLACED`.
+    Web UI: status label and purge entry (EN/FR), similarity row and an explanatory note on the
+    diff view, and a "Format: json → xml" badge in `nuxeo-blobdiff-status` whenever the two mime
+    types differ, whatever the status — extensions when they differ, mime subtypes otherwise.
+    The plugin had never been deployed: no migration.
+
+    Coverage: `TestTextDifferSimilarity` (10), `TestBlobDiffService` (6),
+    `TestExtractorSelection` (2), `TestBlobDiffSkipReporting` (4),
+    `TestBlobDiffManagement#testRetryRefusesAReplacedContent`. With the score check neutralised,
+    `TestBlobDiffService#testATextFileReplacedByAnotherFormatIsFlagged` and
+    `TestBlobDiffSkipReporting#testATextFileReplacedByAnotherFormatIsKeptWithoutItsBody` failed;
+    with the mime check neutralised, `#testARewriteInTheSameFormatIsNeverFlagged` and
+    `#testATextFileRewrittenInTheSameFormatIsStillDiffed` failed. Web UI changes have no automated
+    coverage; manual check: version a `.json` then an unrelated `.xml`, the diff shows "Content
+    replaced", the badge, a similarity of 0 % and the note, and no Download action. 290 tests → 313.
 
 > **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
 > reused or renumbered. Follow the recommended order below, not the numbering.

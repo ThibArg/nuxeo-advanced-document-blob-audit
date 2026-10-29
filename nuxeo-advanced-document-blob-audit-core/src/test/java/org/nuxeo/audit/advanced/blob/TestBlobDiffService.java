@@ -23,6 +23,8 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.DOCX_MIME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.cells;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.customersJson;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.productsXml;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
@@ -39,6 +41,7 @@ import jakarta.inject.Inject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor;
+import org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
@@ -282,6 +285,80 @@ public class TestBlobDiffService {
     protected DiffEligibility pairEligibility(String oldMimeType, String newMimeType) throws Exception {
         return blobDiffService.getEligibility("File", "file:content", textBlob("old", oldMimeType, "old.bin"),
                 textBlob("new", newMimeType, "new.bin"));
+    }
+
+    /* ------------------------------------------------------- replaced content */
+
+    /**
+     * Item 62: a text file replaced by an unrelated one of another format is flagged, and keeps its
+     * full body for a caller that wants it - only {@code BlobDiffWork} leaves it out.
+     */
+    @Test
+    public void testATextFileReplacedByAnotherFormatIsFlagged() throws Exception {
+        DiffResult result = blobDiffService.diff(textBlob(customersJson(10), "application/json", "data.json"),
+                textBlob(productsXml(10), "application/xml", "data.xml"));
+
+        assertTrue(result.replaced());
+        assertEquals(0d, result.similarity(), 0d);
+        assertFalse("the service still computes the whole body", result.unified().isEmpty());
+    }
+
+    /** The rule is about a file replaced by another one, not about how much an author rewrote. */
+    @Test
+    public void testARewriteInTheSameFormatIsNeverFlagged() throws Exception {
+        DiffResult result = blobDiffService.diff(textBlob(customersJson(10), "application/json", "a.json"),
+                textBlob(productsXml(10), "application/json; charset=UTF-8", "b.json"));
+
+        assertFalse(result.replaced());
+        assertEquals(0d, result.similarity(), 0d);
+    }
+
+    @Test
+    public void testAFileEditedUnderAnotherFormatIsNotFlagged() throws Exception {
+        String edited = customersJson(10).replace("Customer number 3", "Customer renamed");
+
+        DiffResult result = blobDiffService.diff(textBlob(customersJson(10), "text/plain", "data.txt"),
+                textBlob(edited, "application/json", "data.json"));
+
+        assertFalse(result.replaced());
+        assertEquals(1, result.changed());
+        assertTrue(result.similarity() > 0.9);
+    }
+
+    /** A percentage means little on a handful of lines: under minSimilarityLines, always diffed. */
+    @Test
+    public void testASmallFileIsNeverFlagged() throws Exception {
+        DiffResult result = blobDiffService.diff(textBlob("a\nb\nc\nd", "text/plain", "f.txt"),
+                textBlob("w\nx\ny\nz", "text/csv", "f.csv"));
+
+        assertFalse(result.replaced());
+        assertEquals(0d, result.similarity(), 0d);
+    }
+
+    /** Only the contributions that set minSimilarity apply it: plainText alone, as shipped. */
+    @Test
+    public void testOnlyThePlainTextContributionSetsTheRule() {
+        BlobDiffComponent component = (BlobDiffComponent) blobDiffService;
+
+        assertEquals(0.1, component.findResolved(component.extractors, "application/json").minSimilarity(), 0d);
+        assertEquals(5, component.findResolved(component.extractors, "text/plain").minSimilarityLines());
+        for (String mimeType : List.of(DOCX_MIME, "application/pdf", BlobAuditTestHelper.XLSX_MIME,
+                BlobAuditTestHelper.PPTX_MIME, "application/vnd.ms-powerpoint")) {
+            assertEquals(mimeType, 0d, component.findResolved(component.extractors, mimeType).minSimilarity(), 0d);
+        }
+    }
+
+    /** The setting a deployment uses to keep every full diff, through the real registry. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-keepalldiffs-config.xml")
+    public void testMinSimilarityZeroKeepsEveryDiff() throws Exception {
+        DiffResult result = blobDiffService.diff(textBlob(customersJson(10), "application/json", "data.json"),
+                textBlob(productsXml(10), "application/xml", "data.xml"));
+
+        assertFalse(result.replaced());
+        assertEquals("the score is still measured", 0d, result.similarity(), 0d);
+        assertTrue("the partial override must keep the extractor",
+                ((BlobDiffComponent) blobDiffService).findExtractor("application/json") instanceof PlainTextExtractor);
     }
 
     /* -------------------------------------------------------------- container */

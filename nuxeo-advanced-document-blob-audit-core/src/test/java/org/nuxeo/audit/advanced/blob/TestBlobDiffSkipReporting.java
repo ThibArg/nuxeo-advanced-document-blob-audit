@@ -23,12 +23,15 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_I
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_NEW_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_CONTENT_REPLACED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.DOCX_MIME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.XLSX_MIME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.cells;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.customersJson;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.productsXml;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
@@ -74,6 +77,10 @@ public class TestBlobDiffSkipReporting {
     protected static final String PDF_MIME = "application/pdf";
 
     protected static final String XLS_MIME = "application/vnd.ms-excel";
+
+    protected static final String JSON_MIME = "application/json";
+
+    protected static final String XML_MIME = "application/xml";
 
     @Inject
     protected CoreSession session;
@@ -257,6 +264,75 @@ public class TestBlobDiffSkipReporting {
             workbook.write(out);
             return BlobAuditTestHelper.blob(out.toByteArray(), XLS_MIME, "book.xls");
         }
+    }
+
+    /* ------------------------------------------------- replaced text content */
+
+    /**
+     * Item 62: a {@code .json} replaced by an unrelated {@code .xml}. Both are read by
+     * {@code plainText}, so it is no format change in the sense of item 61, and the diff would list
+     * both files whole. It is filed with its counters and its score, without its body. Decided once
+     * the diff is computed: the audit entry, written at check-in, is the nominal one.
+     */
+    @Test
+    public void testATextFileReplacedByAnotherFormatIsKeptWithoutItsBody() throws Exception {
+        DocumentModel doc = createVersionedFile("json-to-xml", textBlob(customersJson(10), JSON_MIME, "data.json"));
+        newVersion(doc, textBlob(productsXml(10), XML_MIME, "data.xml"));
+
+        List<LogEntry> entries = auditEntries(doc.getId());
+        assertEquals(1, entries.size());
+        LogEntry entry = entries.get(0);
+        assertNull(extended(entry, EXT_SKIP_REASON));
+        assertTrue(extended(entry, EXT_CORRELATION_ID) != null);
+        assertEquals(JSON_MIME, extended(entry, EXT_OLD_MIME_TYPE));
+        assertEquals(XML_MIME, extended(entry, EXT_NEW_MIME_TYPE));
+
+        List<DocumentModel> diffs = diffsFor(doc.getId());
+        assertEquals(1, diffs.size());
+        DocumentModel diff = diffs.get(0);
+        assertEquals(STATUS_SKIPPED_CONTENT_REPLACED, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals(0d, (Double) diff.getPropertyValue(BlobAuditConstants.XP_SIMILARITY), 0d);
+        assertTrue((Long) diff.getPropertyValue(BlobAuditConstants.XP_CHANGED) > 0);
+        assertNull("the body must not be stored", diff.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB));
+        assertEquals(JSON_MIME, diff.getPropertyValue(BlobAuditConstants.XP_OLD_MIMETYPE));
+        assertEquals(XML_MIME, diff.getPropertyValue(BlobAuditConstants.XP_MIMETYPE));
+    }
+
+    /** A {@code .txt} holding JSON, edited and saved as {@code .json}: a genuine diff. */
+    @Test
+    public void testATextFileEditedUnderAnotherFormatIsStillDiffed() throws Exception {
+        DocumentModel doc = createVersionedFile("txt-to-json", textBlob(customersJson(10), "text/plain", "data.txt"));
+        newVersion(doc, textBlob(customersJson(10).replace("Customer number 3", "Customer renamed"), JSON_MIME,
+                "data.json"));
+
+        DocumentModel diff = diffsFor(doc.getId()).get(0);
+        assertEquals(BlobAuditConstants.STATUS_OK, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals(Long.valueOf(1), diff.getPropertyValue(BlobAuditConstants.XP_CHANGED));
+        assertTrue((Double) diff.getPropertyValue(BlobAuditConstants.XP_SIMILARITY) > 0.9);
+        assertTrue(diff.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB) != null);
+    }
+
+    /** The same rewrite without a format change is an author's edit, and always diffed. */
+    @Test
+    public void testATextFileRewrittenInTheSameFormatIsStillDiffed() throws Exception {
+        DocumentModel doc = createVersionedFile("json-rewritten", textBlob(customersJson(10), JSON_MIME, "a.json"));
+        newVersion(doc, textBlob(productsXml(10), JSON_MIME, "a.json"));
+
+        DocumentModel diff = diffsFor(doc.getId()).get(0);
+        assertEquals(BlobAuditConstants.STATUS_OK, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals(0d, (Double) diff.getPropertyValue(BlobAuditConstants.XP_SIMILARITY), 0d);
+        assertTrue(diff.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB) != null);
+    }
+
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-keepalldiffs-config.xml")
+    public void testMinSimilarityZeroStoresTheReplacedContentWhole() throws Exception {
+        DocumentModel doc = createVersionedFile("json-to-xml-kept", textBlob(customersJson(10), JSON_MIME, "d.json"));
+        newVersion(doc, textBlob(productsXml(10), XML_MIME, "d.xml"));
+
+        DocumentModel diff = diffsFor(doc.getId()).get(0);
+        assertEquals(BlobAuditConstants.STATUS_OK, diff.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertTrue(diff.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB) != null);
     }
 
     /* ------------------------------------------------------ silent cases */

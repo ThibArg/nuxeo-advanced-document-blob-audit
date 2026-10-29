@@ -140,6 +140,12 @@ public class TextDiffer {
      * share, a unit missing from a truncated side may simply lie beyond its cut: it is neither
      * reported nor counted, rather than reported as an addition or a removal that never happened.
      * Before that point, both windows cover the same part of the document, so the facts hold.
+     * <p>
+     * The result carries a {@link DiffResult#similarity()}: the characters of the units kept
+     * unchanged, divided by the characters of the smaller side. Characters rather than units, so
+     * that the closing braces, brackets and tags two unrelated JSON or XML files share weigh next
+     * to nothing; the smaller side, so that a large addition or a mass deletion still scores
+     * {@code 1}. It is measured on the extracted windows, like the counters.
      */
     public DiffResult diff(DiffableContent oldContent, DiffableContent newContent) {
         boolean keyed = oldContent.keyed() && newContent.keyed();
@@ -169,7 +175,18 @@ public class TextDiffer {
             cut = true;
         }
         return new DiffResult(text.added() + images.added(), text.removed() + images.removed(),
-                text.changed() + images.changed(), text.truncated() || images.truncated() || cut, unified);
+                text.changed() + images.changed(), text.truncated() || images.truncated() || cut, unified,
+                text.similarity(), text.replaced());
+    }
+
+    /**
+     * Returns {@code kept / min(oldChars, newChars)}, or {@code null} when a side has no content.
+     *
+     * @since 2025.1
+     */
+    protected static Double similarity(long kept, long oldChars, long newChars) {
+        long smaller = Math.min(oldChars, newChars);
+        return smaller <= 0 ? null : Double.valueOf(Math.min(1d, (double) kept / smaller));
     }
 
     /* ------------------------------------------------------------------ keyed */
@@ -184,6 +201,7 @@ public class TextDiffer {
         Set<String> keys = new LinkedHashSet<>(oldMap.keySet());
         keys.addAll(newMap.keySet());
 
+        long kept = 0;
         int added = 0;
         int removed = 0;
         int changed = 0;
@@ -194,6 +212,9 @@ public class TextDiffer {
         for (String key : keys) {
             String oldValue = oldMap.get(key);
             String newValue = newMap.get(key);
+            if (oldValue != null && oldValue.equals(newValue)) {
+                kept += keyedLength(key, oldValue);
+            }
             if (Objects.equals(oldValue, newValue) || oldUnknown.contains(key) || newUnknown.contains(key)) {
                 continue;
             }
@@ -228,7 +249,20 @@ public class TextDiffer {
             sb.append(entry);
             emitted++;
         }
-        return new DiffResult(added, removed, changed, truncated || cut, sb.toString());
+        return new DiffResult(added, removed, changed, truncated || cut, sb.toString(),
+                similarity(kept, keyedLength(oldMap), keyedLength(newMap)), false);
+    }
+
+    protected static long keyedLength(String key, String value) {
+        return (key == null ? 0 : key.length()) + (value == null ? 0 : value.length());
+    }
+
+    protected static long keyedLength(Map<String, String> map) {
+        long length = 0;
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            length += keyedLength(entry.getKey(), entry.getValue());
+        }
+        return length;
     }
 
     protected Map<String, String> toMap(DiffableContent content) {
@@ -262,7 +296,8 @@ public class TextDiffer {
         boolean truncated = oldContent.truncated() || newContent.truncated();
         List<String> a = render(oldContent);
         List<String> b = render(newContent);
-        List<Edit> edits = coalesce(positionalEdits(a, b, oldContent.truncated(), newContent.truncated()));
+        Comparison comparison = positionalEdits(a, b, oldContent.truncated(), newContent.truncated());
+        List<Edit> edits = coalesce(comparison.edits());
 
         int added = 0;
         int removed = 0;
@@ -294,7 +329,16 @@ public class TextDiffer {
             sb.append(entry);
             emitted++;
         }
-        return new DiffResult(added, removed, changed, truncated || cut, sb.toString());
+        return new DiffResult(added, removed, changed, truncated || cut, sb.toString(),
+                similarity(comparison.keptChars(), length(a), length(b)), false);
+    }
+
+    protected static long length(List<String> lines) {
+        long length = 0;
+        for (String line : lines) {
+            length += line.length();
+        }
+        return length;
     }
 
     protected List<String> render(DiffableContent content) {
@@ -341,8 +385,11 @@ public class TextDiffer {
      * <p>
      * Past the last aligned line, a removal is unknown when the new side is truncated and an
      * addition when the old side is: the line may lie beyond the cut. Those edits are dropped.
+     * <p>
+     * The kept characters are those of the common prefix, the common suffix and the aligned lines,
+     * counted before that drop: every line of the old side is either kept or removed.
      */
-    protected List<Edit> positionalEdits(List<String> a, List<String> b, boolean oldTruncated,
+    protected Comparison positionalEdits(List<String> a, List<String> b, boolean oldTruncated,
             boolean newTruncated) {
         int n = a.size();
         int m = b.size();
@@ -362,8 +409,14 @@ public class TextDiffer {
         List<Edit> edits = new ArrayList<>();
         Alignment alignment = new Alignment(a.subList(prefix, n - suffix), b.subList(prefix, m - suffix), edits);
         alignment.align(0, n - prefix - suffix, 0, m - prefix - suffix);
+        long kept = length(a);
+        for (Edit edit : edits) {
+            if (edit.type == EditType.REMOVE) {
+                kept -= edit.oldValue.length();
+            }
+        }
         if (suffix > 0 || !(oldTruncated || newTruncated)) {
-            return edits;
+            return new Comparison(edits, kept);
         }
         List<Edit> known = new ArrayList<>(edits.subList(0, alignment.tailStart));
         for (Edit edit : edits.subList(alignment.tailStart, edits.size())) {
@@ -371,7 +424,15 @@ public class TextDiffer {
                 known.add(edit);
             }
         }
-        return known;
+        return new Comparison(known, kept);
+    }
+
+    /**
+     * Edits of a positional comparison, and the characters of the lines it kept unchanged.
+     *
+     * @since 2025.1
+     */
+    protected record Comparison(List<Edit> edits, long keptChars) {
     }
 
     /**

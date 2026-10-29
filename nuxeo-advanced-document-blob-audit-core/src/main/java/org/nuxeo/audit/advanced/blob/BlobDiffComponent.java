@@ -53,6 +53,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.logging.log4j.LogManager;
@@ -100,7 +101,16 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     protected List<ResolvedExtractor> imageExtractors;
 
-    protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor) {
+    /**
+     * One enabled contribution, instantiated. {@code minSimilarity} and {@code minSimilarityLines}
+     * are its {@link ExtractorDescriptor#MIN_SIMILARITY} rule, parsed once; {@code 0} disables it.
+     */
+    protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor,
+            double minSimilarity, int minSimilarityLines) {
+
+        protected ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor) {
+            this(descriptor, extractor, 0, ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES);
+        }
     }
 
     @Override
@@ -131,7 +141,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                 properties.putIfAbsent(BlobTextExtractor.MAX_VALUE_LENGTH,
                         String.valueOf(getConfig().getMaxValueLength()));
                 extractor.init(properties);
-                resolved.add(new ResolvedExtractor(descriptor, extractor));
+                resolved.add(new ResolvedExtractor(descriptor, extractor, minSimilarity(descriptor),
+                        minSimilarityLines(descriptor)));
             } catch (ReflectiveOperationException | RuntimeException e) {
                 // RuntimeException included on purpose: init() parses contributed properties -
                 // ConverterTextExtractor does Integer.parseInt on minLineLength - so a typo in an
@@ -142,6 +153,47 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
         resolved.sort(Comparator.comparingInt(r -> r.descriptor().getOrder()));
         return resolved;
+    }
+
+    /**
+     * Parsed apart from {@code init()} and leniently: a typo in this property must cost the rule,
+     * not the extractor, whose formats would otherwise all become unsupported.
+     */
+    protected static double minSimilarity(ExtractorDescriptor descriptor) {
+        String value = descriptor.getProperties().get(ExtractorDescriptor.MIN_SIMILARITY);
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            if (parsed >= 0 && parsed <= 1) {
+                return parsed;
+            }
+        } catch (NumberFormatException e) {
+            // logged below
+        }
+        log.error("Invalid {} '{}' on blob diff extractor {}: expected a number between 0 and 1, rule disabled",
+                ExtractorDescriptor.MIN_SIMILARITY, value, descriptor.getId());
+        return 0;
+    }
+
+    protected static int minSimilarityLines(ExtractorDescriptor descriptor) {
+        String value = descriptor.getProperties().get(ExtractorDescriptor.MIN_SIMILARITY_LINES);
+        if (value == null || value.isBlank()) {
+            return ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            if (parsed >= 0) {
+                return parsed;
+            }
+        } catch (NumberFormatException e) {
+            // logged below
+        }
+        log.error("Invalid {} '{}' on blob diff extractor {}: expected a positive integer, using {}",
+                ExtractorDescriptor.MIN_SIMILARITY_LINES, value, descriptor.getId(),
+                ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES);
+        return ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES;
     }
 
     /**
@@ -206,12 +258,18 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     protected BlobTextExtractor findExtractor(List<ResolvedExtractor> candidates, String mimeType) {
+        ResolvedExtractor resolved = findResolved(candidates, mimeType);
+        return resolved == null ? null : resolved.extractor();
+    }
+
+    /** @since 2025.1 */
+    protected ResolvedExtractor findResolved(List<ResolvedExtractor> candidates, String mimeType) {
         if (candidates == null) {
             return null;
         }
         for (ResolvedExtractor resolved : candidates) {
             if (resolved.descriptor().accepts(mimeType)) {
-                return resolved.extractor();
+                return resolved;
             }
         }
         return null;
@@ -255,6 +313,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     protected DiffResult diffLocal(Blob oldBlob, Blob newBlob) {
+        List<ResolvedExtractor> candidates = extractors;
         DiffableContent oldContent = extract(oldBlob);
         DiffableContent newContent = extract(newBlob);
         if (oldContent == null || newContent == null) {
@@ -264,6 +323,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         TextDiffer differ = new TextDiffer(config.getMaxDiffEntries(), config.getMaxDiffChars(),
                 config.getMaxValueLength());
         DiffResult textResult = differ.diff(oldContent, newContent);
+        if (isReplaced(candidates, oldBlob, newBlob, oldContent, newContent, textResult)) {
+            textResult = textResult.asReplaced();
+        }
         if (config.normalizeImageAnalysisLevel() == 0) {
             return textResult;
         }
@@ -288,6 +350,33 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     /** A missing side (first version, blob added or removed) has an empty inventory, not none. */
     protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws IOException {
         return blob == null ? DiffableContent.keyed(List.of(), false) : extractor.extract(blob, maxLines);
+    }
+
+    /**
+     * Whether the pair changed mime type and shares too little to be worth a diff (item 62).
+     * <p>
+     * Only a pair read by one contribution reaches this point - two contributions are
+     * {@code FORMAT_CHANGED} - so the rule of the new side's contribution is the rule of both. A
+     * rewrite within one mime type is always diffed: the rule is about a file replaced by another
+     * one, not about how much an author changed.
+     */
+    protected boolean isReplaced(List<ResolvedExtractor> candidates, Blob oldBlob, Blob newBlob,
+            DiffableContent oldContent, DiffableContent newContent, DiffResult result) {
+        if (oldBlob == null || newBlob == null || result.similarity() == null) {
+            return false;
+        }
+        if (Objects.equals(ExtractorDescriptor.normalizeMimeType(oldBlob.getMimeType()),
+                ExtractorDescriptor.normalizeMimeType(newBlob.getMimeType()))) {
+            return false;
+        }
+        ResolvedExtractor resolved = findResolved(candidates, newBlob.getMimeType());
+        if (resolved == null || resolved.minSimilarity() <= 0) {
+            return false;
+        }
+        if (Math.min(oldContent.size(), newContent.size()) < resolved.minSimilarityLines()) {
+            return false;
+        }
+        return result.similarity() < resolved.minSimilarity();
     }
 
     /* ------------------------------------------------------------- persistence */
@@ -525,6 +614,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             diffDoc.setPropertyValue(XP_REMOVED, Long.valueOf(result.removed()));
             diffDoc.setPropertyValue(XP_CHANGED, Long.valueOf(result.changed()));
             diffDoc.setPropertyValue(XP_TRUNCATED, Boolean.valueOf(result.truncated()));
+            diffDoc.setPropertyValue(BlobAuditConstants.XP_SIMILARITY, result.similarity());
             if (STATUS_OK.equals(status) && !result.isEmpty()) {
                 // A blob, not a string: it stays out of the SQL/Mongo record and out of full-text.
                 Blob diffBlob = Blobs.createBlob(result.unified(), "text/plain", StandardCharsets.UTF_8.name(),

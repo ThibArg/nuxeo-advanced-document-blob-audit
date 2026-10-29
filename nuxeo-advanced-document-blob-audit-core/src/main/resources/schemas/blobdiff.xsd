@@ -38,6 +38,12 @@
   <xs:element name="changed" type="xs:long" />
   <xs:element name="truncated" type="xs:boolean" />
   <xs:element name="status" type="xs:string" />
+  <!--
+    Share of the smaller version kept unchanged in the other, in characters, 0 to 1. Absent when
+    not measured. Below the minSimilarity of the extractor, a pair that changed mime type is filed
+    as skippedContentReplaced.
+  -->
+  <xs:element name="similarity" type="xs:double" />
 
   <!--
     Storage identity of the two compared binaries (since 1.2). Lets a diff in error be replayed

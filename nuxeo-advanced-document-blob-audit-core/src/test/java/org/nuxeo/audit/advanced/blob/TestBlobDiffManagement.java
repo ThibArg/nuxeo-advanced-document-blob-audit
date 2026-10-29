@@ -337,6 +337,23 @@ public class TestBlobDiffManagement {
     }
 
     /**
+     * Item 62, product decision: a replaced content is not an incident, so it is not replayed. A
+     * deployment that wants the full diffs sets {@code minSimilarity} to {@code 0}, and an
+     * integrator recomputes a pair through {@code BlobDiffService#diff} on the version blobs.
+     */
+    @Test
+    public void testRetryRefusesAReplacedContent() throws Exception {
+        DocumentModel replaced = diffOnTextPair("replaced",
+                BlobAuditConstants.STATUS_SKIPPED_CONTENT_REPLACED);
+        try {
+            run(session, BlobDiffRetryOp.ID, replaced, null);
+            fail("retry must be refused for a replaced content");
+        } catch (Exception e) {
+            assertRefusedBecause(e, "Only a BlobDiff in error");
+        }
+    }
+
+    /**
      * SEC-01: {@code BlobDiff.Retry} replays a pair of storage keys read off the input document, and
      * {@code BlobDiffWork} re-reads them in a <b>system session</b> through
      * {@code provider.readBlob(info)}. A blob provider is a store keyed by an opaque string: that

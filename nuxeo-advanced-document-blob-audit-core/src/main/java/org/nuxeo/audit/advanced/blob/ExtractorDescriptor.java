@@ -41,6 +41,27 @@ public class ExtractorDescriptor implements Descriptor {
     /** @since 2025.1 */
     public static final int DEFAULT_ORDER = 100;
 
+    /**
+     * Extractor property: a pair whose mime type changed and whose {@link DiffResult#similarity()}
+     * is under this value, between {@code 0} and {@code 1}, is filed as
+     * {@code skippedContentReplaced}, with its counters and without its body. {@code 0}, or absent,
+     * keeps every diff. Read by the service, not by the extractor.
+     *
+     * @since 2025.1
+     */
+    public static final String MIN_SIMILARITY = "minSimilarity";
+
+    /**
+     * Extractor property: {@link #MIN_SIMILARITY} only applies when both sides hold at least this
+     * many units, a percentage meaning little on a handful of lines.
+     *
+     * @since 2025.1
+     */
+    public static final String MIN_SIMILARITY_LINES = "minSimilarityLines";
+
+    /** @since 2025.1 */
+    public static final int DEFAULT_MIN_SIMILARITY_LINES = 5;
+
     @XNode("@name")
     protected String name;
 
@@ -115,11 +136,7 @@ public class ExtractorDescriptor implements Descriptor {
         if (mimeType == null) {
             return mimeTypes.contains("*");
         }
-        String normalized = mimeType.toLowerCase(Locale.ROOT);
-        int idx = normalized.indexOf(';');
-        if (idx > 0) {
-            normalized = normalized.substring(0, idx).trim();
-        }
+        String normalized = normalizeMimeType(mimeType);
         for (String candidate : mimeTypes) {
             if ("*".equals(candidate) || candidate.equalsIgnoreCase(normalized)) {
                 return true;
@@ -130,5 +147,21 @@ public class ExtractorDescriptor implements Descriptor {
             }
         }
         return false;
+    }
+
+    /**
+     * Returns the mime type lower-cased and without its parameters, so that
+     * {@code text/plain; charset=UTF-8} and {@code text/plain} are the same type; {@code null} for
+     * {@code null}.
+     *
+     * @since 2025.1
+     */
+    public static String normalizeMimeType(String mimeType) {
+        if (mimeType == null) {
+            return null;
+        }
+        String normalized = mimeType.toLowerCase(Locale.ROOT);
+        int idx = normalized.indexOf(';');
+        return idx > 0 ? normalized.substring(0, idx).trim() : normalized.trim();
     }
 }

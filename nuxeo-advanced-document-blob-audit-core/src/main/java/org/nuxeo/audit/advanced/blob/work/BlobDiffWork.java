@@ -19,6 +19,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_CONTENT_REPLACED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_RETRYING;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.SUMMARY_SOURCE_MISSING;
@@ -349,6 +350,8 @@ public class BlobDiffWork extends AbstractWork {
                         // Since COR-01, a null can only mean "no extractor for that mime type": an
                         // extraction that fails raises and lands in the catch below, as an error.
                         status = STATUS_SKIPPED_TYPE;
+                    } else if (result.replaced()) {
+                        status = STATUS_SKIPPED_CONTENT_REPLACED;
                     }
                 } catch (RuntimeException e) {
                     log.warn("Blob diff failed for {} ({})", docId, xpath, e);

@@ -96,6 +96,35 @@ public class BlobAuditTestHelper {
     }
 
     /**
+     * A JSON list of customers, one field per line.
+     *
+     * @since 2025.1
+     */
+    public static String customersJson(int count) {
+        StringBuilder sb = new StringBuilder("[\n");
+        for (int i = 0; i < count; i++) {
+            sb.append("  {\n    \"id\": ").append(i).append(",\n    \"name\": \"Customer number ").append(i)
+              .append("\",\n    \"city\": \"Paris\"\n  }").append(i < count - 1 ? ",\n" : "\n");
+        }
+        return sb.append("]\n").toString();
+    }
+
+    /**
+     * An XML product catalog sharing nothing with {@link #customersJson(int)}: the file a user
+     * stores in place of the other one, not a conversion of it.
+     *
+     * @since 2025.1
+     */
+    public static String productsXml(int count) {
+        StringBuilder sb = new StringBuilder("<?xml version=\"1.0\"?>\n<catalog>\n");
+        for (int i = 0; i < count; i++) {
+            sb.append("  <product sku=\"SKU-").append(i).append("\">\n    <label>Product reference ").append(i)
+              .append("</label>\n    <price>").append(10 + i).append(".99</price>\n  </product>\n");
+        }
+        return sb.append("</catalog>\n").toString();
+    }
+
+    /**
      * Same bytes, but backed by a real file, so {@code blob.getFile()} is not {@code null}.
      * <p>
      * The extractors read POI formats from the file when there is one - random access, read only -

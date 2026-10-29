@@ -83,6 +83,38 @@
         }
       },
 
+      /** Mime type without case nor parameters, as ExtractorDescriptor#normalizeMimeType. */
+      normalizeMimeType: function (mimeType) {
+        return (mimeType || '').split(';')[0].trim().toLowerCase();
+      },
+
+      /** Whether the two versions hold different formats (item 62). Both must be known. */
+      formatChanged: function (oldMimeType, newMimeType) {
+        return !!oldMimeType && !!newMimeType &&
+          this.normalizeMimeType(oldMimeType) !== this.normalizeMimeType(newMimeType);
+      },
+
+      /**
+       * Short names of the two formats: the file extensions when they differ, which is what the
+       * user sees ("json", "xml"), the mime subtypes otherwise.
+       */
+      formatPair: function (oldMimeType, newMimeType, oldFilename, newFilename) {
+        var extension = function (filename) {
+          var dot = filename ? filename.lastIndexOf('.') : -1;
+          return dot > 0 && dot < filename.length - 1 ? filename.substring(dot + 1).toLowerCase() : '';
+        };
+        var oldExtension = extension(oldFilename);
+        var newExtension = extension(newFilename);
+        if (oldExtension && newExtension && oldExtension !== newExtension) {
+          return [oldExtension, newExtension];
+        }
+        var subtype = function (mimeType) {
+          var normalized = this.normalizeMimeType(mimeType);
+          return normalized.substring(normalized.indexOf('/') + 1);
+        }.bind(this);
+        return [subtype(oldMimeType), subtype(newMimeType)];
+      },
+
       // "retrying" too: a replay lost with a restarted node must be requestable again. The server
       // refuses a second one while the first is still queued or running.
       isRetryable: function (status) {

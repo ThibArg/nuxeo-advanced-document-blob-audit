@@ -76,6 +76,11 @@ public interface BlobDiffService {
 
     /**
      * Compares two blobs.
+     * <p>
+     * The result always holds the full body. When the pair changed mime type and its similarity is
+     * under the {@code minSimilarity} of its extractor contribution, it is flagged
+     * {@link DiffResult#replaced()}: {@code BlobDiffWork} then stores the counters without the body.
+     * Calling this on the blobs of two versions is how an integrator recomputes such a pair.
      *
      * @return the result, or {@code null} if either side has no registered extractor
      * @throws NuxeoException if an extraction failed

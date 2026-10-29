@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.keepalldiffs">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <!--
+    Item 62: how a deployment keeps every full diff. A partial override of the shipped plainText
+    contribution, setting nothing but minSimilarity: the class, the mime types and the other
+    properties must survive it.
+  -->
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
+    <extractor name="plainText">
+      <property name="minSimilarity">0</property>
+    </extractor>
+  </extension>
+
+</component>

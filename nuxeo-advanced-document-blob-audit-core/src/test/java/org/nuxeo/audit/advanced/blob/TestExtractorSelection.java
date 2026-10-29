@@ -17,6 +17,7 @@ package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.HashMap;
@@ -140,5 +141,37 @@ public class TestExtractorSelection {
 
         assertFalse(merged.isEnabled());
         assertEquals(ConverterTextExtractor.class, merged.getKlass());
+    }
+
+    /**
+     * Item 62: a typo in {@code minSimilarity} costs the rule, never the extractor - parsing it in
+     * {@code init()} would have skipped the extractor and made every text format unsupported.
+     */
+    @Test
+    public void testAnInvalidSimilarityRuleIsDisabledRatherThanFatal() {
+        ExtractorDescriptor descriptor = descriptor("text/*");
+        descriptor.name = "plainText";
+
+        assertEquals(0d, BlobDiffComponent.minSimilarity(descriptor), 0d);
+        assertEquals(ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES,
+                BlobDiffComponent.minSimilarityLines(descriptor));
+
+        descriptor.properties = new HashMap<>(Map.of("minSimilarity", "0.25", "minSimilarityLines", "12"));
+        assertEquals(0.25, BlobDiffComponent.minSimilarity(descriptor), 0d);
+        assertEquals(12, BlobDiffComponent.minSimilarityLines(descriptor));
+
+        for (String invalid : List.of("ten percent", "1.5", "-0.1")) {
+            descriptor.properties = new HashMap<>(Map.of("minSimilarity", invalid, "minSimilarityLines", "many"));
+            assertEquals(invalid, 0d, BlobDiffComponent.minSimilarity(descriptor), 0d);
+            assertEquals(ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES,
+                    BlobDiffComponent.minSimilarityLines(descriptor));
+        }
+    }
+
+    @Test
+    public void testMimeTypesAreComparedWithoutCaseNorParameters() {
+        assertEquals("text/plain", ExtractorDescriptor.normalizeMimeType("Text/Plain; charset=UTF-8"));
+        assertEquals("application/json", ExtractorDescriptor.normalizeMimeType("application/json"));
+        assertNull(ExtractorDescriptor.normalizeMimeType(null));
     }
 }

@@ -47,6 +47,11 @@
         <label>[[i18n('label.blobaudit.diff.summary')]]</label>
         <span>[[document.properties.bdiff:summary]]</span>
 
+        <template is="dom-if" if="[[_hasSimilarity(document.properties.bdiff:similarity)]]">
+          <label>[[i18n('label.blobaudit.view.similarity')]]</label>
+          <span title$="[[i18n('label.blobaudit.view.similarityHelp')]]">[[_percent(document.properties.bdiff:similarity)]]</span>
+        </template>
+
         <label>[[i18n('label.blobaudit.view.files')]]</label>
         <span>[[document.properties.bdiff:oldFilename]] &rarr; [[document.properties.bdiff:newFilename]]
           <span class="blobdiff-muted">([[document.properties.bdiff:mimeType]])</span></span>
@@ -73,6 +78,9 @@
     </nuxeo-card>
 
     <nuxeo-card heading="[[i18n('label.blobaudit.view.diff')]]">
+      <template is="dom-if" if="[[_isReplaced(document.properties.bdiff:status)]]">
+        <p class="blobdiff-muted">[[i18n('label.blobaudit.view.replaced')]]</p>
+      </template>
       <nuxeo-blobdiff-viewer url="[[document.properties.bdiff:diff.data]]"></nuxeo-blobdiff-viewer>
     </nuxeo-card>
 
@@ -96,6 +104,16 @@
       },
       _versionIds: function (previousId, newId) {
         return [previousId, newId].filter(Boolean).join(' → ');
+      },
+      // 0 is a measured score, the most telling one: only null and undefined mean "not measured".
+      _hasSimilarity: function (similarity) {
+        return similarity !== null && similarity !== undefined;
+      },
+      _percent: function (similarity) {
+        return Math.round(similarity * 100) + ' %';
+      },
+      _isReplaced: function (status) {
+        return status === 'skippedContentReplaced';
       },
       _canRetry: function (doc) {
         var p = doc && doc.properties;
