@@ -4,6 +4,16 @@ Audit **what actually changed inside a file**: Excel spreadsheets cell by cell, 
 
 A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
 
+> [!IMPORTANT]
+> By essence, this plugin is complex. With listeners, asynchronous work, different code for extractors
+> (depending on the mime type), etc.
+>
+> It is a **Nuxeo Presales Sandbox plugin**, showing art of the possible but not included as part of the
+> Nuxeo PLatform and, so, **not supported**. The need for this feature is very rare and mostly limited to
+> strict regulation constraints. So, if you need it **we strongly recommend at a Nuxeo Partner forks the code
+> and takes ownership** (tuning, maintenance,
+> support)
+
 ## Principle
 
 | Step | Where | Cost |
