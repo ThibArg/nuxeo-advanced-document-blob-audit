@@ -9,10 +9,9 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 > (depending on the mime type), etc.
 >
 > It is a **Nuxeo Presales Sandbox plugin**, showing art of the possible but not included as part of the
-> Nuxeo PLatform and, so, **not supported**. The need for this feature is very rare and mostly limited to
-> strict regulation constraints. So, if you need it **we strongly recommend at a Nuxeo Partner forks the code
-> and takes ownership** (tuning, maintenance,
-> support)
+> Nuxeo Platform and, so, **not supported**. The need for this feature is very rare and mostly limited to
+> strict regulation constraints. So, if you need it **we strongly recommend a Nuxeo Partner forks the code
+> and takes ownership** (tuning, maintenance, support)
 
 ## Principle
 
