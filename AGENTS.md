@@ -339,9 +339,11 @@ the README as a prerequisite rather than worked around.
 
 **The diff body is bounded by construction, and the counters are not.** `maxDiffChars` caps the
 whole rendered body, `maxValueLength` a single unit, and both are checked **after** the entry is
-built — testing `sb.length()` beforehand lets the result overshoot by one whole entry. The cut is
+built — testing the body length beforehand lets the result overshoot by one whole entry. The cut is
 monotone, and `added` / `removed` / `changed` keep counting past the budget so they stay exact.
-Any change to `diffKeyed` or `diffPositional` must preserve all three properties.
+Both strategies, `diffKeyed` and `diffPositional`, write their body through `TextDiffer.Body`,
+which owns the budget and the cut; they only count and offer each entry. Any change to either, or
+to `Body`, must preserve all three properties.
 Coverage: `TestTextDifferBounding`.
 
 **A unit missing from a cut side is unknown past the last shared unit** (item 46). Each side is cut

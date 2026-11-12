@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The single diff engine of the plugin, shared by every format.
@@ -189,6 +190,46 @@ public class TextDiffer {
         return smaller <= 0 ? null : Double.valueOf(Math.min(1d, (double) kept / smaller));
     }
 
+    /**
+     * Diff body within maxEntries and maxChars. The budget is checked on the rendered entry, and once
+     * the body is cut it stays cut, so the body is always a contiguous prefix of the full diff.
+     *
+     * @since 2025.1
+     */
+    protected final class Body {
+
+        private final StringBuilder text = new StringBuilder();
+
+        private int emitted;
+
+        private boolean cut;
+
+        /** Appends the entry if it fits; past the budget, the entry is not even rendered. */
+        void offer(Supplier<String> entry) {
+            if (cut || emitted >= maxEntries) {
+                cut = true;
+                return;
+            }
+            String rendered = entry.get();
+            // Checked on the rendered entry: testing text.length() alone would let the body
+            // overshoot maxChars by one whole entry.
+            if (text.length() + rendered.length() > maxChars) {
+                cut = true;
+                return;
+            }
+            text.append(rendered);
+            emitted++;
+        }
+
+        boolean isCut() {
+            return cut;
+        }
+
+        String text() {
+            return text.toString();
+        }
+    }
+
     /* ------------------------------------------------------------------ keyed */
 
     protected DiffResult diffKeyed(DiffableContent oldContent, DiffableContent newContent) {
@@ -205,9 +246,7 @@ public class TextDiffer {
         int added = 0;
         int removed = 0;
         int changed = 0;
-        int emitted = 0;
-        boolean cut = false;
-        StringBuilder sb = new StringBuilder();
+        Body body = new Body();
 
         for (String key : keys) {
             String oldValue = oldMap.get(key);
@@ -218,6 +257,8 @@ public class TextDiffer {
             if (Objects.equals(oldValue, newValue) || oldUnknown.contains(key) || newUnknown.contains(key)) {
                 continue;
             }
+            // Counted before the budget check: added/removed/changed stay exact whatever the body
+            // had room for.
             if (oldValue == null) {
                 added++;
             } else if (newValue == null) {
@@ -225,32 +266,26 @@ public class TextDiffer {
             } else {
                 changed++;
             }
-            if (cut || emitted >= maxEntries) {
-                // Counting continues past the budget on purpose: added/removed/changed must stay
-                // exact whatever the rendering had room for. Once cut, stay cut - letting a later,
-                // shorter entry through would produce a non-contiguous diff body.
-                cut = true;
-                continue;
-            }
-            String entry;
-            if (oldValue == null) {
-                entry = "+ " + elide(key) + " = " + elide(newValue) + "\n";
-            } else if (newValue == null) {
-                entry = "- " + elide(key) + " = " + elide(oldValue) + "\n";
-            } else {
-                entry = "~ " + elide(key) + " : " + elide(oldValue) + " -> " + elide(newValue) + "\n";
-            }
-            // Checked against the rendered entry, not before building it: testing sb.length()
-            // alone would let the result overshoot maxChars by one whole entry.
-            if (sb.length() + entry.length() > maxChars) {
-                cut = true;
-                continue;
-            }
-            sb.append(entry);
-            emitted++;
+            body.offer(() -> keyedEntry(key, oldValue, newValue));
         }
-        return new DiffResult(added, removed, changed, truncated || cut, sb.toString(),
+        return new DiffResult(added, removed, changed, truncated || body.isCut(), body.text(),
                 similarity(kept, keyedLength(oldMap), keyedLength(newMap)), false);
+    }
+
+    /**
+     * Renders one keyed entry: {@code +} for an added key, {@code -} for a removed one, {@code ~} for
+     * a changed value.
+     *
+     * @since 2025.1
+     */
+    protected String keyedEntry(String key, String oldValue, String newValue) {
+        if (oldValue == null) {
+            return "+ " + elide(key) + " = " + elide(newValue) + "\n";
+        }
+        if (newValue == null) {
+            return "- " + elide(key) + " = " + elide(oldValue) + "\n";
+        }
+        return "~ " + elide(key) + " : " + elide(oldValue) + " -> " + elide(newValue) + "\n";
     }
 
     protected static long keyedLength(String key, String value) {
@@ -302,35 +337,33 @@ public class TextDiffer {
         int added = 0;
         int removed = 0;
         int changed = 0;
-        int emitted = 0;
-        boolean cut = false;
-        StringBuilder sb = new StringBuilder();
+        Body body = new Body();
 
         for (Edit edit : edits) {
-            switch (edit.type) {
+            // See diffKeyed: counted before the budget check.
+            switch (edit.type()) {
             case ADD -> added++;
             case REMOVE -> removed++;
             case CHANGE -> changed++;
             }
-            if (cut || emitted >= maxEntries) {
-                // See diffKeyed: counters stay exact past the budget, and the cut is monotone.
-                cut = true;
-                continue;
-            }
-            String entry = switch (edit.type) {
-                case ADD -> "+ " + elide(edit.newValue) + "\n";
-                case REMOVE -> "- " + elide(edit.oldValue) + "\n";
-                case CHANGE -> "- " + elide(edit.oldValue) + "\n+ " + elide(edit.newValue) + "\n";
-            };
-            if (sb.length() + entry.length() > maxChars) {
-                cut = true;
-                continue;
-            }
-            sb.append(entry);
-            emitted++;
+            body.offer(() -> positionalEntry(edit));
         }
-        return new DiffResult(added, removed, changed, truncated || cut, sb.toString(),
+        return new DiffResult(added, removed, changed, truncated || body.isCut(), body.text(),
                 similarity(comparison.keptChars(), length(a), length(b)), false);
+    }
+
+    /**
+     * Renders one positional edit: {@code +} for an added line, {@code -} for a removed one, both for
+     * a changed one.
+     *
+     * @since 2025.1
+     */
+    protected String positionalEntry(Edit edit) {
+        return switch (edit.type()) {
+            case ADD -> "+ " + elide(edit.newValue()) + "\n";
+            case REMOVE -> "- " + elide(edit.oldValue()) + "\n";
+            case CHANGE -> "- " + elide(edit.oldValue()) + "\n+ " + elide(edit.newValue()) + "\n";
+        };
     }
 
     protected static long length(List<String> lines) {
@@ -353,19 +386,7 @@ public class TextDiffer {
         ADD, REMOVE, CHANGE
     }
 
-    protected static class Edit {
-
-        protected final EditType type;
-
-        protected final String oldValue;
-
-        protected final String newValue;
-
-        protected Edit(EditType type, String oldValue, String newValue) {
-            this.type = type;
-            this.oldValue = oldValue;
-            this.newValue = newValue;
-        }
+    protected record Edit(EditType type, String oldValue, String newValue) {
     }
 
     /**
@@ -411,8 +432,8 @@ public class TextDiffer {
         alignment.align(0, n - prefix - suffix, 0, m - prefix - suffix);
         long kept = length(a);
         for (Edit edit : edits) {
-            if (edit.type == EditType.REMOVE) {
-                kept -= edit.oldValue.length();
+            if (edit.type() == EditType.REMOVE) {
+                kept -= edit.oldValue().length();
             }
         }
         if (suffix > 0 || !(oldTruncated || newTruncated)) {
@@ -420,7 +441,7 @@ public class TextDiffer {
         }
         List<Edit> known = new ArrayList<>(edits.subList(0, alignment.tailStart));
         for (Edit edit : edits.subList(alignment.tailStart, edits.size())) {
-            if (edit.type == EditType.REMOVE ? !newTruncated : !oldTruncated) {
+            if (edit.type() == EditType.REMOVE ? !newTruncated : !oldTruncated) {
                 known.add(edit);
             }
         }
@@ -583,9 +604,9 @@ public class TextDiffer {
         List<Edit> result = new ArrayList<>(edits.size());
         for (int i = 0; i < edits.size(); i++) {
             Edit current = edits.get(i);
-            if (current.type == EditType.REMOVE && i + 1 < edits.size()
-                    && edits.get(i + 1).type == EditType.ADD) {
-                result.add(new Edit(EditType.CHANGE, current.oldValue, edits.get(i + 1).newValue));
+            if (current.type() == EditType.REMOVE && i + 1 < edits.size()
+                    && edits.get(i + 1).type() == EditType.ADD) {
+                result.add(new Edit(EditType.CHANGE, current.oldValue(), edits.get(i + 1).newValue()));
                 i++;
             } else {
                 result.add(current);
