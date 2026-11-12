@@ -25,22 +25,11 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.LABEL_EVENT_BLOB_
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_OK;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_ADDED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CHANGED;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DIFF_BLOB;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_MIMETYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_REMOVED;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_REPO;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_STATUS;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_TRUNCATED;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_USER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -49,7 +38,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -591,67 +579,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     @Override
-    public DocumentModel createDiffDocument(CoreSession session, DocumentModel source, String xpath, Blob oldBlob,
-            Blob newBlob, String user, Date date, DiffResult result, String status, String correlationId) {
-        return createDiffDocument(session, source.getId(), source.getRepositoryName(), source.getTitle(), xpath,
-                oldBlob, newBlob, user, date, result, status, correlationId);
-    }
-
-    @Override
-    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, String user, Date date, DiffResult result,
-            String status, String correlationId) {
-        return createDiffDocument(session, sourceId, sourceRepository, sourceTitle, xpath, oldBlob, newBlob,
-                FrozenBlobs.of(oldBlob, newBlob), user, date, result, status, correlationId);
-    }
-
-    @Override
-    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
-            DiffResult result, String status, String correlationId) {
-        return createDiffDocument(session, sourceId, sourceRepository, sourceTitle, xpath, oldBlob, newBlob, frozen,
-                VersionContext.NONE, user, date, result, status, correlationId);
-    }
-
-    @Override
-    public DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen,
-            VersionContext versions, String user, Date date, DiffResult result, String status, String correlationId) {
+    public DocumentModel createDiffDocument(CoreSession session, DiffRequest request, String status,
+            DiffResult result) {
+        Date date = new Date(request.eventTime());
         DocumentModel container = getOrCreateContainer(session, date);
-        String name = diffDocumentName(sourceId, date, correlationId);
+        String name = diffDocumentName(request.sourceId(), date, request.correlationId());
         DocumentModel diffDoc = session.createDocumentModel(container.getPathAsString(), name, DIFF_DOCTYPE);
-        diffDoc.setPropertyValue("dc:title", (sourceTitle == null ? sourceId : sourceTitle) + " - " + xpath);
-        diffDoc.setPropertyValue(XP_SOURCE_ID, sourceId);
-        diffDoc.setPropertyValue(XP_SOURCE_REPO, sourceRepository);
-        diffDoc.setPropertyValue(XP_XPATH, xpath);
-        VersionContext versionContext = versions == null ? VersionContext.NONE : versions;
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_PREVIOUS_VERSION_ID, versionContext.previousVersionId());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_PREVIOUS_VERSION_LABEL, versionContext.previousVersionLabel());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_VERSION_ID, versionContext.newVersionId());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_VERSION_LABEL, versionContext.newVersionLabel());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_VERSION_SERIES_ID, versionContext.versionSeriesId());
-        diffDoc.setPropertyValue(XP_CORRELATION_ID, correlationId);
-        diffDoc.setPropertyValue(XP_USER, user);
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(date);
-        diffDoc.setPropertyValue(XP_DATE, calendar);
-        diffDoc.setPropertyValue(XP_NEW_MIMETYPE, newBlob != null ? newBlob.getMimeType() : null);
-        FrozenBlobs keys = frozen == null ? FrozenBlobs.NONE : frozen;
-        diffDoc.setPropertyValue(XP_OLD_FILENAME, oldBlob != null ? oldBlob.getFilename() : keys.oldFilename());
-        diffDoc.setPropertyValue(XP_NEW_FILENAME, newBlob != null ? newBlob.getFilename() : keys.newFilename());
-        diffDoc.setPropertyValue(XP_OLD_DIGEST, oldBlob != null ? oldBlob.getDigest() : keys.oldDigest());
-        diffDoc.setPropertyValue(XP_NEW_DIGEST, newBlob != null ? newBlob.getDigest() : keys.newDigest());
+        request.writeTo(diffDoc);
         diffDoc.setPropertyValue(XP_STATUS, status);
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_PROVIDER, keys.oldProviderId());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, keys.oldKey());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_MIMETYPE, keys.oldMimeType());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_OLD_LENGTH, keys.oldLength() < 0 ? null : keys.oldLength());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_PROVIDER, keys.newProviderId());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY, keys.newKey());
-        diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_LENGTH, keys.newLength() < 0 ? null : keys.newLength());
-        if (newBlob == null && keys.newMimeType() != null) {
-            diffDoc.setPropertyValue(XP_NEW_MIMETYPE, keys.newMimeType());
-        }
         if (result != null) {
             diffDoc.setPropertyValue(XP_SUMMARY, result.summary());
             diffDoc.setPropertyValue(XP_ADDED, Long.valueOf(result.added()));

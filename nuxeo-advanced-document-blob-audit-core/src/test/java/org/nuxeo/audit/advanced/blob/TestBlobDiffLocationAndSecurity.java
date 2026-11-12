@@ -131,6 +131,14 @@ public class TestBlobDiffLocationAndSecurity {
         return page;
     }
 
+    /** An {@code ok} diff of the given source and xpath, with no stored binaries. */
+    protected DocumentModel createDiff(DocumentModel source, String xpath, Date date) {
+        return BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(source.getRepositoryName(), source.getId(), source.getTitle(), xpath,
+                        null, null, "jdoe", date, UUID.randomUUID().toString()),
+                BlobAuditConstants.STATUS_OK, null);
+    }
+
     /** jdoe edits a text file end to end; returns the source document id.
      * @throws IOException */
     protected String jdoeEditsAFile(String name) throws IOException {
@@ -252,10 +260,8 @@ public class TestBlobDiffLocationAndSecurity {
     public void testSameSourceAndTimeGetDistinctNames() throws Exception {
         DocumentModel source = createFile(session, "two-blobs", textBlob("x", "text/plain", "x.txt"));
         Date now = new Date();
-        DocumentModel first = blobDiffService.createDiffDocument(session, source, "file:content", null, null,
-                "jdoe", now, null, BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
-        DocumentModel second = blobDiffService.createDiffDocument(session, source, "files:files/0/file", null,
-                null, "jdoe", now, null, BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        DocumentModel first = createDiff(source, "file:content", now);
+        DocumentModel second = createDiff(source, "files:files/0/file", now);
         session.save();
 
         assertNotEquals(first.getName(), second.getName());
@@ -403,8 +409,7 @@ public class TestBlobDiffLocationAndSecurity {
     @Test
     public void testDiffsCannotLeaveTheContainer() throws Exception {
         DocumentModel source = createFile(session, "kept-in", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel diff = blobDiffService.createDiffDocument(session, source, "file:content", null, null,
-                "jdoe", new Date(), null, BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        DocumentModel diff = createDiff(source, "file:content", new Date());
         DocumentModel otherDay = blobDiffService.getOrCreateContainer(session, date(2031, Calendar.MARCH, 14));
         session.save();
         DocumentRef root = session.getRootDocument().getRef();
@@ -423,8 +428,7 @@ public class TestBlobDiffLocationAndSecurity {
     @Test
     public void testAuditListIgnoresABlobDiffOutsideTheContainer() throws Exception {
         DocumentModel source = createFile(session, "listed", textBlob("x", "text/plain", "x.txt"));
-        blobDiffService.createDiffDocument(session, source, "file:content", null, null, "jdoe", new Date(), null,
-                BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        createDiff(source, "file:content", new Date());
         DocumentModel forged = session.createDocumentModel("/", "forged", BlobAuditConstants.DIFF_DOCTYPE);
         forged.setPropertyValue(BlobAuditConstants.XP_SOURCE_ID, source.getId());
         BlobAuditTestHelper.createUnguarded(session, forged);
@@ -452,9 +456,10 @@ public class TestBlobDiffLocationAndSecurity {
         txFeature.nextTransaction();
         String missingId = UUID.randomUUID().toString();
         String correlationId = UUID.randomUUID().toString();
-        BlobDiffWork work = new BlobDiffWork(session.getRepositoryName(), missingId, "file:content", "default",
-                null, "old.txt", "text/plain", null, 0, "default", null, "new.txt", "text/plain", null, 0, "jdoe",
-                System.currentTimeMillis(), correlationId);
+        BlobDiffWork work = new BlobDiffWork(BlobAuditTestHelper.request(session.getRepositoryName(), missingId,
+                null, "file:content", new FrozenBlob("default", null, "old.txt", "text/plain", null, 0),
+                new FrozenBlob("default", null, "new.txt", "text/plain", null, 0), "jdoe", new Date(),
+                correlationId));
         Framework.getService(WorkManager.class).schedule(work);
         txFeature.nextTransaction();
 

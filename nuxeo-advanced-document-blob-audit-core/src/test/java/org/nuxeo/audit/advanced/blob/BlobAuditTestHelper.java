@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -274,5 +275,28 @@ public class BlobAuditTestHelper {
         } finally {
             events.setListenerEnabledFlag(BlobDiffLocationListener.NAME, true);
         }
+    }
+
+    /**
+     * Builds a diff request with a version pair of its own, derived from the correlation id.
+     *
+     * @since 2025.1
+     */
+    public static DiffRequest request(String repository, String sourceId, String sourceTitle, String xpath,
+            FrozenBlob oldBlob, FrozenBlob newBlob, String user, Date date, String correlationId) {
+        VersionContext versions = new VersionContext("v1-" + correlationId, "1.0", "v2-" + correlationId, "1.1",
+                "series");
+        return new DiffRequest(repository, sourceId, sourceTitle, xpath, oldBlob, newBlob, versions, user,
+                date.getTime(), correlationId);
+    }
+
+    /**
+     * Creates the {@code BlobDiff} of a request, the way the work does.
+     *
+     * @since 2025.1
+     */
+    public static DocumentModel createDiff(CoreSession session, DiffRequest request, String status,
+            DiffResult result) {
+        return Framework.getService(BlobDiffService.class).createDiffDocument(session, request, status, result);
     }
 }

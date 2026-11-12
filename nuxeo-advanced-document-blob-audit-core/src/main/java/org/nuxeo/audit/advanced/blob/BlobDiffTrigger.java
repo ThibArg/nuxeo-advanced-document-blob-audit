@@ -25,7 +25,6 @@ import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
-import org.nuxeo.ecm.core.work.api.Work;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
 
@@ -104,7 +103,7 @@ public final class BlobDiffTrigger {
                     liveDoc.getId(), eligibility.getSkipReason());
             return Outcome.skipped(eligibility.getSkipReason());
         }
-        if (!(oldBlob instanceof ManagedBlob oldManaged) || !(newBlob instanceof ManagedBlob newManaged)) {
+        if (!(oldBlob instanceof ManagedBlob) || !(newBlob instanceof ManagedBlob)) {
             // The work re-reads both binaries from their provider after commit, which requires a
             // provider id and a key. Without them the diff is impossible - but the binary did
             // change, so this is reported like any other non-diffable change rather than dropped.
@@ -113,20 +112,16 @@ public final class BlobDiffTrigger {
             return Outcome.skipped(STATUS_SKIPPED_NOT_MANAGED);
         }
 
-        String correlationId = UUID.randomUUID().toString();
-        Work work = new BlobDiffWork(liveDoc.getRepositoryName(), liveDoc.getId(), liveDoc.getTitle(), xpath,
-                oldManaged.getProviderId(), oldManaged.getKey(), oldBlob.getFilename(), oldBlob.getMimeType(),
-                oldBlob.getDigest(), oldBlob.getLength(), newManaged.getProviderId(), newManaged.getKey(),
-                newBlob.getFilename(), newBlob.getMimeType(), newBlob.getDigest(), newBlob.getLength(), principal,
-                eventTime, correlationId, versions);
+        DiffRequest request = new DiffRequest(liveDoc.getRepositoryName(), liveDoc.getId(), liveDoc.getTitle(),
+                xpath, FrozenBlob.of(oldBlob), FrozenBlob.of(newBlob), versions, principal, eventTime,
+                UUID.randomUUID().toString());
 
         // The version and the audit event belong to the current transaction. Running only after commit guarantees
         // that a rollback creates neither the audit entry nor a BlobDiff.
-        Framework.getService(WorkManager.class)
-                 .schedule(work, WorkManager.Scheduling.IF_NOT_RUNNING_OR_SCHEDULED, true);
-        log.debug("Scheduled version blob diff {} for {} ({}, {} -> {})", correlationId, liveDoc.getId(), xpath,
-                versions.previousVersionLabel(), versions.newVersionLabel());
-        return Outcome.scheduled(correlationId);
+        Framework.getService(WorkManager.class).schedule(new BlobDiffWork(request), true);
+        log.debug("Scheduled version blob diff {} for {} ({}, {} -> {})", request.correlationId(), liveDoc.getId(),
+                xpath, versions.previousVersionLabel(), versions.newVersionLabel());
+        return Outcome.scheduled(request.correlationId());
     }
 
     protected static boolean sameContent(Blob oldBlob, Blob newBlob) {

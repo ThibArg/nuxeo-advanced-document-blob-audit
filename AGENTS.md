@@ -33,8 +33,9 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
 - `nuxeo-advanced-document-blob-audit-core/` — all Java, all contributions, and the Web UI.
   - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`),
     `BlobModificationListener`, `VersionBlobPairs` (which blobs of two versions to compare),
-    `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`, `image/`, `io/`, `operations/`,
-    `work/`.
+    `BlobDiffTrigger`, `DiffRequest` + `FrozenBlob` (what a diff compares, carried by the work,
+    written on the `BlobDiff` and read back by the retry), `TextDiffer`; subpackages `bulk/`,
+    `extractor/`, `image/`, `io/`, `operations/`, `work/`.
   - `src/main/resources/OSGI-INF/` — 11 components + `deployment-fragment.xml` + `l10n/`.
   - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
     **server-side** i18n, appended by `deployment-fragment.xml` to
@@ -180,15 +181,32 @@ the diff during the extraction. Do not drop that second check, it is item 5 agai
 Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction`,
 `#testADiffRecordedDuringTheExtractionIsNotDuplicated`.
 
+**What a diff compares is frozen at check-in, and the work id only names it** (item 71).
+`BlobDiffTrigger` builds a `DiffRequest` — source, xpath, a `FrozenBlob` per side (provider id, key,
+filename, mime type, digest, length), the version pair, user, time and correlation id — and the work
+re-reads both binaries through `FrozenBlob#resolve`, never from the live document: a later save would
+otherwise make a queued v1 → v2 work compare v1 → v3. The version pair is mandatory. `DiffRequest#writeTo`
+and `#readFrom` are the only mapping between a request and the `BlobDiff` properties; keep them
+symmetric. An `error` diff therefore keeps the filenames and digests even when no blob could be read.
+`DiffRequest#workId` is a readable name, **not** a deduplication key: `IF_NOT_RUNNING_OR_SCHEDULED` is
+a no-op in LTS 2025 (`WorkManagerImpl#schedule` hard-codes it disabled, `StreamWorkManager#schedule`
+ignores it), so the work is scheduled plainly and `BlobDiffWork#alreadyRecorded`, on the correlation
+id, is the duplicate guard. Coverage: `TestBlobDiffService#testARequestSurvivesTheRoundTripThroughABlobDiff`,
+`TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests`,
+`TestBlobDiffHardening#testRunningTheSameWorkTwiceCreatesASingleDiff`.
+
 **`BlobDiff.Retry` trusts nothing on its input but the path.** The operation replays the provider
 id and the storage key persisted on the document, and `BlobDiffWork` re-reads them in a *system
-session* through `provider.readBlob(info)` — a keyed store lookup, subject to **no document ACL**.
+session* through `FrozenBlob#resolve` (`provider.readBlob(info)`) — a keyed store lookup, subject to
+**no document ACL**.
 The doctype and `bdiff:status` checks are both on attacker-controlled properties, and
 `AbstractSession.createDocument` does not enforce allowed subtypes (that is `TypeManager`, i.e. UI).
 `BlobDiffRetryOp#checkProvenance` therefore rejects anything outside `/change-diff/` **before a
 single property is read**, and it must stay the first thing after `checkAuditor`.
+`DiffRequest.readFrom`, which trusts every property it reads, only runs after it.
 The eligibility recheck in the work is *not* a substitute: the length it compares comes from
-`BlobInfo`, which `resolveBlob` fills from `bdiff:oldLength` / `bdiff:newLength` — forgeable.
+`BlobInfo`, which `FrozenBlob#resolve` fills from the `bdiff:oldLength` / `bdiff:newLength` that
+`DiffRequest.readFrom` read — forgeable.
 Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
 `#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
@@ -318,7 +336,7 @@ not share a backend:
 
 | Site | Mechanism | Destination |
 |---|---|---|
-| `BlobDiffWork#existingDiffId:215` | `session.query` | repository, always |
+| `BlobDiffWork#existingDiffId:124` | `session.query` | repository, always |
 | `BlobModificationListener#previousVersionRefFallback:283` | `session.query` | repository, always |
 | `BLOB_DIFFS_FOR_DOCUMENT` | `<coreQueryPageProvider>` | repository, always |
 | `BLOB_DIFFS_ADMIN` | `SearchServicePageProvider` → `SearchService` | **the configured search client** |
@@ -366,7 +384,8 @@ Coverage: `TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvert
 **`BlobTextExtractor.extract` declares `throws IOException`, and must not be widened back.** It
 declared `throws Exception` until item 28, which forced `catch (Exception)` on all three call sites
 — the shape the Nuxeo "Catching Exceptions" page rules out, because it also catches
-`InterruptedException`. The one that mattered is `BlobDiffWork#resolveBlob`: it runs on a
+`InterruptedException`. The one that mattered is the blob re-read of `BlobDiffWork` (now
+`FrozenBlob#resolve`): it runs on a
 WorkManager thread that *is* interrupted at shutdown, and it swallowed the cancel to file a bogus
 `error` diff. An extractor that needs to report a non-I/O failure throws a `NuxeoException`.
 `ImageInventoryExtractor` wraps the only other checked exception it could raise,

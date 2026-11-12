@@ -89,14 +89,15 @@ public class TestBlobDiffHardening {
     /* ------------------------------------------------------------------ work id */
 
     protected BlobDiffWork work(String oldDigest, String newDigest, VersionContext versions) {
-        return new BlobDiffWork("test", "doc-1", "Title", "file:content", "p", "oldKey", "old.txt", "text/plain",
-                oldDigest, 10, "p", "newKey", "new.txt", "text/plain", newDigest, 12, "jdoe",
-                System.currentTimeMillis(), UUID.randomUUID().toString(), versions);
+        return new BlobDiffWork(new DiffRequest("test", "doc-1", "Title", "file:content",
+                new FrozenBlob("p", "oldKey", "old.txt", "text/plain", oldDigest, 10),
+                new FrozenBlob("p", "newKey", "new.txt", "text/plain", newDigest, 12), versions, "jdoe",
+                System.currentTimeMillis(), UUID.randomUUID().toString()));
     }
 
     /**
-     * The id is what IF_NOT_RUNNING_OR_SCHEDULED deduplicates on. Two works describing the same
-     * version pair must collide, whatever their (random) correlation id.
+     * The id names the version pair; duplicates are prevented by the correlation-id check. Two works
+     * describing the same version pair must collide, whatever their (random) correlation id.
      */
     @Test
     public void testWorkIdIsDeterministicOnTheVersionPair() {
@@ -104,14 +105,6 @@ public class TestBlobDiffHardening {
         assertEquals(work("d1", "d2", versions).getId(), work("d1", "d2", versions).getId());
         // A different correlation id must not create a new work identity
         assertEquals(work("other", "digests", versions).getId(), work("d1", "d2", versions).getId());
-    }
-
-    /** Without a version pair, the digest pair is the identity. */
-    @Test
-    public void testWorkIdFallsBackOnDigests() {
-        assertEquals(work("d1", "d2", VersionContext.NONE).getId(), work("d1", "d2", VersionContext.NONE).getId());
-        assertNotEquals(work("d1", "d2", VersionContext.NONE).getId(),
-                work("d1", "d3", VersionContext.NONE).getId());
     }
 
     @Test
@@ -154,10 +147,12 @@ public class TestBlobDiffHardening {
         // Replay the exact same work, as a redelivery would
         Blob old = textBlob("line 1", "text/plain", "notes.txt");
         Blob current = textBlob("line 1 modified", "text/plain", "notes.txt");
-        BlobDiffWork replay = new BlobDiffWork(session.getRepositoryName(), doc.getId(), doc.getTitle(),
-                "file:content", "test", "oldKey", "notes.txt", "text/plain", old.getDigest(), old.getLength(),
-                "test", "newKey", "notes.txt", "text/plain", current.getDigest(), current.getLength(), "Administrator",
-                System.currentTimeMillis(), correlationId, VersionContext.NONE);
+        BlobDiffWork replay = new BlobDiffWork(new DiffRequest(session.getRepositoryName(), doc.getId(),
+                doc.getTitle(), "file:content",
+                new FrozenBlob("test", "oldKey", "notes.txt", "text/plain", old.getDigest(), old.getLength()),
+                new FrozenBlob("test", "newKey", "notes.txt", "text/plain", current.getDigest(), current.getLength()),
+                new VersionContext("v1", "0.1", "v2", "0.2", "series"), "Administrator", System.currentTimeMillis(),
+                correlationId));
         Framework.getService(WorkManager.class).schedule(replay, true);
         txFeature.nextTransaction();
 
@@ -211,16 +206,19 @@ public class TestBlobDiffHardening {
         String correlationId = UUID.randomUUID().toString();
         TransactionProbeExtractor.reset(() -> TransactionHelper.runInNewTransaction(() -> {
             CoreSession other = CoreInstance.getCoreSessionSystem(repository);
-            Framework.getService(BlobDiffService.class)
-                     .createDiffDocument(other, created.getId(), repository, "Another run", "file:content", null,
-                             null, FrozenBlobs.NONE, VersionContext.NONE, "Administrator", new Date(), null,
-                             BlobAuditConstants.STATUS_OK, correlationId);
+            BlobAuditTestHelper.createDiff(other, BlobAuditTestHelper.request(repository, created.getId(),
+                    "Another run", "file:content", null, null, "Administrator", new Date(), correlationId),
+                    BlobAuditConstants.STATUS_OK, null);
         }));
 
-        BlobDiffWork work = new BlobDiffWork(repository, created.getId(), created.getTitle(), "file:content",
-                old.getProviderId(), old.getKey(), "notes.txt", "text/plain", old.getDigest(), old.getLength(),
-                current.getProviderId(), current.getKey(), "notes.txt", "text/plain", current.getDigest(),
-                current.getLength(), "Administrator", System.currentTimeMillis(), correlationId, VersionContext.NONE);
+        BlobDiffWork work = new BlobDiffWork(new DiffRequest(repository, created.getId(), created.getTitle(),
+                "file:content",
+                new FrozenBlob(old.getProviderId(), old.getKey(), "notes.txt", "text/plain", old.getDigest(),
+                        old.getLength()),
+                new FrozenBlob(current.getProviderId(), current.getKey(), "notes.txt", "text/plain",
+                        current.getDigest(), current.getLength()),
+                new VersionContext("v1", "0.1", "v2", "0.2", "series"), "Administrator", System.currentTimeMillis(),
+                correlationId));
         Framework.getService(WorkManager.class).schedule(work, true);
         txFeature.nextTransaction();
 

@@ -62,9 +62,6 @@ public class TestBlobDiffAdminSearch {
     protected CoreSession session;
 
     @Inject
-    protected BlobDiffService blobDiffService;
-
-    @Inject
     protected PageProviderService pageProviderService;
 
     @Inject
@@ -86,9 +83,10 @@ public class TestBlobDiffAdminSearch {
 
     protected String diff(String sourceId, String user, Date date, boolean truncated) {
         DiffResult result = new DiffResult(1, 0, 0, truncated, "+ line\n");
-        DocumentModel diff = blobDiffService.createDiffDocument(session, sourceId, session.getRepositoryName(),
-                sourceId, "file:content", null, null, FrozenBlobs.NONE, user, date, result,
-                BlobAuditConstants.STATUS_OK, UUID.randomUUID().toString());
+        DocumentModel diff = BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(session.getRepositoryName(), sourceId, sourceId, "file:content", null,
+                        null, user, date, UUID.randomUUID().toString()),
+                BlobAuditConstants.STATUS_OK, result);
         session.save();
         return diff.getId();
     }

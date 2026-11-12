@@ -89,34 +89,13 @@ public interface BlobDiffService {
     DiffResult diff(Blob oldBlob, Blob newBlob);
 
     /**
-     * Creates the {@code BlobDiff} document holding the result, inside the dated container. The
-     * session must be privileged.
-     */
-    DocumentModel createDiffDocument(CoreSession session, DocumentModel source, String xpath, Blob oldBlob,
-            Blob newBlob, String user, Date date, DiffResult result, String status, String correlationId);
-
-    /**
-     * Same as above for a source that may no longer exist (deleted before the asynchronous work
-     * ran): only its id, repository and last known title are needed.
-     */
-    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, String user, Date date, DiffResult result,
-            String status, String correlationId);
-
-    /**
-     * Full variant: also persists the storage identity of both binaries, which is what makes a diff
-     * in {@code error} replayable.
+     * Creates the {@code BlobDiff} document recording the request and its result, inside the dated
+     * container of the request time. The session must be privileged.
      *
+     * @param result the comparison, {@code null} when none was computed
      * @since 2025.1
      */
-    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen, String user, Date date,
-            DiffResult result, String status, String correlationId);
-
-    /** Full version-aware variant used by version-triggered works. */
-    DocumentModel createDiffDocument(CoreSession session, String sourceId, String sourceRepository,
-            String sourceTitle, String xpath, Blob oldBlob, Blob newBlob, FrozenBlobs frozen,
-            VersionContext versions, String user, Date date, DiffResult result, String status, String correlationId);
+    DocumentModel createDiffDocument(CoreSession session, DiffRequest request, String status, DiffResult result);
 
     /**
      * Returns (creating it if needed) the root {@code /change-diff} container and makes sure its

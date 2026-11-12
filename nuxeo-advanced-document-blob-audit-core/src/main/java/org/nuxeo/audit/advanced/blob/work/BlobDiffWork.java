@@ -26,21 +26,14 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.WORK_CATEGORY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 
-import java.io.IOException;
-import java.util.Date;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffService;
+import org.nuxeo.audit.advanced.blob.DiffRequest;
 import org.nuxeo.audit.advanced.blob.DiffResult;
-import org.nuxeo.audit.advanced.blob.FrozenBlobs;
-import org.nuxeo.audit.advanced.blob.VersionContext;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
-import org.nuxeo.ecm.core.blob.BlobInfo;
-import org.nuxeo.ecm.core.blob.BlobManager;
-import org.nuxeo.ecm.core.blob.BlobProvider;
 import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.work.AbstractWork;
 import org.nuxeo.runtime.api.Framework;
@@ -61,41 +54,8 @@ public class BlobDiffWork extends AbstractWork {
 
     private static final Logger log = LogManager.getLogger(BlobDiffWork.class);
 
-    protected final String sourceTitle;
-
-    protected final String xpath;
-
-    protected final String oldBlobProviderId;
-
-    protected final String oldBlobKey;
-
-    protected final String oldFilename;
-
-    protected final String oldMimeType;
-
-    protected final String oldDigest;
-
-    protected final long oldLength;
-
-    protected final String newBlobProviderId;
-
-    protected final String newBlobKey;
-
-    protected final String newFilename;
-
-    protected final String newMimeType;
-
-    protected final String newDigest;
-
-    protected final long newLength;
-
-    protected final String principal;
-
-    protected final long eventTime;
-
-    protected final String correlationId;
-
-    protected final VersionContext versions;
+    /** What this work compares and what its {@code BlobDiff} records; it also names the work. */
+    protected final DiffRequest request;
 
     /**
      * Id of a previous {@code BlobDiff} this work replaces ({@code BlobDiff.Retry}). Removed only once
@@ -103,40 +63,11 @@ public class BlobDiffWork extends AbstractWork {
      */
     protected String replaceDiffId;
 
-    public BlobDiffWork(String repositoryName, String docId, String xpath, String oldBlobProviderId,
-            String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest, long oldLength,
-            String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType, String newDigest,
-            long newLength, String principal, long eventTime, String correlationId) {
-        this(repositoryName, docId, null, xpath, oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest,
-                oldLength, newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength, principal,
-                eventTime, correlationId, VersionContext.NONE);
-    }
-
-    public BlobDiffWork(String repositoryName, String docId, String sourceTitle, String xpath,
-            String oldBlobProviderId, String oldBlobKey, String oldFilename, String oldMimeType, String oldDigest,
-            long oldLength, String newBlobProviderId, String newBlobKey, String newFilename, String newMimeType,
-            String newDigest, long newLength, String principal, long eventTime, String correlationId,
-            VersionContext versions) {
-        super(workId(repositoryName, docId, xpath, oldDigest, newDigest, correlationId, versions));
-        setDocument(repositoryName, docId);
-        this.sourceTitle = sourceTitle;
-        this.xpath = xpath;
-        this.oldBlobProviderId = oldBlobProviderId;
-        this.oldBlobKey = oldBlobKey;
-        this.oldFilename = oldFilename;
-        this.oldMimeType = oldMimeType;
-        this.oldDigest = oldDigest;
-        this.oldLength = oldLength;
-        this.newBlobProviderId = newBlobProviderId;
-        this.newBlobKey = newBlobKey;
-        this.newFilename = newFilename;
-        this.newMimeType = newMimeType;
-        this.newDigest = newDigest;
-        this.newLength = newLength;
-        this.principal = principal;
-        this.eventTime = eventTime;
-        this.correlationId = correlationId;
-        this.versions = versions == null ? VersionContext.NONE : versions;
+    /** @since 2025.1 */
+    public BlobDiffWork(DiffRequest request) {
+        super(request.workId());
+        setDocument(request.repository(), request.sourceId());
+        this.request = request;
     }
 
     /**
@@ -155,33 +86,6 @@ public class BlobDiffWork extends AbstractWork {
     }
 
     /**
-     * Builds the work id from the <b>business identity</b> of the comparison, never from a random
-     * correlation id.
-     * <p>
-     * The id is what {@link org.nuxeo.ecm.core.work.api.WorkManager.Scheduling#IF_NOT_RUNNING_OR_SCHEDULED}
-     * deduplicates on. Deriving it from a per-event UUID made every work unique, so the scheduling
-     * flag never deduplicated anything and a burst of check-ins piled up redundant works.
-     * <p>
-     * Identity is the version pair when known (the nominal case), otherwise the digest pair, which
-     * is just as stable: the same two binaries always produce the same diff. The correlation id is
-     * only a last-resort fallback when neither is available.
-     *
-     * @since 2025.1
-     */
-    protected static String workId(String repositoryName, String docId, String xpath, String oldDigest,
-            String newDigest, String correlationId, VersionContext versions) {
-        String identity;
-        if (versions != null && versions.previousVersionId() != null && versions.newVersionId() != null) {
-            identity = versions.previousVersionId() + ">" + versions.newVersionId();
-        } else if (oldDigest != null && newDigest != null) {
-            identity = oldDigest + ">" + newDigest;
-        } else {
-            identity = String.valueOf(correlationId);
-        }
-        return repositoryName + ':' + docId + ':' + xpath + ':' + identity + ":blobDiff";
-    }
-
-    /**
      * Transient failures are the common case here: an S3 read timing out, a converter temporarily
      * unavailable, a concurrent update on the dated container. Retrying is safe because
      * {@link #existingDiffId()} makes the work idempotent.
@@ -191,11 +95,6 @@ public class BlobDiffWork extends AbstractWork {
     @Override
     public int getRetryCount() {
         return 2;
-    }
-
-    protected FrozenBlobs frozen() {
-        return new FrozenBlobs(oldBlobProviderId, oldBlobKey, oldMimeType, oldLength, newBlobProviderId, newBlobKey,
-                newMimeType, newLength, oldFilename, newFilename, oldDigest, newDigest);
     }
 
     /**
@@ -215,6 +114,7 @@ public class BlobDiffWork extends AbstractWork {
      * @since 2025.1
      */
     protected String existingDiffId() {
+        String correlationId = request.correlationId();
         if (correlationId == null) {
             return null;
         }
@@ -248,7 +148,7 @@ public class BlobDiffWork extends AbstractWork {
 
     @Override
     public String getTitle() {
-        return "Blob content diff for " + docId + " (" + xpath + ")";
+        return "Blob content diff for " + docId + " (" + request.xpath() + ")";
     }
 
     /**
@@ -269,15 +169,14 @@ public class BlobDiffWork extends AbstractWork {
             return;
         }
 
+        String xpath = request.xpath();
         IdRef sourceRef = new IdRef(docId);
         if (!session.exists(sourceRef)) {
             // Deleted (or permanently purged) between the save and this work: the audit entry
             // already exists, so leave a trace instead of failing silently.
             log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
             DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
-                                             .createDiffDocument(session, docId, repositoryName, sourceTitle,
-                                                     xpath, null, null, frozen(), versions, principal,
-                                                     new Date(eventTime), null, STATUS_ERROR, correlationId);
+                                             .createDiffDocument(session, request, STATUS_ERROR, null);
             diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
             session.saveDocument(diffDoc);
             removeReplaced();
@@ -286,20 +185,18 @@ public class BlobDiffWork extends AbstractWork {
         }
         DocumentModel source = session.getDocument(sourceRef);
         String sourceType = source.getType();
-        String sourceRepository = source.getRepositoryName();
-        String currentTitle = source.getTitle();
-        Blob oldBlob = resolveBlob(oldBlobProviderId, oldBlobKey, oldFilename, oldMimeType, oldDigest, oldLength,
-                "previous");
-        Blob newBlob = resolveBlob(newBlobProviderId, newBlobKey, newFilename, newMimeType, newDigest, newLength,
-                "new");
+        // The diff records the title of the source at work time, not at check-in.
+        DiffRequest recorded = request.withSourceTitle(source.getTitle());
+        Blob oldBlob = request.oldBlob().resolve();
+        Blob newBlob = request.newBlob().resolve();
         BlobDiffService service = Framework.getService(BlobDiffService.class);
 
         commitOrRollbackTransaction();
         DiffResult result = null;
         String status = STATUS_OK;
         if (oldBlob == null || newBlob == null) {
-            log.warn("Frozen blob pair ({}, {}) is no longer fully readable, cannot diff {} ({})", oldBlobKey,
-                    newBlobKey, docId, xpath);
+            log.warn("Frozen blob pair ({}, {}) is no longer fully readable, cannot diff {} ({})",
+                    request.oldBlob().key(), request.newBlob().key(), docId, xpath);
             status = STATUS_ERROR;
         } else {
             // Re-checked at work time: a retry or a queued work can outlive a configuration change. Not a
@@ -331,8 +228,7 @@ public class BlobDiffWork extends AbstractWork {
         if (alreadyRecorded()) {
             return;
         }
-        DocumentModel diffDoc = service.createDiffDocument(session, docId, sourceRepository, currentTitle, xpath,
-                oldBlob, newBlob, frozen(), versions, principal, new Date(eventTime), result, status, correlationId);
+        DocumentModel diffDoc = service.createDiffDocument(session, recorded, status, result);
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");
@@ -349,48 +245,9 @@ public class BlobDiffWork extends AbstractWork {
         if (recorded == null) {
             return false;
         }
-        log.debug("BlobDiff {} already exists for correlation id {}, skipping", recorded, correlationId);
+        log.debug("BlobDiff {} already exists for correlation id {}, skipping", recorded, request.correlationId());
         removeReplaced();
         setStatus("Done");
         return true;
-    }
-
-    /** Re-hydrates one frozen side of the comparison through its blob provider. */
-    protected Blob resolveBlob(String providerId, String key, String filename, String mimeType, String digest,
-            long length, String side) {
-        if (key == null) {
-            return null;
-        }
-        try {
-            BlobProvider provider = lookupProvider(providerId);
-            if (provider == null) {
-                log.warn("No blob provider {} to resolve {} blob {}", providerId, side, key);
-                return null;
-            }
-            BlobInfo info = new BlobInfo();
-            info.key = key;
-            info.filename = filename;
-            info.mimeType = mimeType;
-            info.digest = digest;
-            info.length = length < 0 ? null : Long.valueOf(length);
-            return provider.readBlob(info);
-        } catch (IOException | RuntimeException e) {
-            // Narrow on purpose: readBlob declares IOException and nothing else. Catching Exception
-            // here also caught InterruptedException, on a WorkManager thread that is interrupted at
-            // shutdown - the work then filed a bogus "error" diff instead of letting the cancel
-            // through.
-            log.warn("Cannot resolve {} blob {} from provider {}", side, key, providerId, e);
-            return null;
-        }
-    }
-
-    /**
-     * Returns the blob provider registered under the given id.
-     * <p>
-     * <b>Single point of adaptation.</b> If {@code BlobManager#getBlobProvider(String)} is not the
-     * accessor available in your target version, this is the only method to change.
-     */
-    protected BlobProvider lookupProvider(String providerId) {
-        return Framework.getService(BlobManager.class).getBlobProvider(providerId);
     }
 }

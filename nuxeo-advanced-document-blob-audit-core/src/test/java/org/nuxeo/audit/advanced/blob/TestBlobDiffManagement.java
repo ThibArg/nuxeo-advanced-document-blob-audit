@@ -93,9 +93,6 @@ public class TestBlobDiffManagement {
     protected CoreFeature coreFeature;
 
     @Inject
-    protected BlobDiffService blobDiffService;
-
-    @Inject
     protected AutomationService automationService;
 
     @Inject
@@ -115,10 +112,12 @@ public class TestBlobDiffManagement {
         return (ManagedBlob) session.getDocument(doc.getRef()).getPropertyValue("file:content");
     }
 
-    protected DocumentModel diff(DocumentModel source, Date date, String status, FrozenBlobs keys) {
-        DocumentModel diff = blobDiffService.createDiffDocument(session, source.getId(), source.getRepositoryName(),
-                source.getTitle(), "file:content", null, null, keys, "jdoe", date, null, status,
-                UUID.randomUUID().toString());
+    protected DocumentModel diff(DocumentModel source, Date date, String status, FrozenBlob oldBlob,
+            FrozenBlob newBlob) {
+        DocumentModel diff = BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(source.getRepositoryName(), source.getId(), source.getTitle(),
+                        "file:content", oldBlob, newBlob, "jdoe", date, UUID.randomUUID().toString()),
+                status, null);
         session.save();
         return diff;
     }
@@ -192,8 +191,8 @@ public class TestBlobDiffManagement {
     @Test
     public void testAdministratorCanDeleteDiffs() throws Exception {
         DocumentModel source = file("to-delete", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel d1 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
-        DocumentModel d2 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        DocumentModel d1 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
+        DocumentModel d2 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
 
         run(session, BlobDiffDeleteOp.ID,
                 new org.nuxeo.ecm.core.api.impl.DocumentModelListImpl(List.of(d1, d2)), null);
@@ -224,7 +223,7 @@ public class TestBlobDiffManagement {
     @Test
     public void testNonAuditorCannotDeletePurgeOrRetry() throws Exception {
         DocumentModel source = file("protected", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel d = diff(source, daysAgo(10), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        DocumentModel d = diff(source, daysAgo(10), BlobAuditConstants.STATUS_OK, null, null);
         txFeature.nextTransaction();
 
         assertRefusedForJdoe(BlobDiffPurgeOp.ID, null, java.util.Map.of("before", Calendar.getInstance()));
@@ -272,9 +271,8 @@ public class TestBlobDiffManagement {
         DocumentModel v2 = file("v2-holder", textBlob("alpha\nBETA", "text/plain", "notes.txt"));
         ManagedBlob b1 = storedBlob(v1);
         ManagedBlob b2 = storedBlob(v2);
-        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
-                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
-        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, FrozenBlob.of(b1),
+                FrozenBlob.of(b2));
         String correlationId = (String) failed.getPropertyValue(BlobAuditConstants.XP_CORRELATION_ID);
         txFeature.nextTransaction();
 
@@ -302,9 +300,8 @@ public class TestBlobDiffManagement {
         DocumentModel v2 = file("guarded-v2", textBlob("alpha\nBETA", "text/plain", "notes.txt"));
         ManagedBlob b1 = storedBlob(v1);
         ManagedBlob b2 = storedBlob(v2);
-        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
-                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
-        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, FrozenBlob.of(b1),
+                FrozenBlob.of(b2));
         DocumentModel decoy = session.createDocumentModel("/", "decoy", BlobAuditConstants.DIFF_DOCTYPE);
         decoy.setPropertyValue(BlobAuditConstants.XP_CORRELATION_ID,
                 failed.getPropertyValue(BlobAuditConstants.XP_CORRELATION_ID));
@@ -323,8 +320,8 @@ public class TestBlobDiffManagement {
     @Test
     public void testRetryRequiresAnErrorDiffWithKeys() throws Exception {
         DocumentModel source = file("no-retry", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel okDiff = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
-        DocumentModel noKeys = diff(source, new Date(), BlobAuditConstants.STATUS_ERROR, FrozenBlobs.NONE);
+        DocumentModel okDiff = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
+        DocumentModel noKeys = diff(source, new Date(), BlobAuditConstants.STATUS_ERROR, null, null);
         for (DocumentModel d : List.of(okDiff, noKeys)) {
             try {
                 run(session, BlobDiffRetryOp.ID, d, null);
@@ -417,9 +414,8 @@ public class TestBlobDiffManagement {
         DocumentModel v2 = file("big-v2", textBlob(big + "two", "text/plain", "notes.txt"));
         ManagedBlob b1 = storedBlob(v1);
         ManagedBlob b2 = storedBlob(v2);
-        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
-                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
-        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, FrozenBlob.of(b1),
+                FrozenBlob.of(b2));
         txFeature.nextTransaction();
 
         run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
@@ -443,9 +439,8 @@ public class TestBlobDiffManagement {
         DocumentModel v2 = file("format-v2", textBlob("alpha\nBETA", BlobAuditTestHelper.XLSX_MIME, "book.xlsx"));
         ManagedBlob b1 = storedBlob(v1);
         ManagedBlob b2 = storedBlob(v2);
-        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
-                b2.getProviderId(), b2.getKey(), BlobAuditTestHelper.XLSX_MIME, b2.getLength());
-        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, keys);
+        DocumentModel failed = diff(v2, new Date(), BlobAuditConstants.STATUS_ERROR, FrozenBlob.of(b1),
+                FrozenBlob.of(b2));
         txFeature.nextTransaction();
 
         run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
@@ -554,10 +549,11 @@ public class TestBlobDiffManagement {
     public void testAnErrorDiffKeepsTheFilenamesAndDigests() throws Exception {
         DocumentModel source = file("unreadable", textBlob("x", "text/plain", "x.txt"));
         txFeature.nextTransaction();
-        BlobDiffWork work = new BlobDiffWork(session.getRepositoryName(), source.getId(), "Source", "file:content",
-                "no-such-provider", "k1", "before.txt", "text/plain", "d1", 1, "no-such-provider", "k2",
-                "after.txt", "text/plain", "d2", 1, "jdoe", System.currentTimeMillis(),
-                UUID.randomUUID().toString(), VersionContext.NONE);
+        BlobDiffWork work = new BlobDiffWork(BlobAuditTestHelper.request(session.getRepositoryName(),
+                source.getId(), "Source", "file:content",
+                new FrozenBlob("no-such-provider", "k1", "before.txt", "text/plain", "d1", 1),
+                new FrozenBlob("no-such-provider", "k2", "after.txt", "text/plain", "d2", 1), "jdoe", new Date(),
+                UUID.randomUUID().toString()));
         Framework.getService(WorkManager.class).schedule(work, true);
         txFeature.nextTransaction();
 
@@ -577,11 +573,12 @@ public class TestBlobDiffManagement {
      */
     @Test
     public void testARetryKeepsTheTitleAndTheFilenames() throws Exception {
-        FrozenBlobs keys = new FrozenBlobs("no-such-provider", "k1", "text/plain", 1, "no-such-provider", "k2",
-                "text/plain", 1, "before.txt", "after.txt", "d1", "d2");
-        DocumentModel failed = blobDiffService.createDiffDocument(session, "gone-source", session.getRepositoryName(),
-                "Report", "file:content", null, null, keys, "jdoe", new Date(), null, BlobAuditConstants.STATUS_ERROR,
-                UUID.randomUUID().toString());
+        DocumentModel failed = BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(session.getRepositoryName(), "gone-source", "Report", "file:content",
+                        new FrozenBlob("no-such-provider", "k1", "before.txt", "text/plain", "d1", 1),
+                        new FrozenBlob("no-such-provider", "k2", "after.txt", "text/plain", "d2", 1), "jdoe",
+                        new Date(), UUID.randomUUID().toString()),
+                BlobAuditConstants.STATUS_ERROR, null);
         session.save();
         txFeature.nextTransaction();
 
@@ -601,15 +598,14 @@ public class TestBlobDiffManagement {
         DocumentModel v2 = file(name + "-v2", textBlob("alpha\nBETA", "text/plain", "notes.txt"));
         ManagedBlob b1 = storedBlob(v1);
         ManagedBlob b2 = storedBlob(v2);
-        FrozenBlobs keys = new FrozenBlobs(b1.getProviderId(), b1.getKey(), "text/plain", b1.getLength(),
-                b2.getProviderId(), b2.getKey(), "text/plain", b2.getLength());
-        return diff(v2, new Date(), status, keys);
+        return diff(v2, new Date(), status, FrozenBlob.of(b1), FrozenBlob.of(b2));
     }
 
     protected BlobDiffWork replayableWork() {
-        return new BlobDiffWork(session.getRepositoryName(), "source", "Source", "file:content", "default", "k1",
-                "a.txt", "text/plain", "d1", 1, "default", "k2", "a.txt", "text/plain", "d2", 1, "jdoe", 0L,
-                "correlation", new VersionContext("v1", "1.0", "v2", "1.1", "series"));
+        return new BlobDiffWork(new DiffRequest(session.getRepositoryName(), "source", "Source", "file:content",
+                new FrozenBlob("default", "k1", "a.txt", "text/plain", "d1", 1),
+                new FrozenBlob("default", "k2", "a.txt", "text/plain", "d2", 1),
+                new VersionContext("v1", "1.0", "v2", "1.1", "series"), "jdoe", 0L, "correlation"));
     }
 
     /** An .xlsx by mime type and filename only: the extractor is found, then fails on the bytes. */
@@ -647,7 +643,7 @@ public class TestBlobDiffManagement {
         acl.add(ACE.BLOCK);
         acp.addACL(acl);
         session.setACP(source.getRef(), acp, true);
-        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
         // The default auditors group is "administrators", which bypasses ACLs: grant the diff to a
         // plain user instead, the way the container grants it to a dedicated auditors group.
         ACP diffAcp = session.getACP(d.getRef());
@@ -670,7 +666,7 @@ public class TestBlobDiffManagement {
     @Test
     public void testEnricherDescribesAnExistingSource() throws Exception {
         DocumentModel source = file("enriched", textBlob("x", "text/plain", "x.txt"));
-        JsonNode info = sourceInfo(diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE));
+        JsonNode info = sourceInfo(diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null));
         assertTrue(info.get("exists").asBoolean());
         assertFalse(info.get("trashed").asBoolean());
         assertTrue(info.get("readable").asBoolean());
@@ -681,7 +677,7 @@ public class TestBlobDiffManagement {
     @Test
     public void testEnricherFlagsATrashedSource() throws Exception {
         DocumentModel source = file("trashed", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
         Framework.getService(TrashService.class).trashDocument(session.getDocument(source.getRef()));
         session.save();
         JsonNode info = sourceInfo(d);
@@ -692,7 +688,7 @@ public class TestBlobDiffManagement {
     @Test
     public void testEnricherFlagsADeletedSource() throws Exception {
         DocumentModel source = file("gone", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, FrozenBlobs.NONE);
+        DocumentModel d = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
         session.removeDocument(source.getRef());
         session.save();
         JsonNode info = sourceInfo(d);

@@ -18,35 +18,10 @@ package org.nuxeo.audit.advanced.blob.operations;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_KEY;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_PROVIDER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_LENGTH;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_MIMETYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_LABEL;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_KEY;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_PROVIDER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_DIGEST;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_FILENAME;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_LENGTH;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_MIMETYPE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_PREVIOUS_VERSION_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_PREVIOUS_VERSION_LABEL;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SOURCE_REPO;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_STATUS;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_USER;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_VERSION_SERIES_ID;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_XPATH;
-
-import java.util.Calendar;
 
 import org.nuxeo.audit.advanced.blob.BlobDiffAccess;
-import org.nuxeo.audit.advanced.blob.VersionContext;
+import org.nuxeo.audit.advanced.blob.DiffRequest;
 import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
 import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
@@ -91,30 +66,12 @@ public class BlobDiffRetryOp {
         if (!STATUS_ERROR.equals(diff.getPropertyValue(XP_STATUS))) {
             throw new NuxeoException("Only a BlobDiff in error can be retried", 400);
         }
-        String oldKey = str(diff, XP_OLD_BLOB_KEY);
-        String newKey = str(diff, XP_NEW_BLOB_KEY);
-        String oldProvider = str(diff, XP_OLD_BLOB_PROVIDER);
-        String newProvider = str(diff, XP_NEW_BLOB_PROVIDER);
-        if (oldKey == null || newKey == null || oldProvider == null || newProvider == null) {
-            throw new NuxeoException(
-                    "This BlobDiff has no stored binary keys (created before 1.2), it cannot be retried", 400);
+        // Read only now: the provenance above is what makes the stored keys trustworthy.
+        DiffRequest request = DiffRequest.readFrom(diff);
+        if (request.oldBlob() == null || request.newBlob() == null) {
+            throw new NuxeoException("This BlobDiff has no stored binary keys, it cannot be retried", 400);
         }
-        Calendar date = (Calendar) diff.getPropertyValue(XP_DATE);
-        VersionContext versions = new VersionContext(
-                str(diff, XP_PREVIOUS_VERSION_ID),
-                str(diff, XP_PREVIOUS_VERSION_LABEL),
-                str(diff, XP_NEW_VERSION_ID),
-                str(diff, XP_NEW_VERSION_LABEL),
-                str(diff, XP_VERSION_SERIES_ID));
-        BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), sourceTitle(diff),
-                str(diff, XP_XPATH),
-                oldProvider, oldKey, str(diff, XP_OLD_FILENAME), str(diff, XP_OLD_MIMETYPE),
-                str(diff, XP_OLD_DIGEST), length(diff, XP_OLD_LENGTH), newProvider, newKey,
-                str(diff, XP_NEW_FILENAME), str(diff, XP_NEW_MIMETYPE), str(diff, XP_NEW_DIGEST),
-                length(diff, XP_NEW_LENGTH),
-                str(diff, XP_USER), date == null ? System.currentTimeMillis() : date.getTimeInMillis(),
-                str(diff, XP_CORRELATION_ID), versions);
-        work.withReplaceDiffId(diff.getId());
+        BlobDiffWork work = new BlobDiffWork(request).withReplaceDiffId(diff.getId());
         WorkManager workManager = Framework.getService(WorkManager.class);
         if (isPending(workManager.getWorkState(work.getId()))) {
             throw new NuxeoException("A retry of this BlobDiff is already pending", 409);
@@ -160,27 +117,5 @@ public class BlobDiffRetryOp {
         if (path == null || !path.startsWith(CONTAINER_PATH_PREFIX)) {
             throw new NuxeoException("Not a managed BlobDiff: " + path, 400);
         }
-    }
-
-    protected String repo(DocumentModel diff) {
-        String repo = str(diff, XP_SOURCE_REPO);
-        return repo == null ? session.getRepositoryName() : repo;
-    }
-
-    /** The diff is titled {@code <source title> - <xpath>}; passed whole, every retry appended the xpath again. */
-    protected static String sourceTitle(DocumentModel diff) {
-        String title = diff.getTitle();
-        String suffix = " - " + str(diff, XP_XPATH);
-        return title != null && title.endsWith(suffix) ? title.substring(0, title.length() - suffix.length()) : null;
-    }
-
-    protected static String str(DocumentModel doc, String xpath) {
-        Object value = doc.getPropertyValue(xpath);
-        return value == null ? null : value.toString();
-    }
-
-    protected static long length(DocumentModel doc, String xpath) {
-        Object value = doc.getPropertyValue(xpath);
-        return value instanceof Number number ? number.longValue() : -1;
     }
 }

@@ -26,6 +26,4 @@ public record VersionContext(String previousVersionId, String previousVersionLab
         String newVersionId, String newVersionLabel, String versionSeriesId) implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    public static final VersionContext NONE = new VersionContext(null, null, null, null, null);
 }

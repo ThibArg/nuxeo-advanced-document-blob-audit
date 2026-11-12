@@ -439,8 +439,8 @@ public class TestBlobDiffService {
         DiffResult result = blobDiffService.diff(before, after);
         assertEquals(1, result.changed());
 
-        DocumentModel diffDoc = blobDiffService.createDiffDocument(session, source, "file:content", before, after,
-                "jdoe", new Date(), result, BlobAuditConstants.STATUS_OK, "corr-42");
+        DocumentModel diffDoc = createDiff(source, FrozenBlob.of(before), FrozenBlob.of(after), result,
+                BlobAuditConstants.STATUS_OK, "corr-42");
         session.save();
 
         assertEquals(BlobAuditConstants.DIFF_DOCTYPE, diffDoc.getType());
@@ -468,8 +468,8 @@ public class TestBlobDiffService {
         DocumentModel source = session.createDocument(session.createDocumentModel("/", "source-skipped", "File"));
         session.save();
 
-        DocumentModel diffDoc = blobDiffService.createDiffDocument(session, source, "file:content", null, null,
-                "jdoe", new Date(), null, BlobAuditConstants.STATUS_SKIPPED_TYPE, "corr-43");
+        DocumentModel diffDoc = createDiff(source, null, null, null, BlobAuditConstants.STATUS_SKIPPED_TYPE,
+                "corr-43");
         session.save();
 
         assertEquals(BlobAuditConstants.STATUS_SKIPPED_TYPE,
@@ -487,8 +487,8 @@ public class TestBlobDiffService {
         DiffResult result = blobDiffService.diff(blob, blob);
         assertTrue(result.isEmpty());
 
-        DocumentModel diffDoc = blobDiffService.createDiffDocument(session, source, "file:content", blob, blob,
-                "jdoe", new Date(), result, BlobAuditConstants.STATUS_OK, "corr-44");
+        DocumentModel diffDoc = createDiff(source, FrozenBlob.of(blob), FrozenBlob.of(blob), result,
+                BlobAuditConstants.STATUS_OK, "corr-44");
         session.save();
 
         assertNull(diffDoc.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB));
@@ -507,12 +507,40 @@ public class TestBlobDiffService {
         Blob stored = (Blob) session.getDocument(source.getRef()).getPropertyValue("file:content");
         assertNotNull("a stored blob must expose a digest", stored.getDigest());
 
-        DocumentModel diffDoc = blobDiffService.createDiffDocument(session, source, "file:content", stored, stored,
-                "jdoe", new Date(), null, BlobAuditConstants.STATUS_OK, "corr-45");
+        DocumentModel diffDoc = createDiff(source, FrozenBlob.of(stored), FrozenBlob.of(stored), null,
+                BlobAuditConstants.STATUS_OK, "corr-45");
         session.save();
 
         assertEquals(stored.getDigest(), diffDoc.getPropertyValue(BlobAuditConstants.XP_OLD_DIGEST));
         assertEquals(stored.getDigest(), diffDoc.getPropertyValue(BlobAuditConstants.XP_NEW_DIGEST));
+    }
+
+    /**
+     * {@link DiffRequest#writeTo} and {@link DiffRequest#readFrom} must stay symmetric: a retry rebuilds
+     * its work from what the first run wrote, so any property one side forgets is lost on replay.
+     */
+    @Test
+    public void testARequestSurvivesTheRoundTripThroughABlobDiff() {
+        DiffRequest request = new DiffRequest(session.getRepositoryName(), "source-id", "Quarterly report",
+                "file:content", new FrozenBlob("default", "k1", "before.xlsx", BlobAuditTestHelper.XLSX_MIME, "d1", 10),
+                new FrozenBlob("other", "k2", "after.docx", DOCX_MIME, "d2", 20),
+                new VersionContext("v1", "1.0", "v2", "1.1", "series"), "jdoe", date(2026, Calendar.MAY, 4).getTime(),
+                "corr-46");
+
+        DocumentModel diffDoc = BlobAuditTestHelper.createDiff(session, request, BlobAuditConstants.STATUS_ERROR,
+                null);
+        session.save();
+
+        assertEquals(request, DiffRequest.readFrom(session.getDocument(diffDoc.getRef())));
+    }
+
+    /** A diff of {@code file:content} on the given source, by jdoe, now. */
+    protected DocumentModel createDiff(DocumentModel source, FrozenBlob oldBlob, FrozenBlob newBlob, DiffResult result,
+            String status, String correlationId) {
+        return BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(source.getRepositoryName(), source.getId(), source.getTitle(),
+                        "file:content", oldBlob, newBlob, "jdoe", new Date(), correlationId),
+                status, result);
     }
 
     /** In UTC, the zone the container path is rendered in: east of UTC+10, 10:00 local is the day before. */

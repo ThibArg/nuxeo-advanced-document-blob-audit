@@ -84,9 +84,6 @@ public class TestBlobDiffPurgeAction {
     protected CoreFeature coreFeature;
 
     @Inject
-    protected BlobDiffService blobDiffService;
-
-    @Inject
     protected AutomationService automationService;
 
     @Inject
@@ -106,9 +103,10 @@ public class TestBlobDiffPurgeAction {
     }
 
     protected DocumentModel diff(DocumentModel source, Date date, String status) {
-        DocumentModel diff = blobDiffService.createDiffDocument(session, source.getId(), source.getRepositoryName(),
-                source.getTitle(), "file:content", null, null, FrozenBlobs.NONE, "jdoe", date, null, status,
-                UUID.randomUUID().toString());
+        DocumentModel diff = BlobAuditTestHelper.createDiff(session,
+                BlobAuditTestHelper.request(source.getRepositoryName(), source.getId(), source.getTitle(),
+                        "file:content", null, null, "jdoe", date, UUID.randomUUID().toString()),
+                status, null);
         session.save();
         return diff;
     }
