@@ -216,14 +216,14 @@ public class TestBlobDiffVersionPairing {
     /** Templates are computed per schema: a blob field, and a blob inside a list. */
     @Test
     public void testTemplatesAreComputedPerSchema() {
-        assertEquals(List.of("file:content"), BlobModificationListener.computeBlobXPathTemplates("file"));
-        assertEquals(List.of("files:files/*/file"), BlobModificationListener.computeBlobXPathTemplates("files"));
+        assertEquals(List.of("file:content"), VersionBlobPairs.computeBlobXPathTemplates("file"));
+        assertEquals(List.of("files:files/*/file"), VersionBlobPairs.computeBlobXPathTemplates("files"));
     }
 
     /** An unknown schema must not throw, only yield nothing. */
     @Test
     public void testUnknownSchemaYieldsNoXPath() {
-        assertTrue(BlobModificationListener.computeBlobXPathTemplates("noSuchSchemaAtAll").isEmpty());
+        assertTrue(VersionBlobPairs.computeBlobXPathTemplates("noSuchSchemaAtAll").isEmpty());
     }
 
     /**

@@ -32,8 +32,9 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
 
 - `nuxeo-advanced-document-blob-audit-core/` — all Java, all contributions, and the Web UI.
   - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`),
-    `BlobModificationListener`, `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`,
-    `image/`, `io/`, `operations/`, `work/`.
+    `BlobModificationListener`, `VersionBlobPairs` (which blobs of two versions to compare),
+    `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`, `image/`, `io/`, `operations/`,
+    `work/`.
   - `src/main/resources/OSGI-INF/` — 12 components + `deployment-fragment.xml` + `l10n/`.
   - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
     **server-side** i18n, appended by `deployment-fragment.xml` to
@@ -152,7 +153,7 @@ would make every text format unsupported. Coverage: `TestTextDifferSimilarity`,
 `TestBlobDiffManagement#testRetryRefusesAReplacedContent`.
 
 **Blobs inside a list are paired by content, never by index alone** (item 45).
-`BlobModificationListener#pairListEntries` expands a list template on each version separately: a
+`VersionBlobPairs#pairListEntries` expands a list template on each version separately: a
 digest present on both sides is unchanged wherever it sits, a new blob is compared with the one at
 the same xpath only when the list kept its shape and that one is gone, and a new blob in a list that
 also lost an entry is audited as `skippedListChanged`, without a diff. A blob with no digest never

@@ -194,12 +194,13 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     /**
      * The extractor lists are kept: a work still running past the WorkManager drain needs them
-     * (item 49). Only the blob xpaths derived from schemas go, a hot reload can redefine those.
+     * (item 49). Only the blob xpath templates of {@link VersionBlobPairs} go, a hot reload can
+     * redefine the schemas they are derived from.
      */
     @Override
     public void stop(ComponentContext context) throws InterruptedException {
         super.stop(context);
-        BlobModificationListener.clearBlobXPathTemplates();
+        VersionBlobPairs.clearCache();
     }
 
     @Override

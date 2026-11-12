@@ -81,17 +81,14 @@ public final class BlobDiffTrigger {
      * The same holds for a format change: identical bytes re-uploaded under another mime type stay
      * silent.
      *
+     * @param service the blob diff service, held by the caller
      * @return never {@code null}; see {@link Outcome}
      */
-    public static Outcome scheduleIfNeeded(DocumentModel liveDoc, String xpath, Blob oldBlob, Blob newBlob,
-            VersionContext versions, String principal, long eventTime) {
+    public static Outcome scheduleIfNeeded(BlobDiffService service, DocumentModel liveDoc, String xpath,
+            Blob oldBlob, Blob newBlob, VersionContext versions, String principal, long eventTime) {
         // Additions/removals are deliberately not expanded into a complete-file diff. The feature currently
         // audits replacement of an existing blob, as the original save-based implementation did.
         if (oldBlob == null || newBlob == null) {
-            return Outcome.none();
-        }
-        BlobDiffService service = Framework.getService(BlobDiffService.class);
-        if (service == null) {
             return Outcome.none();
         }
         DiffEligibility eligibility = service.getEligibility(liveDoc.getType(), xpath, oldBlob, newBlob);

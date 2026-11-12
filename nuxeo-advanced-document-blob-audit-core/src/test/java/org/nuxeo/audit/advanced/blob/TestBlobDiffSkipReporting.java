@@ -380,9 +380,10 @@ public class TestBlobDiffSkipReporting {
     public void testNonManagedBlobPairIsAuditedWithoutADiff() throws Exception {
         DocumentModel doc = createVersionedFile("not-managed", "v1", "text/plain");
         VersionContext versions = new VersionContext("prev", "1.0", "new", "1.1", "series");
+        BlobDiffService service = org.nuxeo.runtime.api.Framework.getService(BlobDiffService.class);
 
         // plain in-memory blobs, deliberately not ManagedBlob
-        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(doc, "file:content",
+        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(service, doc, "file:content",
                 textBlob("v1", "text/plain", "notes.txt"), textBlob("v2", "text/plain", "notes.txt"), versions,
                 "Administrator", System.currentTimeMillis());
 
@@ -407,9 +408,10 @@ public class TestBlobDiffSkipReporting {
         Blob recent = textBlob("same", "text/plain", "notes.txt");
         old.setDigest("d41d8cd98f00b204e9800998ecf8427e");
         recent.setDigest("d41d8cd98f00b204e9800998ecf8427e");
+        BlobDiffService service = org.nuxeo.runtime.api.Framework.getService(BlobDiffService.class);
 
-        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(doc, "file:content", old, recent, versions,
-                "Administrator", System.currentTimeMillis());
+        BlobDiffTrigger.Outcome outcome = BlobDiffTrigger.scheduleIfNeeded(service, doc, "file:content", old, recent,
+                versions, "Administrator", System.currentTimeMillis());
 
         assertNull(outcome.skipReason());
         assertFalse("a binary with an unchanged digest must stay silent", outcome.isAuditable());
