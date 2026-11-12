@@ -49,7 +49,6 @@ import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
-import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.impl.UserPrincipal;
@@ -535,7 +534,7 @@ public class TestBlobDiffManagement {
         }));
 
         run(session, BlobDiffRetryOp.ID, session.getDocument(failed.getRef()), null);
-        assertEquals(BlobAuditConstants.STATUS_RETRYING,
+        assertEquals(BlobAuditConstants.STATUS_ERROR,
                 session.getDocument(failed.getRef()).getPropertyValue(BlobAuditConstants.XP_STATUS));
         txFeature.nextTransaction();
 
@@ -544,48 +543,6 @@ public class TestBlobDiffManagement {
         List<DocumentModel> diffs = diffsOf(sourceId);
         assertEquals(1, diffs.size());
         assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
-    }
-
-    /** COR-02: a replay that fails for good must leave its diff retryable, not {@code retrying}. */
-    @Test
-    public void testARetryThatFailsForGoodPutsTheDiffBackInError() throws Exception {
-        DocumentModel source = file("failing-replay", textBlob("x", "text/plain", "x.txt"));
-        DocumentModel diff = diff(source, new Date(), BlobAuditConstants.STATUS_RETRYING, FrozenBlobs.NONE);
-        txFeature.nextTransaction();
-        BlobDiffWork replay = replayableWork().withReplaceDiffId(diff.getId());
-
-        // the WorkManager calls workFailed once the attempts are exhausted, with no transaction open
-        TransactionHelper.commitOrRollbackTransaction();
-        try {
-            replay.workFailed(new NuxeoException("extraction kept failing"));
-            fail("workFailed must still report the failure");
-        } catch (NuxeoException e) {
-            // expected
-        } finally {
-            TransactionHelper.startTransaction();
-        }
-
-        assertEquals(BlobAuditConstants.STATUS_ERROR,
-                session.getDocument(diff.getRef()).getPropertyValue(BlobAuditConstants.XP_STATUS));
-    }
-
-    /**
-     * COR-02: a {@code retrying} diff whose replay the WorkManager no longer holds, lost with the
-     * queue of a node that restarted, can be retried again instead of staying stuck.
-     */
-    @Test
-    public void testARetryLostWithItsQueueCanBeRequestedAgain() throws Exception {
-        DocumentModel stuck = diffOnTextPair("lost", BlobAuditConstants.STATUS_RETRYING);
-        String sourceId = (String) stuck.getPropertyValue(BlobAuditConstants.XP_SOURCE_ID);
-        txFeature.nextTransaction();
-
-        run(session, BlobDiffRetryOp.ID, session.getDocument(stuck.getRef()), null);
-        txFeature.nextTransaction();
-
-        List<DocumentModel> diffs = diffsOf(sourceId);
-        assertEquals(1, diffs.size());
-        assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
-        assertFalse(session.exists(stuck.getRef()));
     }
 
     /**

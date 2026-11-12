@@ -192,18 +192,17 @@ The eligibility recheck in the work is *not* a substitute: the length it compare
 Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
 `#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
-**A replay has a work id of its own, and one replay at a time** (item 42). `withReplaceDiffId`
+**A replay has a work id of its own, and one replay at a time** (items 42, 69). `withReplaceDiffId`
 appends `:retry:<diffId>` to the nominal id: under the nominal one, `WorkComputation` skips an
 idempotent work whose id is among the last 50 its thread processed, and the retry vanished. The
-operation sets `bdiff:status` to `retrying` (as system: auditors hold no Write on the container)
-and refuses a second retry while `WorkManager#getWorkState` reports the replay `SCHEDULED` or
-`RUNNING`. A `null` state lets it through on purpose: it is what a replay lost with a restarted
-node looks like, and on the stream WorkManager without `nuxeo.stream.work.storestate.enabled` it
-is all there is. Two replays are harmless there, since they share the partition of the source
-document and run one after the other. `BlobDiffWork#workFailed` puts the diff back in `error`;
-every other outcome removes it. Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn`,
-`#testASecondRetryIsRefusedWhileTheFirstIsRunning`, `#testARetryThatFailsForGoodPutsTheDiffBackInError`,
-`#testARetryLostWithItsQueueCanBeRequestedAgain`.
+diff stays `error` while its replay runs, and the operation refuses a second retry (409) while
+`WorkManager#getWorkState` reports the replay `SCHEDULED` or `RUNNING`. A `null` state lets it
+through on purpose: it is what a replay lost with a restarted node looks like, and on the stream
+WorkManager without `nuxeo.stream.work.storestate.enabled` it is all there is. Two replays are
+harmless there, since they share the partition of the source document and run one after the other.
+A replay that fails for good leaves the `error` diff in place, still retryable; a successful one
+removes it. Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn`,
+`#testASecondRetryIsRefusedWhileTheFirstIsRunning`, `#testRetryReplaysAnErrorDiffAndReplacesIt`.
 
 **A `BlobDiff` lives under `/change-diff`, and nothing leaves it** (item 31). Two layers, keep
 both. `BlobDiffLocationListener` (synchronous, `aboutToCreate` / `aboutToMove` / `aboutToCopy`)
@@ -457,7 +456,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 310 tests (28 test classes)
+mvn -o install                                     # full build, 308 tests (28 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
