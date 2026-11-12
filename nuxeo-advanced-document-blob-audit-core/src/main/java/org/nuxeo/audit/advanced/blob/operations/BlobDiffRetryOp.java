@@ -28,6 +28,7 @@ import org.nuxeo.ecm.automation.core.annotations.Operation;
 import org.nuxeo.ecm.automation.core.annotations.OperationMethod;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.work.api.Work;
 import org.nuxeo.ecm.core.work.api.WorkManager;
@@ -57,8 +58,10 @@ public class BlobDiffRetryOp {
     protected CoreSession session;
 
     @OperationMethod
-    public DocumentModel run(DocumentModel diff) {
+    public DocumentModel run(DocumentModel input) {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
+        // Nothing but the id of the input is used: see checkProvenance.
+        DocumentModel diff = reloadStored(input);
         checkProvenance(diff);
         if (!DIFF_DOCTYPE.equals(diff.getType())) {
             throw new NuxeoException("Not a BlobDiff document: " + diff.getId(), 400);
@@ -66,7 +69,7 @@ public class BlobDiffRetryOp {
         if (!STATUS_ERROR.equals(diff.getPropertyValue(XP_STATUS))) {
             throw new NuxeoException("Only a BlobDiff in error can be retried", 400);
         }
-        // Read only now: the provenance above is what makes the stored keys trustworthy.
+        // Read only now: a stored model under /change-diff is what makes the keys trustworthy.
         DiffRequest request = DiffRequest.readFrom(diff);
         if (request.oldBlob() == null || request.newBlob() == null) {
             throw new NuxeoException("This BlobDiff has no stored binary keys, it cannot be retried", 400);
@@ -77,7 +80,28 @@ public class BlobDiffRetryOp {
             throw new NuxeoException("A retry of this BlobDiff is already pending", 409);
         }
         workManager.schedule(work, true);
-        return session.getDocument(diff.getRef());
+        return diff;
+    }
+
+    /**
+     * Returns the document as stored, read with the caller's session (so Read is still enforced),
+     * discarding whatever the input model holds in memory.
+     *
+     * @throws NuxeoException (400) when the input was never stored, so has no id to reload
+     * @since 2025.1
+     */
+    protected DocumentModel reloadStored(DocumentModel input) {
+        String id;
+        try {
+            id = input == null ? null : input.getId();
+        } catch (UnsupportedOperationException e) {
+            // SimpleDocumentModel, what a JSON document entity without uid becomes
+            id = null;
+        }
+        if (id == null) {
+            throw new NuxeoException("Not a stored BlobDiff", 400);
+        }
+        return session.getDocument(new IdRef(id));
     }
 
     /**
@@ -90,8 +114,9 @@ public class BlobDiffRetryOp {
     }
 
     /**
-     * Refuses anything that does not come from {@code /change-diff}, <b>before a single property of
-     * the input is read</b>.
+     * Refuses anything that does not come from {@code /change-diff}. It must be given the model
+     * {@link #reloadStored(DocumentModel)} returns, <b>never the input of the operation</b>, and run
+     * before any other property of it is read.
      * <p>
      * The operation replays a diff from the provider id and the storage key persisted on the
      * document, and {@link org.nuxeo.audit.advanced.blob.work.BlobDiffWork} re-reads them through
@@ -109,6 +134,10 @@ public class BlobDiffRetryOp {
      * <p>
      * The path is the provenance: the plugin creates diffs nowhere else, and {@code /change-diff} is
      * ACL-restricted to the auditors group, so a document sitting there was put there by the plugin.
+     * That holds of the <b>stored</b> document only. Over REST, a JSON document entity given as input
+     * is loaded by uid, then gets the properties of the request applied in memory under
+     * {@code doPrivileged} ({@code DocumentModelJsonReader#readEntity}): Read on a genuine diff keeps
+     * its genuine path while the status and the keys are the caller's.
      *
      * @since 2025.1
      */

@@ -196,19 +196,27 @@ id, is the duplicate guard. Coverage: `TestBlobDiffService#testARequestSurvivesT
 `TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests`,
 `TestBlobDiffHardening#testRunningTheSameWorkTwiceCreatesASingleDiff`.
 
-**`BlobDiff.Retry` trusts nothing on its input but the path.** The operation replays the provider
+**`BlobDiff.Retry` uses nothing of its input but the id.** The operation replays the provider
 id and the storage key persisted on the document, and `BlobDiffWork` re-reads them in a *system
 session* through `FrozenBlob#resolve` (`provider.readBlob(info)`) — a keyed store lookup, subject to
 **no document ACL**.
-The doctype and `bdiff:status` checks are both on attacker-controlled properties, and
+The input model is not the stored document: over REST, a JSON document entity is loaded by uid with
+the caller's session, then `DocumentModelJsonReader#readEntity` applies the request's properties to
+it in memory, under `doPrivileged` — Read on any diff is enough, and the path stays genuine while
+status and keys are the caller's (item 88). `BlobDiffRetryOp#reloadStored` therefore reads the id
+alone, refuses a model never stored (400, `SimpleDocumentModel` included), and reloads it with
+`session.getDocument`; every check and `DiffRequest.readFrom` run on **that** model, never on the
+parameter. Do not reuse the input "to save a read".
+On the stored model, the doctype and `bdiff:status` are still attacker-controlled properties, and
 `AbstractSession.createDocument` does not enforce allowed subtypes (that is `TypeManager`, i.e. UI).
-`BlobDiffRetryOp#checkProvenance` therefore rejects anything outside `/change-diff/` **before a
-single property is read**, and it must stay the first thing after `checkAuditor`.
+`BlobDiffRetryOp#checkProvenance` therefore rejects anything outside `/change-diff/` before any
+other property is read, and it must stay the first check after `reloadStored`.
 `DiffRequest.readFrom`, which trusts every property it reads, only runs after it.
 The eligibility recheck in the work is *not* a substitute: the length it compares comes from
 `BlobInfo`, which `FrozenBlob#resolve` fills from the `bdiff:oldLength` / `bdiff:newLength` that
 `DiffRequest.readFrom` read — forgeable.
 Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
+`#testRetryReadsTheStoredDiffNotTheModelItIsHanded`, `#testRetryRefusesADocumentThatIsNotStored`,
 `#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
 
 **A replay has a work id of its own, and one replay at a time** (items 42, 69). `withReplaceDiffId`
@@ -476,7 +484,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 308 tests (28 test classes)
+mvn -o install                                     # full build, 310 tests (28 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```

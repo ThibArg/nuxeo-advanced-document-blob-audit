@@ -62,8 +62,8 @@ public record FrozenBlob(String providerId, String key, String filename, String 
      * Re-reads the binary through its blob provider.
      * <p>
      * {@code provider.readBlob} is a keyed store lookup: it applies no document ACL. Only resolve an
-     * identity the plugin froze itself, or read back from a {@code BlobDiff} whose provenance was
-     * checked.
+     * identity the plugin froze itself, or read back from a <b>stored</b> {@code BlobDiff} whose
+     * provenance was checked (see {@link DiffRequest#readFrom}).
      *
      * @return the blob, or {@code null} when there is no key, no such provider, or the read failed
      */

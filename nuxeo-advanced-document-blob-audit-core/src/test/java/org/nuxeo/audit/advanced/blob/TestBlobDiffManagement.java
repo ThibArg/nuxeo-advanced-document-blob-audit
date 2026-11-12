@@ -51,6 +51,7 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.VersioningOption;
+import org.nuxeo.ecm.core.api.impl.SimpleDocumentModel;
 import org.nuxeo.ecm.core.api.impl.UserPrincipal;
 import org.nuxeo.ecm.core.api.security.ACE;
 import org.nuxeo.ecm.core.api.security.ACL;
@@ -362,9 +363,9 @@ public class TestBlobDiffManagement {
      * auditor who is explicitly <b>not</b> an administrator could forge a {@code BlobDiff} in their
      * own space, point it at someone else's binary and have the platform extract it for them.
      * <p>
-     * The path is what establishes provenance, and it is checked before a single property of the
-     * input is read. {@code BlobDiffLocationListener} now refuses such a creation outright; the
-     * fixture bypasses it to stand for a document forged before the guard existed.
+     * The path is what establishes provenance, and it is checked on the stored document before any
+     * other of its properties is read. {@code BlobDiffLocationListener} now refuses such a creation
+     * outright; the fixture bypasses it to stand for a document forged before the guard existed.
      */
     @Test
     public void testRetryRefusesADiffCreatedOutsideTheContainer() throws Exception {
@@ -395,6 +396,88 @@ public class TestBlobDiffManagement {
         restartTransaction();
         assertTrue("the refusal must leave the forged document alone, not consume it",
                 session.exists(forged.getRef()));
+    }
+
+    /**
+     * Item 88: the operation read the path, the status and the keys off the model it was handed.
+     * Over REST, a JSON document entity is loaded by uid with the caller's session, then gets the
+     * properties of the request overlaid in memory, under {@code doPrivileged}: Read on any diff was
+     * enough to keep its genuine path, set {@code bdiff:status=error} and point a side at someone
+     * else's binary. Everything is now read from the stored document.
+     */
+    @Test
+    public void testRetryReadsTheStoredDiffNotTheModelItIsHanded() throws Exception {
+        DocumentModel victim = file("in-memory-victim", textBlob("confidential", "text/plain", "secret.txt"));
+        ManagedBlob target = storedBlob(victim);
+        DocumentModel done = diffOnTextPair("in-memory-ok", BlobAuditConstants.STATUS_OK);
+        DocumentModel failed = diffOnTextPair("in-memory-error", BlobAuditConstants.STATUS_ERROR);
+        String sourceId = (String) failed.getPropertyValue(BlobAuditConstants.XP_SOURCE_ID);
+        String storedOldKey = (String) failed.getPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY);
+        String storedNewKey = (String) failed.getPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY);
+        txFeature.nextTransaction();
+
+        DocumentModel forgedStatus = pointOldSideAt(session.getDocument(done.getRef()), target);
+        forgedStatus.setPropertyValue(BlobAuditConstants.XP_STATUS, BlobAuditConstants.STATUS_ERROR);
+        try {
+            run(session, BlobDiffRetryOp.ID, forgedStatus, null);
+            fail("a status set in memory only must not make a diff replayable");
+        } catch (Exception e) {
+            assertRefusedBecause(e, "Only a BlobDiff in error");
+        }
+        restartTransaction();
+
+        DocumentModel forgedKeys = pointOldSideAt(session.getDocument(failed.getRef()), target);
+        assertEquals("the fixture must not reach storage", storedOldKey,
+                session.getDocument(failed.getRef()).getPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY));
+        run(session, BlobDiffRetryOp.ID, forgedKeys, null);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(sourceId);
+        assertEquals(1, diffs.size());
+        DocumentModel replayed = diffs.get(0);
+        assertEquals(BlobAuditConstants.STATUS_OK, replayed.getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals(storedOldKey, replayed.getPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY));
+        assertEquals(storedNewKey, replayed.getPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY));
+        Blob body = (Blob) replayed.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB);
+        assertFalse("the binary named in memory must never be extracted", body.getString().contains("confidential"));
+        assertEquals("the refused call must leave the diff it was handed alone", BlobAuditConstants.STATUS_OK,
+                session.getDocument(done.getRef()).getPropertyValue(BlobAuditConstants.XP_STATUS));
+    }
+
+    /**
+     * Item 88: a model that was never stored has no identity to reload, whatever its path says. A
+     * {@code SimpleDocumentModel}, what a JSON document entity without uid becomes, has no id at all.
+     */
+    @Test
+    public void testRetryRefusesADocumentThatIsNotStored() throws Exception {
+        DocumentModel failed = diffOnTextPair("detached", BlobAuditConstants.STATUS_ERROR);
+        String dayFolder = session.getDocument(failed.getParentRef()).getPathAsString();
+        txFeature.nextTransaction();
+
+        DocumentModel detached = session.createDocumentModel(dayFolder, "detached-copy",
+                BlobAuditConstants.DIFF_DOCTYPE);
+        detached.copyContent(session.getDocument(failed.getRef()));
+        SimpleDocumentModel simple = SimpleDocumentModel.ofType(BlobAuditConstants.DIFF_DOCTYPE);
+        simple.setPathInfo(dayFolder, "simple-copy");
+        simple.setPropertyValue(BlobAuditConstants.XP_STATUS, BlobAuditConstants.STATUS_ERROR);
+        for (DocumentModel input : List.of(detached, simple)) {
+            restartTransaction();
+            try {
+                run(session, BlobDiffRetryOp.ID, input, null);
+                fail("a model that was never stored must not be replayed: " + input.getClass().getSimpleName());
+            } catch (Exception e) {
+                assertRefusedBecause(e, "Not a stored BlobDiff");
+            }
+        }
+    }
+
+    /** Points the old side of a diff at another binary, in memory only. */
+    protected DocumentModel pointOldSideAt(DocumentModel diff, ManagedBlob target) {
+        diff.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_PROVIDER, target.getProviderId());
+        diff.setPropertyValue(BlobAuditConstants.XP_OLD_BLOB_KEY, target.getKey());
+        diff.setPropertyValue(BlobAuditConstants.XP_OLD_DIGEST, target.getDigest());
+        diff.setPropertyValue(BlobAuditConstants.XP_OLD_LENGTH, Long.valueOf(target.getLength()));
+        return diff;
     }
 
     /**

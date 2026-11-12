@@ -117,8 +117,10 @@ public record DiffRequest(String repository, String sourceId, String sourceTitle
      * {@link #writeTo(DocumentModel)}. A side whose provider id or key is missing is returned as
      * {@code null}.
      * <p>
-     * Trusts every property it reads: call it only on a BlobDiff whose provenance was checked
-     * (BlobDiffRetryOp#checkProvenance).
+     * Trusts every property it reads: call it only on a model loaded from storage
+     * ({@code CoreSession#getDocument}), never on one a caller handed in, and only once its path was
+     * checked (BlobDiffRetryOp#checkProvenance). A caller-supplied model can carry in-memory values
+     * its stored document does not hold.
      */
     public static DiffRequest readFrom(DocumentModel diff) {
         String repository = string(diff, XP_SOURCE_REPO);
