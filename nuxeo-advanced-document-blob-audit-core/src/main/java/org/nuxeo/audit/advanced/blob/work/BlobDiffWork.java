@@ -29,6 +29,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.advanced.blob.BlobDiffService;
+import org.nuxeo.audit.advanced.blob.BlobDiffStore;
 import org.nuxeo.audit.advanced.blob.DiffRequest;
 import org.nuxeo.audit.advanced.blob.DiffResult;
 import org.nuxeo.ecm.core.api.Blob;
@@ -175,8 +176,7 @@ public class BlobDiffWork extends AbstractWork {
             // Deleted (or permanently purged) between the save and this work: the audit entry
             // already exists, so leave a trace instead of failing silently.
             log.warn("Source document {} no longer exists, recording an error BlobDiff ({})", docId, xpath);
-            DocumentModel diffDoc = Framework.getService(BlobDiffService.class)
-                                             .createDiffDocument(session, request, STATUS_ERROR, null);
+            DocumentModel diffDoc = BlobDiffStore.createDiffDocument(session, request, STATUS_ERROR, null);
             diffDoc.setPropertyValue(XP_SUMMARY, SUMMARY_SOURCE_MISSING);
             session.saveDocument(diffDoc);
             removeReplaced();
@@ -228,7 +228,7 @@ public class BlobDiffWork extends AbstractWork {
         if (alreadyRecorded()) {
             return;
         }
-        DocumentModel diffDoc = service.createDiffDocument(session, recorded, status, result);
+        DocumentModel diffDoc = BlobDiffStore.createDiffDocument(session, recorded, status, result);
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");

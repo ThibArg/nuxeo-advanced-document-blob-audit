@@ -91,9 +91,6 @@ public class TestBlobDiffLocationAndSecurity {
     protected CoreFeature coreFeature;
 
     @Inject
-    protected BlobDiffService blobDiffService;
-
-    @Inject
     protected PageProviderService pageProviderService;
 
     @Inject
@@ -191,12 +188,12 @@ public class TestBlobDiffLocationAndSecurity {
         DocumentModel diff = diffs.get(0);
         Calendar date = (Calendar) diff.getPropertyValue(BlobAuditConstants.XP_DATE);
         /*
-          Render the expected path in UTC, like BlobDiffComponent.CONTAINER_PATH_FORMAT does.
+          Render the expected path in UTC, like BlobDiffStore.CONTAINER_PATH_FORMAT does.
           Formatting the Calendar with %t* uses its own (local) zone, so east of Greenwich the
           test failed for every run between midnight and the UTC offset.
          */
         String expectedParent = CONTAINER_PATH + "/"
-                + BlobDiffComponent.CONTAINER_PATH_FORMAT.format(date.toInstant());
+                + BlobDiffStore.CONTAINER_PATH_FORMAT.format(date.toInstant());
         assertEquals(expectedParent, session.getParentDocument(diff.getRef()).getPathAsString());
 
         // every BlobDiff of the repository lives under the container
@@ -206,8 +203,8 @@ public class TestBlobDiffLocationAndSecurity {
 
     @Test
     public void testSingleContainerAtRoot() {
-        blobDiffService.getOrCreateContainer(session, new Date());
-        blobDiffService.getOrCreateContainer(session, new Date());
+        BlobDiffStore.getOrCreateContainer(session, new Date());
+        BlobDiffStore.getOrCreateContainer(session, new Date());
         DocumentModelList containers = session.query("SELECT * FROM Document WHERE ecm:parentId = '"
                 + session.getRootDocument().getId() + "' AND ecm:name LIKE '" + BlobAuditConstants.CONTAINER_NAME
                 + "%'");
@@ -230,7 +227,7 @@ public class TestBlobDiffLocationAndSecurity {
             TimeZone.setDefault(TimeZone.getTimeZone("Europe/Paris"));
             Date instant = Date.from(Instant.parse("2026-03-15T23:30:00Z"));
 
-            DocumentModel container = blobDiffService.getOrCreateContainer(session, instant);
+            DocumentModel container = BlobDiffStore.getOrCreateContainer(session, instant);
 
             assertEquals("/" + BlobAuditConstants.CONTAINER_NAME + "/2026/03/15", container.getPathAsString());
         } finally {
@@ -245,9 +242,9 @@ public class TestBlobDiffLocationAndSecurity {
         Date instant = Date.from(Instant.parse("2026-07-01T02:15:00Z"));
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Auckland"));
-            String fromAuckland = blobDiffService.getOrCreateContainer(session, instant).getPathAsString();
+            String fromAuckland = BlobDiffStore.getOrCreateContainer(session, instant).getPathAsString();
             TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
-            String fromLosAngeles = blobDiffService.getOrCreateContainer(session, instant).getPathAsString();
+            String fromLosAngeles = BlobDiffStore.getOrCreateContainer(session, instant).getPathAsString();
 
             assertEquals(fromAuckland, fromLosAngeles);
         } finally {
@@ -289,7 +286,7 @@ public class TestBlobDiffLocationAndSecurity {
                 String[] path = new String[1];
                 TransactionHelper.runInTransaction(() -> CoreInstance.doPrivileged(repo,
                         (CoreSession s) -> {
-                            path[0] = blobDiffService.getOrCreateContainer(s, date).getPathAsString();
+                            path[0] = BlobDiffStore.getOrCreateContainer(s, date).getPathAsString();
                         }));
                 return path[0];
             }));
@@ -360,7 +357,7 @@ public class TestBlobDiffLocationAndSecurity {
     /** A tampered ACL (older version, manual change) is restored by the next initialisation. */
     @Test
     public void testTamperedAclIsRepaired() {
-        DocumentModel root = blobDiffService.ensureRootContainer(session);
+        DocumentModel root = BlobDiffStore.ensureRootContainer(session);
         ACP open = new ACPImpl();
         ACL acl = new ACLImpl(ACL.LOCAL_ACL);
         acl.add(new ACE(SecurityConstants.EVERYONE, SecurityConstants.READ, true));
@@ -368,8 +365,8 @@ public class TestBlobDiffLocationAndSecurity {
         session.setACP(root.getRef(), open, true);
         session.save();
 
-        assertTrue("a tampered ACL must be reported as repaired", blobDiffService.repairSecurity(session, root));
-        assertFalse("a correct ACL must be left untouched", blobDiffService.repairSecurity(session, root));
+        assertTrue("a tampered ACL must be reported as repaired", BlobDiffStore.repairSecurity(session, root));
+        assertFalse("a correct ACL must be left untouched", BlobDiffStore.repairSecurity(session, root));
 
         ACL local = session.getACP(root.getRef()).getACL(ACL.LOCAL_ACL);
         assertTrue(java.util.Arrays.stream(local.getACEs())
@@ -410,7 +407,7 @@ public class TestBlobDiffLocationAndSecurity {
     public void testDiffsCannotLeaveTheContainer() throws Exception {
         DocumentModel source = createFile(session, "kept-in", textBlob("x", "text/plain", "x.txt"));
         DocumentModel diff = createDiff(source, "file:content", new Date());
-        DocumentModel otherDay = blobDiffService.getOrCreateContainer(session, date(2031, Calendar.MARCH, 14));
+        DocumentModel otherDay = BlobDiffStore.getOrCreateContainer(session, date(2031, Calendar.MARCH, 14));
         session.save();
         DocumentRef root = session.getRootDocument().getRef();
         DocumentRef day = diff.getParentRef();

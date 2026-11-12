@@ -15,32 +15,17 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
-import java.util.Date;
-
 import org.nuxeo.ecm.core.api.Blob;
-import org.nuxeo.ecm.core.api.CoreSession;
-import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.NuxeoException;
 
 /**
- * Entry point of the blob diff feature.
+ * Entry point of the blob diff feature. Persistence of the results is {@link BlobDiffStore}.
  *
  * @since 2025.1
  */
 public interface BlobDiffService {
 
     BlobDiffConfigDescriptor getConfig();
-
-    /**
-     * Why the given document/xpath/blob can, or cannot, be content-diffed.
-     * <p>
-     * Callers that need to audit a binary change they cannot diff must use this rather than
-     * {@link #isDiffable}, which collapses "out of scope" and "changed but not diffable" into the
-     * same {@code false}.
-     *
-     * @since 2025.1
-     */
-    DiffEligibility getEligibility(String docType, String xpath, Blob blob);
 
     /**
      * Whether the change from {@code oldBlob} to {@code newBlob} can be content-diffed.
@@ -55,26 +40,6 @@ public interface BlobDiffService {
      */
     DiffEligibility getEligibility(String docType, String xpath, Blob oldBlob, Blob newBlob);
 
-    /** {@code true} if the given document/xpath/blob is eligible for a content diff. */
-    default boolean isDiffable(String docType, String xpath, Blob blob) {
-        return getEligibility(docType, xpath, blob) == DiffEligibility.ELIGIBLE;
-    }
-
-    /**
-     * Extracts the comparable content of a blob.
-     * <p>
-     * {@code null} means <b>no extractor is registered</b> for the mime type - a legitimate,
-     * expected outcome. An extractor that was found but failed raises: the two used to be collapsed
-     * into the same {@code null}, which had {@code BlobDiffWork} persist a genuine failure as
-     * {@code skippedUnsupportedType}, a status {@code BlobDiff.Retry} refuses to replay.
-     *
-     * @param blob the blob to read, never {@code null}
-     * @return the extracted content, or {@code null} if and only if no extractor handles the mime
-     *         type
-     * @throws NuxeoException if an extractor was found but could not read the binary
-     */
-    DiffableContent extract(Blob blob);
-
     /**
      * Compares two blobs. Both blobs must be non-null.
      * <p>
@@ -87,25 +52,4 @@ public interface BlobDiffService {
      * @throws NuxeoException if an extraction failed
      */
     DiffResult diff(Blob oldBlob, Blob newBlob);
-
-    /**
-     * Creates the {@code BlobDiff} document recording the request and its result, inside the dated
-     * container of the request time. The session must be privileged.
-     *
-     * @param result the comparison, {@code null} when none was computed
-     * @since 2025.1
-     */
-    DocumentModel createDiffDocument(CoreSession session, DiffRequest request, String status, DiffResult result);
-
-    /**
-     * Returns (creating it if needed) the root {@code /change-diff} container and makes sure its
-     * ACL is the expected one. The session must be privileged.
-     */
-    DocumentModel ensureRootContainer(CoreSession session);
-
-    /** Resets the root container ACL if it differs from the expected one; {@code true} if repaired. */
-    boolean repairSecurity(CoreSession session, DocumentModel root);
-
-    /** Returns (creating it if needed) the dated container for the given date. */
-    DocumentModel getOrCreateContainer(CoreSession session, Date date);
 }

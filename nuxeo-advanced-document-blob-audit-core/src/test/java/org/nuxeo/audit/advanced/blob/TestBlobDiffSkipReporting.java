@@ -367,8 +367,8 @@ public class TestBlobDiffSkipReporting {
     @Test
     public void testOutOfScopeXPathStaysSilent() throws Exception {
         BlobDiffService service = org.nuxeo.runtime.api.Framework.getService(BlobDiffService.class);
-        assertEquals(DiffEligibility.NOT_APPLICABLE,
-                service.getEligibility("File", "files:files/0/file", textBlob("x", UNSUPPORTED_MIME, "f.bin")));
+        Blob blob = textBlob("x", UNSUPPORTED_MIME, "f.bin");
+        assertEquals(DiffEligibility.NOT_APPLICABLE, service.getEligibility("File", "files:files/0/file", blob, blob));
     }
 
     /**

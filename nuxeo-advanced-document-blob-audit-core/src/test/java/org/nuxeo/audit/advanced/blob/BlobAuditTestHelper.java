@@ -297,6 +297,6 @@ public class BlobAuditTestHelper {
      */
     public static DocumentModel createDiff(CoreSession session, DiffRequest request, String status,
             DiffResult result) {
-        return Framework.getService(BlobDiffService.class).createDiffDocument(session, request, status, result);
+        return BlobDiffStore.createDiffDocument(session, request, status, result);
     }
 }

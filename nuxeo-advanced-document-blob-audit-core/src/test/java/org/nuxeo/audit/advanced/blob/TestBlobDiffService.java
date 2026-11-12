@@ -74,6 +74,20 @@ public class TestBlobDiffService {
     @Inject
     protected TransactionalFeature txFeature;
 
+    /** The component, for its protected per-blob methods (same package). */
+    protected BlobDiffComponent component() {
+        return (BlobDiffComponent) blobDiffService;
+    }
+
+    /** The verdict for one blob: the pair form with the blob on both sides, which never changes format. */
+    protected DiffEligibility eligibility(String docType, String xpath, Blob blob) {
+        return blobDiffService.getEligibility(docType, xpath, blob, blob);
+    }
+
+    protected boolean isDiffable(String docType, String xpath, Blob blob) {
+        return eligibility(docType, xpath, blob) == DiffEligibility.ELIGIBLE;
+    }
+
     /* ---------------------------------------------------------------- service */
 
     @Test
@@ -102,7 +116,7 @@ public class TestBlobDiffService {
 
     @Test
     public void testSpreadsheetExtractorIsSelected() throws Exception {
-        DiffableContent content = blobDiffService.extract(xlsx("Sheet1", cells("A1", "hello"), "f.xlsx"));
+        DiffableContent content = component().extract(xlsx("Sheet1", cells("A1", "hello"), "f.xlsx"));
 
         assertNotNull(content);
         assertTrue("a spreadsheet must produce keyed content", content.keyed());
@@ -110,7 +124,7 @@ public class TestBlobDiffService {
 
     @Test
     public void testPlainTextExtractorIsSelected() throws Exception {
-        DiffableContent content = blobDiffService.extract(textBlob("a\nb", "text/plain", "f.txt"));
+        DiffableContent content = component().extract(textBlob("a\nb", "text/plain", "f.txt"));
 
         assertNotNull(content);
         assertFalse("text must produce positional content", content.keyed());
@@ -120,7 +134,7 @@ public class TestBlobDiffService {
     @Test
     @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-smallvalue-config.xml")
     public void testTheConfiguredMaxValueLengthReachesTheExtractors() throws Exception {
-        DiffableContent content = blobDiffService.extract(textBlob("x".repeat(10_000), "text/plain", "f.txt"));
+        DiffableContent content = component().extract(textBlob("x".repeat(10_000), "text/plain", "f.txt"));
 
         assertEquals(200, blobDiffService.getConfig().getMaxValueLength());
         assertEquals(1, content.size());
@@ -153,9 +167,9 @@ public class TestBlobDiffService {
     public void testUnsupportedMimeTypeYieldsNoExtractor() throws Exception {
         Blob blob = textBlob("binary-ish", "application/x-unknown-binary", "f.bin");
 
-        assertNull(blobDiffService.extract(blob));
+        assertNull(component().extract(blob));
         assertNull(blobDiffService.diff(blob, blob));
-        assertFalse(blobDiffService.isDiffable("File", "file:content", blob));
+        assertFalse(isDiffable("File", "file:content", blob));
     }
 
     /**
@@ -172,7 +186,7 @@ public class TestBlobDiffService {
         Blob corrupted = BlobAuditTestHelper.blob("not a zip at all".getBytes(StandardCharsets.UTF_8),
                 BlobAuditTestHelper.XLSX_MIME, "corrupt.xlsx");
 
-        assertThrows(NuxeoException.class, () -> blobDiffService.extract(corrupted));
+        assertThrows(NuxeoException.class, () -> component().extract(corrupted));
         assertThrows("the failure must reach the caller through diff() too", NuxeoException.class,
                 () -> blobDiffService.diff(corrupted, corrupted));
     }
@@ -188,23 +202,23 @@ public class TestBlobDiffService {
             sb.append("padding padding padding\n");
         }
 
-        assertFalse(blobDiffService.isDiffable("File", "file:content",
+        assertFalse(isDiffable("File", "file:content",
                 textBlob(sb.toString(), "text/plain", "big.txt")));
         assertTrue("a small blob must still pass",
-                blobDiffService.isDiffable("File", "file:content", textBlob("tiny", "text/plain", "small.txt")));
+                isDiffable("File", "file:content", textBlob("tiny", "text/plain", "small.txt")));
     }
 
     @Test
     public void testXPathOutsideTheConfiguredListIsNotDiffable() throws Exception {
         Blob blob = textBlob("hello", "text/plain", "f.txt");
 
-        assertTrue(blobDiffService.isDiffable("File", "file:content", blob));
-        assertFalse(blobDiffService.isDiffable("File", "files:files/0/file", blob));
+        assertTrue(isDiffable("File", "file:content", blob));
+        assertFalse(isDiffable("File", "files:files/0/file", blob));
     }
 
     @Test
     public void testNullBlobIsNotDiffable() {
-        assertFalse(blobDiffService.isDiffable("File", "file:content", null));
+        assertFalse(isDiffable("File", "file:content", null));
     }
 
     /* ------------------------------------------------------------ eligibility */
@@ -221,14 +235,14 @@ public class TestBlobDiffService {
             sb.append("padding padding padding\n");
         }
 
-        assertEquals(DiffEligibility.TOO_LARGE, blobDiffService.getEligibility("File", "file:content",
+        assertEquals(DiffEligibility.TOO_LARGE, eligibility("File", "file:content",
                 textBlob(sb.toString(), "text/plain", "big.txt")));
-        assertEquals(DiffEligibility.UNSUPPORTED_TYPE, blobDiffService.getEligibility("File", "file:content",
+        assertEquals(DiffEligibility.UNSUPPORTED_TYPE, eligibility("File", "file:content",
                 textBlob("tiny", "application/x-unknown-binary", "f.bin")));
         assertEquals(DiffEligibility.ELIGIBLE,
-                blobDiffService.getEligibility("File", "file:content", textBlob("tiny", "text/plain", "f.txt")));
-        assertEquals(DiffEligibility.NOT_APPLICABLE, blobDiffService.getEligibility("File", "file:content", null));
-        assertEquals(DiffEligibility.NOT_APPLICABLE, blobDiffService.getEligibility("File", "files:files/0/file",
+                eligibility("File", "file:content", textBlob("tiny", "text/plain", "f.txt")));
+        assertEquals(DiffEligibility.NOT_APPLICABLE, eligibility("File", "file:content", null));
+        assertEquals(DiffEligibility.NOT_APPLICABLE, eligibility("File", "files:files/0/file",
                 textBlob("tiny", "text/plain", "f.txt")));
     }
 
@@ -365,7 +379,7 @@ public class TestBlobDiffService {
 
     @Test
     public void testContainerIsPartitionedByDate() {
-        DocumentModel container = blobDiffService.getOrCreateContainer(session, date(2026, Calendar.SEPTEMBER, 25));
+        DocumentModel container = BlobDiffStore.getOrCreateContainer(session, date(2026, Calendar.SEPTEMBER, 25));
 
         assertEquals("/" + BlobAuditConstants.CONTAINER_NAME + "/2026/09/25", container.getPathAsString());
         assertTrue(session.exists(new PathRef("/" + BlobAuditConstants.CONTAINER_NAME)));
@@ -376,16 +390,16 @@ public class TestBlobDiffService {
     public void testContainerCreationIsIdempotent() {
         Date date = date(2026, Calendar.SEPTEMBER, 25);
 
-        DocumentModel first = blobDiffService.getOrCreateContainer(session, date);
-        DocumentModel second = blobDiffService.getOrCreateContainer(session, date);
+        DocumentModel first = BlobDiffStore.getOrCreateContainer(session, date);
+        DocumentModel second = BlobDiffStore.getOrCreateContainer(session, date);
 
         assertEquals(first.getId(), second.getId());
     }
 
     @Test
     public void testDifferentDaysGetDifferentFolders() {
-        DocumentModel sept = blobDiffService.getOrCreateContainer(session, date(2026, Calendar.SEPTEMBER, 25));
-        DocumentModel oct = blobDiffService.getOrCreateContainer(session, date(2026, Calendar.OCTOBER, 1));
+        DocumentModel sept = BlobDiffStore.getOrCreateContainer(session, date(2026, Calendar.SEPTEMBER, 25));
+        DocumentModel oct = BlobDiffStore.getOrCreateContainer(session, date(2026, Calendar.OCTOBER, 1));
 
         assertEquals("/change-diff/2026/09/25", sept.getPathAsString());
         assertEquals("/change-diff/2026/10/01", oct.getPathAsString());
@@ -398,7 +412,7 @@ public class TestBlobDiffService {
      */
     @Test
     public void testRootContainerBlocksInheritanceAndRestrictsRead() {
-        blobDiffService.getOrCreateContainer(session, new Date());
+        BlobDiffStore.getOrCreateContainer(session, new Date());
         DocumentModel root = session.getDocument(new PathRef("/" + BlobAuditConstants.CONTAINER_NAME));
 
         ACP acp = session.getACP(root.getRef());
@@ -421,7 +435,7 @@ public class TestBlobDiffService {
 
     @Test
     public void testContainerIsHiddenFromNavigation() {
-        blobDiffService.getOrCreateContainer(session, new Date());
+        BlobDiffStore.getOrCreateContainer(session, new Date());
         DocumentModel root = session.getDocument(new PathRef("/" + BlobAuditConstants.CONTAINER_NAME));
 
         assertTrue(root.hasFacet("HiddenInNavigation"));

@@ -31,11 +31,12 @@ extension point. The diff engine (`TextDiffer`) is format-agnostic.
 Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-SNAPSHOT`.
 
 - `nuxeo-advanced-document-blob-audit-core/` — all Java, all contributions, and the Web UI.
-  - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`),
-    `BlobModificationListener`, `VersionBlobPairs` (which blobs of two versions to compare),
-    `BlobDiffTrigger`, `DiffRequest` + `FrozenBlob` (what a diff compares, carried by the work,
-    written on the `BlobDiff` and read back by the retry), `TextDiffer`; subpackages `bulk/`,
-    `extractor/`, `image/`, `io/`, `operations/`, `work/`.
+  - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`: configuration,
+    eligibility, diff), `BlobDiffStore` (the `/change-diff` container and the `BlobDiff` documents,
+    static, privileged session), `BlobModificationListener`, `VersionBlobPairs` (which blobs of two
+    versions to compare), `BlobDiffTrigger`, `DiffRequest` + `FrozenBlob` (what a diff compares,
+    carried by the work, written on the `BlobDiff` and read back by the retry), `TextDiffer`;
+    subpackages `bulk/`, `extractor/`, `image/`, `io/`, `operations/`, `work/`.
   - `src/main/resources/OSGI-INF/` — 11 components + `deployment-fragment.xml` + `l10n/`.
   - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
     **server-side** i18n, appended by `deployment-fragment.xml` to
@@ -128,7 +129,7 @@ by `ExtractorDescriptor#normalizeMimeType`: no case, no parameters), both sides 
 `minSimilarityLines` units, and `DiffResult#similarity()` is under `minSimilarity` — two properties
 of the contribution reading the pair, parsed once in `resolve` into `ResolvedExtractor`, read by the
 service and ignored by the extractor. Only `plainText` sets them (`0.1`, `5`); `0` disables the
-rule. `BlobDiffWork` turns the flag into `skippedContentReplaced`, and `createDiffDocument` stores
+rule. `BlobDiffWork` turns the flag into `skippedContentReplaced`, and `BlobDiffStore#createDiffDocument` stores
 the counters and `bdiff:similarity` but no body, as for every status other than `ok`. Four points:
 
 - **The mime-change condition is the product decision, not an optimisation.** A rewrite in the same
