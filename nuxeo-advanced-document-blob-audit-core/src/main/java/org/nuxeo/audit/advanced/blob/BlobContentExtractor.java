@@ -21,7 +21,7 @@ import java.util.Map;
 import org.nuxeo.ecm.core.api.Blob;
 
 /**
- * Turns a blob into a comparable {@link DiffableContent}.
+ * Turns a blob into a comparable {@link DiffableContent}: text units, cells, or image digests.
  * <p>
  * This is the only interface to implement in order to support a new format. Extractors are
  * contributed to the {@code extractors} extension point of
@@ -30,7 +30,7 @@ import org.nuxeo.ecm.core.api.Blob;
  *
  * @since 2025.1
  */
-public interface BlobTextExtractor {
+public interface BlobContentExtractor {
 
     /**
      * Property through which the component hands every extractor the configured

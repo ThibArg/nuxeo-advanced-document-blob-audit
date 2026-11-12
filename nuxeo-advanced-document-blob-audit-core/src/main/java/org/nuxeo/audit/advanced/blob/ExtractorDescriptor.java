@@ -28,7 +28,7 @@ import org.nuxeo.common.xmap.annotation.XObject;
 import org.nuxeo.runtime.model.Descriptor;
 
 /**
- * Registration of a {@link BlobTextExtractor} for a set of mime types.
+ * Registration of a {@link BlobContentExtractor} for a set of mime types.
  * <p>
  * Contributions with the same name <b>merge</b>: a later one only overrides what it sets, its
  * properties are added to the earlier ones, and its mime types replace them only when it lists some.
@@ -66,7 +66,7 @@ public class ExtractorDescriptor implements Descriptor {
     protected String name;
 
     @XNode("@class")
-    protected Class<? extends BlobTextExtractor> klass;
+    protected Class<? extends BlobContentExtractor> klass;
 
     @XNode("@enabled")
     protected Boolean enabled;
@@ -127,7 +127,7 @@ public class ExtractorDescriptor implements Descriptor {
         return properties;
     }
 
-    public Class<? extends BlobTextExtractor> getKlass() {
+    public Class<? extends BlobContentExtractor> getKlass() {
         return klass;
     }
 

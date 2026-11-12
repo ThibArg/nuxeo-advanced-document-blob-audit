@@ -41,7 +41,7 @@ import org.nuxeo.runtime.model.DefaultComponent;
 import org.nuxeo.runtime.transaction.TransactionHelper;
 
 /**
- * Registry of {@link BlobTextExtractor} implementations plus the {@link BlobDiffService}
+ * Registry of {@link BlobContentExtractor} implementations plus the {@link BlobDiffService}
  * implementation. Also registers {@link BlobDiffRepositoryInit} and the {@code blobContentModified}
  * audit event type.
  *
@@ -75,7 +75,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      * One enabled contribution, instantiated. {@code minSimilarity} and {@code minSimilarityLines}
      * are its {@link ExtractorDescriptor#MIN_SIMILARITY} rule, parsed once; {@code 0} disables it.
      */
-    protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor,
+    protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobContentExtractor extractor,
             double minSimilarity, int minSimilarityLines) {
     }
 
@@ -140,9 +140,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                 continue;
             }
             try {
-                BlobTextExtractor extractor = descriptor.getKlass().getDeclaredConstructor().newInstance();
+                BlobContentExtractor extractor = descriptor.getKlass().getDeclaredConstructor().newInstance();
                 Map<String, String> properties = new HashMap<>(descriptor.getProperties());
-                properties.putIfAbsent(BlobTextExtractor.MAX_VALUE_LENGTH,
+                properties.putIfAbsent(BlobContentExtractor.MAX_VALUE_LENGTH,
                         String.valueOf(getConfig().getMaxValueLength()));
                 extractor.init(properties);
                 resolved.add(new ResolvedExtractor(descriptor, extractor, minSimilarity(descriptor),
@@ -253,21 +253,21 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (eligibility != DiffEligibility.ELIGIBLE) {
             return eligibility;
         }
-        BlobTextExtractor oldExtractor = findExtractor(candidates, oldBlob.getMimeType());
-        BlobTextExtractor newExtractor = findExtractor(candidates, newBlob.getMimeType());
+        BlobContentExtractor oldExtractor = findExtractor(candidates, oldBlob.getMimeType());
+        BlobContentExtractor newExtractor = findExtractor(candidates, newBlob.getMimeType());
         return oldExtractor == newExtractor ? DiffEligibility.ELIGIBLE : DiffEligibility.FORMAT_CHANGED;
     }
 
-    protected BlobTextExtractor findExtractor(String mimeType) {
+    protected BlobContentExtractor findExtractor(String mimeType) {
         return findExtractor(extractors, mimeType);
     }
 
     /** @since 2025.1 */
-    protected BlobTextExtractor findImageExtractor(String mimeType) {
+    protected BlobContentExtractor findImageExtractor(String mimeType) {
         return findExtractor(imageExtractors, mimeType);
     }
 
-    protected BlobTextExtractor findExtractor(List<ResolvedExtractor> candidates, String mimeType) {
+    protected BlobContentExtractor findExtractor(List<ResolvedExtractor> candidates, String mimeType) {
         ResolvedExtractor resolved = findResolved(candidates, mimeType);
         return resolved == null ? null : resolved.extractor();
     }
@@ -297,7 +297,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      * @throws NuxeoException if an extractor was found but could not read the binary
      */
     protected DiffableContent extract(Blob blob) {
-        BlobTextExtractor extractor = findExtractor(blob.getMimeType());
+        BlobContentExtractor extractor = findExtractor(blob.getMimeType());
         if (extractor == null) {
             return null;
         }
@@ -338,7 +338,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (!config.isImageInventory()) {
             return textResult;
         }
-        BlobTextExtractor imageExtractor = findImageExtractor(newBlob.getMimeType());
+        BlobContentExtractor imageExtractor = findImageExtractor(newBlob.getMimeType());
         if (imageExtractor == null) {
             return textResult;
         }

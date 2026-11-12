@@ -30,7 +30,7 @@ import org.nuxeo.ecm.core.api.Blob;
  *
  * @since 2025.1
  */
-public class FailingImageExtractor implements BlobTextExtractor {
+public class FailingImageExtractor implements BlobContentExtractor {
 
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {

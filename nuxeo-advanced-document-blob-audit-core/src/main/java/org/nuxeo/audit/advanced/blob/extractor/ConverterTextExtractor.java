@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
+import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
@@ -45,7 +45,7 @@ import org.nuxeo.runtime.api.Framework;
  *
  * @since 2025.1
  */
-public class ConverterTextExtractor implements BlobTextExtractor {
+public class ConverterTextExtractor implements BlobContentExtractor {
 
     public static final String ANY_2_TEXT = "any2text";
 
@@ -66,7 +66,7 @@ public class ConverterTextExtractor implements BlobTextExtractor {
         if (min != null) {
             minLineLength = Integer.parseInt(min);
         }
-        maxValueLength = BlobTextExtractor.maxValueLength(properties);
+        maxValueLength = BlobContentExtractor.maxValueLength(properties);
     }
 
     /**

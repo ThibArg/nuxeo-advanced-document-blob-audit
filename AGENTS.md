@@ -23,7 +23,7 @@ A binary that changed but cannot be diffed (over `maxBlobSize`, no extractor for
 the two versions read by different extractor contributions) produces the **audit entry only**, with
 a `skipReason` extended info and no `diffCorrelationId`. See the "Skip reporting" invariant below.
 
-Formats are supported by contributing `BlobTextExtractor` implementations to the `extractors`
+Formats are supported by contributing `BlobContentExtractor` implementations to the `extractors`
 extension point. The diff engine (`TextDiffer`) is format-agnostic.
 
 ## Layout
@@ -398,7 +398,7 @@ it alone. A new extractor must do the same, or nothing bounds what it holds.
 Coverage: `TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
 `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`.
 
-**`BlobTextExtractor.extract` declares `throws IOException`, and must not be widened back.** It
+**`BlobContentExtractor.extract` declares `throws IOException`, and must not be widened back.** It
 declared `throws Exception` until item 28, which forced `catch (Exception)` on all three call sites
 — the shape the Nuxeo "Catching Exceptions" page rules out, because it also catches
 `InterruptedException`. The one that mattered is the blob re-read of `BlobDiffWork` (now

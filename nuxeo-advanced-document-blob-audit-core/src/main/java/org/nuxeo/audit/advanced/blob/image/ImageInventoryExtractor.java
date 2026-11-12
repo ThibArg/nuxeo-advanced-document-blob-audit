@@ -68,7 +68,7 @@ import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.usermodel.XSSFRelation;
-import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
+import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.extractor.SlideHandler;
@@ -83,7 +83,7 @@ import org.xml.sax.helpers.DefaultHandler;
 /**
  * Digest-based image inventory, used when the image inventory is on.
  * <p>
- * A regular {@link BlobTextExtractor}, contributed to the {@code imageExtractors} extension point
+ * A regular {@link BlobContentExtractor}, contributed to the {@code imageExtractors} extension point
  * of {@code org.nuxeo.audit.advanced.blob.BlobDiffComponent}: selectable and disableable per mime
  * type like any other extractor, and bounded by the configured {@code maxLines}.
  * <p>
@@ -93,7 +93,7 @@ import org.xml.sax.helpers.DefaultHandler;
  *
  * @since 2025.1
  */
-public class ImageInventoryExtractor implements BlobTextExtractor {
+public class ImageInventoryExtractor implements BlobContentExtractor {
 
     private static final Logger log = LogManager.getLogger(ImageInventoryExtractor.class);
 

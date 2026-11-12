@@ -22,7 +22,7 @@ import java.util.Map;
 
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.openxml4j.opc.PackagePart;
-import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
+import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
@@ -48,7 +48,7 @@ import org.xml.sax.SAXException;
  *
  * @since 2025.1
  */
-public class PresentationExtractor implements BlobTextExtractor {
+public class PresentationExtractor implements BlobContentExtractor {
 
     public static final String SLIDE_MARKER = "## Slide";
 
@@ -63,7 +63,7 @@ public class PresentationExtractor implements BlobTextExtractor {
     @Override
     public void init(Map<String, String> properties) {
         includeNotes = !"false".equalsIgnoreCase(properties.get("includeNotes"));
-        maxValueLength = BlobTextExtractor.maxValueLength(properties);
+        maxValueLength = BlobContentExtractor.maxValueLength(properties);
     }
 
     /**

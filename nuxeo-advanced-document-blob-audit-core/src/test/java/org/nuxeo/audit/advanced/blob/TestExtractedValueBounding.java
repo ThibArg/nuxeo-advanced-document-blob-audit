@@ -52,7 +52,7 @@ public class TestExtractedValueBounding {
 
     protected static final Map<String, String> BOUNDED = Map.of("maxValueLength", String.valueOf(MAX_VALUE_LENGTH));
 
-    protected static <T extends BlobTextExtractor> T bounded(T extractor) {
+    protected static <T extends BlobContentExtractor> T bounded(T extractor) {
         extractor.init(BOUNDED);
         return extractor;
     }

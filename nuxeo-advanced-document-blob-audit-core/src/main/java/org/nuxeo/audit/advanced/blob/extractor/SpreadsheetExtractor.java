@@ -59,7 +59,7 @@ import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFEvaluationWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.xmlbeans.XmlException;
-import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
+import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
@@ -89,7 +89,7 @@ import org.xml.sax.helpers.DefaultHandler;
  *
  * @since 2025.1
  */
-public class SpreadsheetExtractor implements BlobTextExtractor {
+public class SpreadsheetExtractor implements BlobContentExtractor {
 
     private static final Logger log = LogManager.getLogger(SpreadsheetExtractor.class);
 
@@ -100,7 +100,7 @@ public class SpreadsheetExtractor implements BlobTextExtractor {
     @Override
     public void init(Map<String, String> properties) {
         useFormulas = !"false".equalsIgnoreCase(properties.get("useFormulas"));
-        maxValueLength = BlobTextExtractor.maxValueLength(properties);
+        maxValueLength = BlobContentExtractor.maxValueLength(properties);
     }
 
     /**

@@ -18,7 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 import java.util.List;
 
 /**
- * Format-agnostic representation of a blob content, produced by a {@link BlobTextExtractor} and
+ * Format-agnostic representation of a blob content, produced by a {@link BlobContentExtractor} and
  * consumed by {@link TextDiffer}.
  * <p>
  * This is the single contract every format must implement: adding Word, PDF, ODT or CSV support

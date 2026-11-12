@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.nuxeo.audit.advanced.blob.BlobTextExtractor;
+import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
@@ -39,7 +39,7 @@ import org.nuxeo.ecm.core.api.Blob;
  *
  * @since 2025.1
  */
-public class PlainTextExtractor implements BlobTextExtractor {
+public class PlainTextExtractor implements BlobContentExtractor {
 
     protected boolean trimLines = true;
 
@@ -51,7 +51,7 @@ public class PlainTextExtractor implements BlobTextExtractor {
     public void init(Map<String, String> properties) {
         trimLines = !"false".equalsIgnoreCase(properties.get("trimLines"));
         skipBlankLines = "true".equalsIgnoreCase(properties.get("skipBlankLines"));
-        maxValueLength = BlobTextExtractor.maxValueLength(properties);
+        maxValueLength = BlobContentExtractor.maxValueLength(properties);
     }
 
     @Override

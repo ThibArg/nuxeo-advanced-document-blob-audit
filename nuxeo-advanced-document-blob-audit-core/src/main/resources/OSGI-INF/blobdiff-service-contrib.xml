@@ -21,7 +21,7 @@
   <extension-point name="extractors">
     <object class="org.nuxeo.audit.advanced.blob.ExtractorDescriptor" />
     <documentation>
-      Registers a BlobTextExtractor for a set of mime types. Lowest "order" wins, so a specialised
+      Registers a BlobContentExtractor for a set of mime types. Lowest "order" wins, so a specialised
       extractor overrides a catch-all one. Supporting a new format means contributing here.
       Contributions with the same name merge: a later one only overrides what it sets, and its
       properties are added to the earlier ones.
@@ -33,7 +33,7 @@
   <extension-point name="imageExtractors">
     <object class="org.nuxeo.audit.advanced.blob.ExtractorDescriptor" />
     <documentation>
-      Registers a BlobTextExtractor producing an image inventory, used only when
+      Registers a BlobContentExtractor producing an image inventory, used only when
       imageInventory is true. A point of its own because an image extractor and a
       text extractor both run on the same blob: they cannot compete for the same mime type in a
       single, order-based selection. Same descriptor, same mime type matching, same "enabled"
