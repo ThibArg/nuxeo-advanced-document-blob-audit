@@ -87,6 +87,19 @@ public final class OoxmlPackages {
      * @since 2025.1
      */
     public static void parse(PackagePart part, ContentHandler handler) throws IOException, SAXException {
+        try (InputStream in = part.getInputStream()) {
+            parse(in, handler);
+        }
+    }
+
+    /**
+     * Parses an XML stream with POI's hardened SAX reader, which accepts no DTD and resolves no
+     * external entity. A handler ends the parse early by throwing {@link Stop}. The caller owns the
+     * stream and closes it.
+     *
+     * @since 2025.1
+     */
+    public static void parse(InputStream in, ContentHandler handler) throws IOException, SAXException {
         XMLReader reader;
         try {
             reader = XMLHelper.newXMLReader();
@@ -94,9 +107,7 @@ public final class OoxmlPackages {
             throw new IOException("No SAX parser available", e);
         }
         reader.setContentHandler(handler);
-        try (InputStream in = part.getInputStream()) {
-            reader.parse(new InputSource(in));
-        }
+        reader.parse(new InputSource(in));
     }
 
     /**

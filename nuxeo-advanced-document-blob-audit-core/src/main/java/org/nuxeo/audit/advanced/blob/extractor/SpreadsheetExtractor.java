@@ -25,8 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.xml.parsers.ParserConfigurationException;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
@@ -51,7 +49,6 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.util.XMLHelper;
 import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.model.StylesTable;
@@ -71,9 +68,7 @@ import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTSheet;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTWorkbook;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.WorkbookDocument;
 import org.xml.sax.Attributes;
-import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.DefaultHandler;
 
 /**
@@ -153,17 +148,17 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             XSSFReader.SheetIterator sheets = reader.getSheetIterator();
             while (sheets.hasNext()) {
                 try (InputStream sheet = sheets.next()) {
-                    XMLReader parser = XMLHelper.newXMLReader();
-                    parser.setContentHandler(new SheetHandler(sheets.getSheetName(), lines, maxLines, strings, styles,
-                            formatter, date1904, formulas));
-                    parser.parse(new InputSource(sheet));
-                } catch (MaxLinesReached e) {
+                    OoxmlPackages.parse(sheet, new SheetHandler(sheets.getSheetName(), lines, maxLines, strings,
+                            styles, formatter, date1904, formulas));
+                } catch (OoxmlPackages.Stop e) {
                     return true;
                 }
             }
             return false;
-        } catch (OpenXML4JException | XmlException | SAXException | ParserConfigurationException e) {
+        } catch (OpenXML4JException | XmlException e) {
             throw new IOException("Not a readable OOXML workbook", e);
+        } catch (SAXException e) {
+            throw OoxmlPackages.unreadable(e, "OOXML workbook");
         } finally {
             pkg.revert();
         }
@@ -211,16 +206,6 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return "=" + cell.getCellFormula();
         }
         return formatter.formatCellValue(cell).trim();
-    }
-
-    /** Ends the parse of a sheet once {@code maxLines} is reached. */
-    protected static class MaxLinesReached extends SAXException {
-
-        private static final long serialVersionUID = 1L;
-
-        protected MaxLinesReached() {
-            super("maxLines reached");
-        }
     }
 
     /** A formula written once for a range of cells: the master of a shared formula, or an array formula. */
@@ -507,7 +492,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
                 return;
             }
             if (lines.size() >= maxLines) {
-                throw new MaxLinesReached();
+                throw new OoxmlPackages.Stop();
             }
             lines.add(ContentLine.of(sheetName + "!" + ref, cellText, maxValueLength));
         }
