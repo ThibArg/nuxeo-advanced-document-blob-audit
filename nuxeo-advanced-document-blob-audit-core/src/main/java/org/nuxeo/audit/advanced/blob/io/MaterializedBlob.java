@@ -27,7 +27,7 @@ import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
  * A blob guaranteed to be backed by a local file, for the duration of a try-with-resources block.
  * <p>
  * Diffing one version pair runs several extraction passes over the same two binaries - the text
- * extractor and, when {@code imageAnalysisLevel > 0}, the image inventory extractor. Each pass used
+ * extractor and, when the image inventory is on, the image inventory extractor. Each pass used
  * to call {@link Blob#getStream()}, so a pair of S3-backed blobs meant <b>four downloads for two
  * files</b>. Materialising each side once and handing the local blob to every pass brings that back
  * to one download per side.

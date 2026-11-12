@@ -457,7 +457,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 313 tests (28 test classes)
+mvn -o install                                     # full build, 310 tests (28 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -479,7 +479,7 @@ All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `Core
 this bundle plus `blobaudit-test-config.xml`, `blobaudit-test-pageprovider-contrib.xml` and
 `blobaudit-test-vocabulary-template-contrib.xml`).
 `blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
-`blobaudit-test-imagelevel-config.xml` to turn `imageAnalysisLevel` on,
+`blobaudit-test-imageinventory-config.xml` to turn `imageInventory` on,
 `blobaudit-test-noimagepdf-config.xml` to disable a single image extractor,
 `blobaudit-test-failingimage-contrib.xml` to make the Word image inventory throw
 (`FailingImageExtractor`, a test class contributed to `imageExtractors` with a lower `order` than

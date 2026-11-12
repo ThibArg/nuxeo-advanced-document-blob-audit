@@ -24,59 +24,20 @@ import java.util.List;
 
 import org.junit.Test;
 
-/** Unit tests for the global configuration: bounded image analysis, merge, defaults. */
+/** Unit tests for the global configuration: image inventory switch, merge, defaults. */
 public class TestBlobDiffConfigDescriptor {
 
     @Test
-    public void testImageAnalysisIsDisabledByDefault() {
+    public void testImageInventoryIsOffByDefault() {
         BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        assertEquals(0, config.getImageAnalysisLevel());
-        assertEquals(0, config.normalizeImageAnalysisLevel());
+        assertFalse(config.isImageInventory());
     }
 
     @Test
-    public void testSupportedImageAnalysisLevelIsPreserved() {
+    public void testImageInventoryCanBeTurnedOn() {
         BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        config.imageAnalysisLevel = 1;
-        assertEquals(1, config.normalizeImageAnalysisLevel());
-        assertEquals(1, config.getImageAnalysisLevel());
-    }
-
-    @Test
-    public void testNegativeImageAnalysisLevelIsClampedToZero() {
-        BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        config.imageAnalysisLevel = -4;
-        assertEquals(0, config.normalizeImageAnalysisLevel());
-    }
-
-    @Test
-    public void testFutureImageAnalysisLevelIsClampedToCurrentMaximum() {
-        BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        config.imageAnalysisLevel = 7;
-        assertEquals(1, config.normalizeImageAnalysisLevel());
-    }
-
-    /**
-     * Normalising must not write back.
-     * <p>
-     * The descriptor instance is shared by the whole runtime - {@code getDescriptor(XP_CONFIG, ...)}
-     * hands out the registered one - and {@code normalizeImageAnalysisLevel()} is called both from
-     * {@code BlobDiffComponent#start} and from {@code diffLocal}, that is concurrently from the
-     * {@code blobDiff} worker threads. Assigning the clamped value back to a non-{@code volatile}
-     * field was a data race on a registry object, and it silently turned the "configured value
-     * differs from the normalized one" warning in {@code start()} into a one-shot: the second call
-     * could no longer see the original contribution.
-     */
-    @Test
-    public void testNormalizingDoesNotMutateTheSharedDescriptor() {
-        BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        config.imageAnalysisLevel = 7;
-
-        assertEquals(1, config.normalizeImageAnalysisLevel());
-
-        assertEquals("the contributed value must survive normalisation", 7, config.getImageAnalysisLevel());
-        assertEquals("normalising must be repeatable", 1, config.normalizeImageAnalysisLevel());
-        assertEquals(7, config.getImageAnalysisLevel());
+        config.imageInventory = Boolean.TRUE;
+        assertTrue(config.isImageInventory());
     }
 
     @Test
@@ -103,7 +64,7 @@ public class TestBlobDiffConfigDescriptor {
         shipped.enabled = true;
         shipped.maxBlobSize = 2048L;
         shipped.maxLines = 50;
-        shipped.imageAnalysisLevel = 1;
+        shipped.imageInventory = Boolean.TRUE;
         shipped.auditorsGroup = "auditors";
         shipped.xpaths = new ArrayList<>(List.of("file:content", "files:files/*/file"));
 
@@ -116,7 +77,7 @@ public class TestBlobDiffConfigDescriptor {
         assertTrue("an omitted @enabled must not switch the feature off", merged.isEnabled());
         assertEquals(2048, merged.getMaxBlobSize());
         assertEquals(70, merged.getMaxLines());
-        assertEquals(1, merged.getImageAnalysisLevel());
+        assertTrue(merged.isImageInventory());
         assertEquals("auditors", merged.getAuditorsGroup());
         assertEquals(List.of("Contract"), merged.getDocTypes());
         assertEquals("an omitted list keeps the earlier one", List.of("file:content", "files:files/*/file"),

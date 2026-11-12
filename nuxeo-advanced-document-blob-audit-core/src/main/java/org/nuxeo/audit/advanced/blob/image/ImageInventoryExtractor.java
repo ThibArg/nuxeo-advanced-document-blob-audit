@@ -81,7 +81,7 @@ import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
 /**
- * Digest-based image inventory used by {@code imageAnalysisLevel 1}.
+ * Digest-based image inventory, used when the image inventory is on.
  * <p>
  * A regular {@link BlobTextExtractor}, contributed to the {@code imageExtractors} extension point
  * of {@code org.nuxeo.audit.advanced.blob.BlobDiffComponent}: selectable and disableable per mime

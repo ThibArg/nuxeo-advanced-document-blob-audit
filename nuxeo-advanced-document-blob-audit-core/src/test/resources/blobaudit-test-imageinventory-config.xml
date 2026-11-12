@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<component name="org.nuxeo.audit.advanced.blob.test.imagelevel">
+<component name="org.nuxeo.audit.advanced.blob.test.imageinventory">
 
   <require>org.nuxeo.audit.advanced.blob.test.config</require>
 
@@ -9,7 +9,7 @@
       <maxBlobSize>1048576</maxBlobSize>
       <maxLines>1000</maxLines>
       <maxDiffEntries>500</maxDiffEntries>
-      <imageAnalysisLevel>1</imageAnalysisLevel>
+      <imageInventory>true</imageInventory>
       <docTypes />
       <xpaths>
         <xpath>file:content</xpath>

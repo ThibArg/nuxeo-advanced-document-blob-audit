@@ -96,15 +96,13 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     protected Integer maxValueLength;
 
     /**
-     * Image analysis level. Level 0 disables image processing; level 1 enables digest-based image
-     * inventory. Higher levels are reserved for future, more expensive analysis modes.
+     * Whether the image inventory (extractors of the imageExtractors point) runs next to the text
+     * diff. Off by default.
+     *
+     * @since 2025.1
      */
-    @XNode("imageAnalysisLevel")
-    protected Integer imageAnalysisLevel;
-
-    public static final int MIN_IMAGE_ANALYSIS_LEVEL = 0;
-
-    public static final int MAX_IMAGE_ANALYSIS_LEVEL = 1;
+    @XNode("imageInventory")
+    protected Boolean imageInventory;
 
     /**
      * Group granted access to the {@code /change-diff} container: Read, Remove and RemoveChildren,
@@ -145,7 +143,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         merged.maxDiffEntries = either(other.maxDiffEntries, maxDiffEntries);
         merged.maxDiffChars = either(other.maxDiffChars, maxDiffChars);
         merged.maxValueLength = either(other.maxValueLength, maxValueLength);
-        merged.imageAnalysisLevel = either(other.imageAnalysisLevel, imageAnalysisLevel);
+        merged.imageInventory = either(other.imageInventory, imageInventory);
         merged.auditorsGroup = either(other.auditorsGroup, auditorsGroup);
         merged.docTypes = Descriptor.getIfEmpty(other.docTypes, docTypes);
         merged.xpaths = Descriptor.getIfEmpty(other.xpaths, xpaths);
@@ -182,23 +180,9 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return either(maxValueLength, TextDiffer.DEFAULT_MAX_VALUE_LENGTH);
     }
 
-    public int getImageAnalysisLevel() {
-        return either(imageAnalysisLevel, 0);
-    }
-
-    /**
-     * Clamps the configured image analysis level to the range supported by this version.
-     * <p>
-     * <b>Pure.</b> It used to assign the clamped value back to {@link #imageAnalysisLevel}, which
-     * made a query method write a non-{@code volatile} field of the descriptor instance the whole
-     * runtime shares through {@code getDescriptor(XP_CONFIG, ...)} - and it is called both from
-     * {@code BlobDiffComponent#start} and from {@code diffLocal}, i.e. concurrently from the
-     * {@code blobDiff} worker threads, with no happens-before edge. The write was idempotent so the
-     * outcome was benign, but it was a data race on a registry object, and it silently made the
-     * "configured value differs from the normalized one" warning in {@code start()} a one-shot.
-     */
-    public int normalizeImageAnalysisLevel() {
-        return Math.max(MIN_IMAGE_ANALYSIS_LEVEL, Math.min(MAX_IMAGE_ANALYSIS_LEVEL, getImageAnalysisLevel()));
+    /** @since 2025.1 */
+    public boolean isImageInventory() {
+        return Boolean.TRUE.equals(imageInventory);
     }
 
     public List<String> getDocTypes() {

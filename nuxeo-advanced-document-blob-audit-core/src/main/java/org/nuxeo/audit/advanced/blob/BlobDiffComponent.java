@@ -87,7 +87,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     public static final String XP_EXTRACTORS = "extractors";
 
     /**
-     * Image inventory extractors, used when {@code imageAnalysisLevel > 0}. A separate point on
+     * Image inventory extractors, used when {@code imageInventory} is on. A separate point on
      * purpose: both an image extractor and a text extractor run on the same blob, so they cannot
      * compete for the same mime type in a single, order-based selection.
      *
@@ -112,15 +112,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     @Override
     public void start(ComponentContext context) {
         super.start(context);
-        BlobDiffConfigDescriptor config = getConfig();
-        int configuredImageAnalysisLevel = config.getImageAnalysisLevel();
-        int imageAnalysisLevel = config.normalizeImageAnalysisLevel();
-        if (configuredImageAnalysisLevel != imageAnalysisLevel) {
-            log.warn("Invalid imageAnalysisLevel {}: using supported value {} (range {}..{})",
-                    configuredImageAnalysisLevel, imageAnalysisLevel,
-                    BlobDiffConfigDescriptor.MIN_IMAGE_ANALYSIS_LEVEL,
-                    BlobDiffConfigDescriptor.MAX_IMAGE_ANALYSIS_LEVEL);
-        }
         extractors = resolve(XP_EXTRACTORS);
         imageExtractors = resolve(XP_IMAGE_EXTRACTORS);
     }
@@ -296,7 +287,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     /**
      * Both binaries are materialised locally <b>once</b> and every extraction pass reads the local
      * copy. Without this, a pair of S3-backed blobs meant one download per pass: four for two files
-     * as soon as {@code imageAnalysisLevel > 0}.
+     * as soon as the image inventory is on.
      */
     @Override
     public DiffResult diff(Blob oldBlob, Blob newBlob) {
@@ -320,7 +311,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (isReplaced(candidates, oldBlob, newBlob, oldContent, newContent, textResult)) {
             textResult = textResult.asReplaced();
         }
-        if (config.normalizeImageAnalysisLevel() == 0) {
+        if (!config.isImageInventory()) {
             return textResult;
         }
         BlobTextExtractor imageExtractor = findImageExtractor(newBlob.getMimeType());

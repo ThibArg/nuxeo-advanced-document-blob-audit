@@ -48,7 +48,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  */
 @RunWith(FeaturesRunner.class)
 @Features(BlobAuditFeature.class)
-@Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-imagelevel-config.xml")
+@Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-imageinventory-config.xml")
 public class TestBlobDiffImageExtraction {
 
     protected static final byte[] PNG = Base64.getDecoder().decode(
