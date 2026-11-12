@@ -64,6 +64,9 @@ public record FrozenBlob(String providerId, String key, String filename, String 
      * {@code provider.readBlob} is a keyed store lookup: it applies no document ACL. Only resolve an
      * identity the plugin froze itself, or read back from a <b>stored</b> {@code BlobDiff} whose
      * provenance was checked (see {@link DiffRequest#readFrom}).
+     * <p>
+     * Its warnings name the file and the provider, never the key nor the digest: the default key
+     * strategy makes the key the digest, and either one identifies a binary to whoever reads the logs.
      *
      * @return the blob, or {@code null} when there is no key, no such provider, or the read failed
      */
@@ -74,7 +77,7 @@ public record FrozenBlob(String providerId, String key, String filename, String 
         try {
             BlobProvider provider = Framework.getService(BlobManager.class).getBlobProvider(providerId);
             if (provider == null) {
-                log.warn("No blob provider {} to resolve blob {}", providerId, key);
+                log.warn("No blob provider {} to resolve {}", providerId, filename);
                 return null;
             }
             BlobInfo info = new BlobInfo();
@@ -89,7 +92,7 @@ public record FrozenBlob(String providerId, String key, String filename, String 
             // here also caught InterruptedException, on a WorkManager thread that is interrupted at
             // shutdown - the work then filed a bogus "error" diff instead of letting the cancel
             // through.
-            log.warn("Cannot resolve blob {} from provider {}", key, providerId, e);
+            log.warn("Cannot resolve {} from provider {}", filename, providerId, e);
             return null;
         }
     }

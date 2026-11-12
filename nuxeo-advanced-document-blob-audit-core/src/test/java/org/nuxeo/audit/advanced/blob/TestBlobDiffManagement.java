@@ -69,6 +69,7 @@ import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
+import org.nuxeo.runtime.test.runner.LogCaptureFeature;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
 import org.nuxeo.runtime.transaction.TransactionHelper;
 
@@ -82,7 +83,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
-@Features(BlobAuditFeature.class)
+@Features({ BlobAuditFeature.class, LogCaptureFeature.class })
 @Deploy("org.nuxeo.ecm.automation.core")
 @Deploy("org.nuxeo.ecm.core.io")
 public class TestBlobDiffManagement {
@@ -98,6 +99,9 @@ public class TestBlobDiffManagement {
 
     @Inject
     protected TransactionalFeature txFeature;
+
+    @Inject
+    protected LogCaptureFeature.Result logs;
 
     /* ---------------------------------------------------------------- helpers */
 
@@ -648,6 +652,56 @@ public class TestBlobDiffManagement {
         assertEquals("after.txt", diff.getPropertyValue(BlobAuditConstants.XP_NEW_FILENAME));
         assertEquals("d1", diff.getPropertyValue(BlobAuditConstants.XP_OLD_DIGEST));
         assertEquals("d2", diff.getPropertyValue(BlobAuditConstants.XP_NEW_DIGEST));
+    }
+
+    /**
+     * Item 89: {@code DiffRequest} allows a side with no stored blob, and the work dereferenced both
+     * sides unguarded. The resulting exception failed the work three times and recorded nothing,
+     * leaving the audit entry pointing at a diff that never came.
+     */
+    @Test
+    public void testAWorkWithAMissingSideIsFiledInError() throws Exception {
+        DocumentModel source = file("one-sided", textBlob("x", "text/plain", "x.txt"));
+        txFeature.nextTransaction();
+        BlobDiffWork work = new BlobDiffWork(BlobAuditTestHelper.request(session.getRepositoryName(),
+                source.getId(), "Source", "file:content", null,
+                new FrozenBlob("no-such-provider", "k2", "after.txt", "text/plain", "d2", 1), "jdoe", new Date(),
+                UUID.randomUUID().toString()));
+        Framework.getService(WorkManager.class).schedule(work, true);
+        txFeature.nextTransaction();
+
+        List<DocumentModel> diffs = diffsOf(source.getId());
+        assertEquals(1, diffs.size());
+        assertEquals(BlobAuditConstants.STATUS_ERROR, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
+        assertEquals("after.txt", diffs.get(0).getPropertyValue(BlobAuditConstants.XP_NEW_FILENAME));
+    }
+
+    /**
+     * Item 89: the warnings of an unreadable pair named both storage keys. The default key strategy
+     * makes a key the digest of the binary, so the logs gave whoever reads them the identity of
+     * content they may have no access to. The filenames identify the pair as well.
+     */
+    @Test
+    @LogCaptureFeature.FilterOn(logLevel = "WARN")
+    public void testAnUnreadablePairIsLoggedWithoutItsStorageKeys() throws Exception {
+        DocumentModel source = file("unlogged", textBlob("x", "text/plain", "x.txt"));
+        txFeature.nextTransaction();
+        String oldKey = "old-storage-key-" + UUID.randomUUID();
+        String newKey = "new-storage-key-" + UUID.randomUUID();
+        BlobDiffWork work = new BlobDiffWork(BlobAuditTestHelper.request(session.getRepositoryName(),
+                source.getId(), "Source", "file:content",
+                new FrozenBlob("no-such-provider", oldKey, "before.txt", "text/plain", "d1", 1),
+                new FrozenBlob("no-such-provider", newKey, "after.txt", "text/plain", "d2", 1), "jdoe", new Date(),
+                UUID.randomUUID().toString()));
+        Framework.getService(WorkManager.class).schedule(work, true);
+        txFeature.nextTransaction();
+
+        List<String> warnings = logs.getCaughtEventMessages();
+        assertTrue("the unreadable pair must still be reported: " + warnings,
+                warnings.stream().anyMatch(m -> m.contains("before.txt") && m.contains("after.txt")));
+        for (String warning : warnings) {
+            assertFalse(warning, warning.contains(oldKey) || warning.contains(newKey));
+        }
     }
 
     /**

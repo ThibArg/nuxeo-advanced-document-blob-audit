@@ -119,6 +119,11 @@ public class BlobDiffPurgeOp {
         return Blobs.createJSONBlob("{\"commandId\":\"" + commandId + "\",\"state\":\"SCHEDULED\"}");
     }
 
+    /**
+     * Selects the diffs to purge: only those under {@code /change-diff}, neither proxies nor versions,
+     * like every reader of {@code BlobDiff} documents. A document of that type anywhere else was not
+     * created by the plugin, and the purge runs under the caller, who may hold Remove there.
+     */
     protected String query() {
         String day = BOUNDARY_FORMAT.format(before.toInstant());
         StringBuilder sb = new StringBuilder("SELECT * FROM ").append(BlobAuditConstants.DIFF_DOCTYPE)
@@ -127,6 +132,9 @@ public class BlobDiffPurgeOp {
                                                               .append(" < DATE '")
                                                               .append(day)
                                                               .append("'");
+        sb.append(" AND ecm:path STARTSWITH ")
+          .append(NXQL.escapeString("/" + BlobAuditConstants.CONTAINER_NAME))
+          .append(" AND ecm:isProxy = 0 AND ecm:isVersion = 0");
         if (status != null && !status.isBlank()) {
             sb.append(" AND ").append(BlobAuditConstants.XP_STATUS).append(" = ").append(NXQL.escapeString(status));
         }

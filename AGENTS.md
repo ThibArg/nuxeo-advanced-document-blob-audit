@@ -189,11 +189,16 @@ re-reads both binaries through `FrozenBlob#resolve`, never from the live documen
 otherwise make a queued v1 → v2 work compare v1 → v3. The version pair is mandatory. `DiffRequest#writeTo`
 and `#readFrom` are the only mapping between a request and the `BlobDiff` properties; keep them
 symmetric. An `error` diff therefore keeps the filenames and digests even when no blob could be read.
+A side may be `null` (`DiffRequest` allows it): the work treats it as unreadable and files an `error`
+diff, never dereferences it. Logs name a side by its filename, **never** by its key or digest — the
+default key strategy makes the key the digest, which identifies a binary to whoever reads the logs
+(item 89).
 `DiffRequest#workId` is a readable name, **not** a deduplication key: `IF_NOT_RUNNING_OR_SCHEDULED` is
 a no-op in LTS 2025 (`WorkManagerImpl#schedule` hard-codes it disabled, `StreamWorkManager#schedule`
 ignores it), so the work is scheduled plainly and `BlobDiffWork#alreadyRecorded`, on the correlation
 id, is the duplicate guard. Coverage: `TestBlobDiffService#testARequestSurvivesTheRoundTripThroughABlobDiff`,
 `TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests`,
+`#testAWorkWithAMissingSideIsFiledInError`, `#testAnUnreadablePairIsLoggedWithoutItsStorageKeys`,
 `TestBlobDiffHardening#testRunningTheSameWorkTwiceCreatesASingleDiff`.
 
 **`BlobDiff.Retry` uses nothing of its input but the id.** The operation replays the provider
@@ -237,8 +242,11 @@ refuses, for every principal including system, a `BlobDiff` destined anywhere el
 copy of something under the container to outside it. The page providers additionally filter on
 `ecm:path STARTSWITH '/change-diff' AND ecm:isProxy = 0`, because the listener cannot reach a
 document forged before it existed. Every new reader of `BlobDiff` documents needs the same path
-filter. Tests that need a forged fixture go through `BlobAuditTestHelper.createUnguarded`.
-Coverage: `TestBlobDiffLocationAndSecurity`, three `location guard` cases.
+filter; the purge query of `BlobDiff.Purge` has it too, since the purge runs under the caller, who
+may hold Remove where a forged diff sits (item 89). Tests that need a forged fixture go through
+`BlobAuditTestHelper.createUnguarded`.
+Coverage: `TestBlobDiffLocationAndSecurity`, three `location guard` cases,
+`TestBlobDiffPurgeAction#testPurgeLeavesABlobDiffOutsideTheContainerAlone`.
 
 **The `blobDiffPurge` bulk action must stay off the HTTP surface.** `httpEnabled` is left to its
 default `false`, which is what keeps it out of `Bulk.RunAction` and of the
@@ -484,7 +492,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 310 tests (28 test classes)
+mvn -o install                                     # full build, 313 tests (28 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```

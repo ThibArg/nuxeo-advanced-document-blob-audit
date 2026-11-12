@@ -183,6 +183,29 @@ public class TestBlobDiffPurgeAction {
         assertFalse(session.exists(error.getRef()));
     }
 
+    /**
+     * Item 89: the purge query selected every {@code BlobDiff} of the repository by date alone, so it
+     * reached documents of that type created elsewhere, which the plugin never wrote. The fixture
+     * bypasses the location guard to stand for a document forged before the guard existed.
+     */
+    @Test
+    public void testPurgeLeavesABlobDiffOutsideTheContainerAlone() throws Exception {
+        DocumentModel source = file("purged-scope", textBlob("x", "text/plain", "x.txt"));
+        DocumentModel genuine = diff(source, daysAgo(40), BlobAuditConstants.STATUS_OK);
+        DocumentModel forged = session.createDocumentModel("/", "forged-old", BlobAuditConstants.DIFF_DOCTYPE);
+        forged.setPropertyValue(BlobAuditConstants.XP_SOURCE_ID, source.getId());
+        forged.setPropertyValue(BlobAuditConstants.XP_DATE, beforeDaysAgo(40));
+        forged = BlobAuditTestHelper.createUnguarded(session, forged);
+        session.save();
+        txFeature.nextTransaction();
+
+        JsonNode status = purgeAndWait(Map.of("before", beforeDaysAgo(30)));
+
+        assertEquals(1, status.get("deleted").asInt());
+        assertFalse(session.exists(genuine.getRef()));
+        assertTrue("a BlobDiff outside /change-diff is not the purge's to remove", session.exists(forged.getRef()));
+    }
+
     @Test
     public void testPurgeOnAnEmptySetCompletesWithoutDeletingAnything() throws Exception {
         DocumentModel source = file("nothing-to-purge", textBlob("x", "text/plain", "x.txt"));

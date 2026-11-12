@@ -32,6 +32,7 @@ import org.nuxeo.audit.advanced.blob.BlobDiffService;
 import org.nuxeo.audit.advanced.blob.BlobDiffStore;
 import org.nuxeo.audit.advanced.blob.DiffRequest;
 import org.nuxeo.audit.advanced.blob.DiffResult;
+import org.nuxeo.audit.advanced.blob.FrozenBlob;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
@@ -187,16 +188,20 @@ public class BlobDiffWork extends AbstractWork {
         String sourceType = source.getType();
         // The diff records the title of the source at work time, not at check-in.
         DiffRequest recorded = request.withSourceTitle(source.getTitle());
-        Blob oldBlob = request.oldBlob().resolve();
-        Blob newBlob = request.newBlob().resolve();
+        FrozenBlob oldSide = request.oldBlob();
+        FrozenBlob newSide = request.newBlob();
+        // DiffRequest allows a side with no stored blob: it is as unreadable as a key that resolves to nothing.
+        Blob oldBlob = oldSide == null ? null : oldSide.resolve();
+        Blob newBlob = newSide == null ? null : newSide.resolve();
         BlobDiffService service = Framework.getService(BlobDiffService.class);
 
         commitOrRollbackTransaction();
         DiffResult result = null;
         String status = STATUS_OK;
         if (oldBlob == null || newBlob == null) {
-            log.warn("Frozen blob pair ({}, {}) is no longer fully readable, cannot diff {} ({})",
-                    request.oldBlob().key(), request.newBlob().key(), docId, xpath);
+            // The filenames, never the storage keys: see FrozenBlob#resolve.
+            log.warn("Frozen blob pair ({} -> {}) is no longer fully readable, cannot diff {} ({})",
+                    filenameOf(oldSide), filenameOf(newSide), docId, xpath);
             status = STATUS_ERROR;
         } else {
             // Re-checked at work time: a retry or a queued work can outlive a configuration change. Not a
@@ -232,6 +237,10 @@ public class BlobDiffWork extends AbstractWork {
         removeReplaced();
         log.debug("Created BlobDiff {} for {} ({})", diffDoc.getId(), docId, xpath);
         setStatus("Done");
+    }
+
+    private static String filenameOf(FrozenBlob side) {
+        return side == null ? null : side.filename();
     }
 
     /**
