@@ -338,7 +338,10 @@ public class BlobDiffWork extends AbstractWork {
                     newBlobKey, docId, xpath);
             status = STATUS_ERROR;
         } else {
-            String ineligible = ineligibleStatus(service, sourceType, oldBlob, newBlob);
+            // Re-checked at work time: a retry or a queued work can outlive a configuration change. Not a
+            // security boundary (lengths come from the BlobDiff, see BlobDiffRetryOp#checkProvenance).
+            // NOT_APPLICABLE has no skip reason: the diff goes on.
+            String ineligible = service.getEligibility(sourceType, xpath, oldBlob, newBlob).getSkipReason();
             if (ineligible != null) {
                 log.warn("Frozen blob pair for {} ({}) is no longer eligible for a diff ({}), recording the skip",
                         docId, xpath, ineligible);
@@ -386,39 +389,6 @@ public class BlobDiffWork extends AbstractWork {
         removeReplaced();
         setStatus("Done");
         return true;
-    }
-
-    /**
-     * Re-evaluates {@code maxBlobSize}, the mime type whitelist and the format of the pair at work
-     * time.
-     * <p>
-     * The eligibility decided at check-in can be stale by the time the work runs: the queue is
-     * asynchronous, and {@code BlobDiff.Retry} replays a pair that was frozen arbitrarily long ago
-     * with no eligibility check of its own. Lowering {@code maxBlobSize}, disabling an extractor or
-     * moving a mime type to another contribution would otherwise leave queued and replayable works
-     * free to extract what the configuration now forbids, or to compare what it no longer considers
-     * comparable.
-     * <p>
-     * <b>This is not the security boundary of {@code BlobDiff.Retry}</b>, and must not be mistaken
-     * for one: the length compared here comes from {@code BlobInfo}, which {@code resolveBlob}
-     * fills from {@code bdiff:oldLength} / {@code bdiff:newLength} - document properties, hence
-     * forgeable. What stops a forged input is
-     * {@code BlobDiffRetryOp#checkProvenance}. This check is about configuration drift, plus
-     * defence in depth.
-     * <p>
-     * {@code NOT_APPLICABLE} is deliberately <b>not</b> a skip: it means the feature was turned off
-     * or the xpath left the watched set, which says nothing about the binary. Filing it as
-     * {@code skippedTooLarge} or {@code skippedUnsupportedType} would record a reason that is not
-     * the real one. {@code DiffEligibility#getSkipReason()} returns {@code null} for it already, so
-     * the work simply carries on. The audit entry written at check-in carries a
-     * {@code diffCorrelationId}, so a {@code BlobDiff} has to exist for it either way.
-     *
-     * @return {@code STATUS_SKIPPED_SIZE}, {@code STATUS_SKIPPED_TYPE},
-     *         {@code STATUS_SKIPPED_FORMAT_CHANGED}, or {@code null} to diff
-     * @since 2025.1
-     */
-    protected String ineligibleStatus(BlobDiffService service, String docType, Blob oldBlob, Blob newBlob) {
-        return service.getEligibility(docType, xpath, oldBlob, newBlob).getSkipReason();
     }
 
     /** Re-hydrates one frozen side of the comparison through its blob provider. */

@@ -115,10 +115,6 @@ public class BlobAuditConstants {
      */
     public static final String AUDITORS_GROUP_PROPERTY = "org.nuxeo.web.ui.blobaudit.auditorsGroup";
 
-    /** @deprecated use {@link BlobDiffConfigDescriptor#getAuditorsGroup()} */
-    @Deprecated
-    public static final String AUDITORS_GROUP = DEFAULT_AUDITORS_GROUP;
-
     /* Audit */
     public static final String EVENT_BLOB_MODIFIED = "blobContentModified";
 

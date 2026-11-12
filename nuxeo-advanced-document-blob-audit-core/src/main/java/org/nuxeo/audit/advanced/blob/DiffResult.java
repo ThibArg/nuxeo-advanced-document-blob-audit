@@ -35,15 +35,6 @@ public record DiffResult(int added, int removed, int changed, boolean truncated,
     }
 
     /**
-     * Returns the same result with its similarity set.
-     *
-     * @since 2025.1
-     */
-    public DiffResult withSimilarity(Double value) {
-        return new DiffResult(added, removed, changed, truncated, unified, value, replaced);
-    }
-
-    /**
      * Returns the same result flagged as a replaced content.
      *
      * @since 2025.1

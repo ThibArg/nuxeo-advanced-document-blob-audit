@@ -68,14 +68,15 @@ public interface BlobDiffService {
      * into the same {@code null}, which had {@code BlobDiffWork} persist a genuine failure as
      * {@code skippedUnsupportedType}, a status {@code BlobDiff.Retry} refuses to replay.
      *
+     * @param blob the blob to read, never {@code null}
      * @return the extracted content, or {@code null} if and only if no extractor handles the mime
-     *         type; an empty content for a {@code null} blob
+     *         type
      * @throws NuxeoException if an extractor was found but could not read the binary
      */
     DiffableContent extract(Blob blob);
 
     /**
-     * Compares two blobs.
+     * Compares two blobs. Both blobs must be non-null.
      * <p>
      * The result always holds the full body. When the pair changed mime type and its similarity is
      * under the {@code minSimilarity} of its extractor contribution, it is flagged

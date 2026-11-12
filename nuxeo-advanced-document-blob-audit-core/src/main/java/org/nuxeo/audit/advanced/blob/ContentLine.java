@@ -76,10 +76,6 @@ public record ContentLine(String key, String value) {
         }
     }
 
-    public boolean isKeyed() {
-        return key != null;
-    }
-
     /** Human readable rendering used in the unified diff output. */
     public String render() {
         return key == null ? value : key + " = " + value;

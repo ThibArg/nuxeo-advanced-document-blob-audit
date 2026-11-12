@@ -49,11 +49,6 @@ public record FrozenBlobs(String oldProviderId, String oldKey, String oldMimeTyp
                 oldBlob == null ? null : oldBlob.getDigest(), newBlob == null ? null : newBlob.getDigest());
     }
 
-    /** {@code true} when both sides can be re-read from their blob provider. */
-    public boolean isReplayable() {
-        return oldProviderId != null && oldKey != null && newProviderId != null && newKey != null;
-    }
-
     protected static String providerOf(Blob blob) {
         return blob instanceof ManagedBlob managed ? managed.getProviderId() : null;
     }

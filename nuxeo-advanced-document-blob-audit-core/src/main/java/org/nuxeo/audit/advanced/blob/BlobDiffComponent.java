@@ -107,10 +107,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      */
     protected record ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor,
             double minSimilarity, int minSimilarityLines) {
-
-        protected ResolvedExtractor(ExtractorDescriptor descriptor, BlobTextExtractor extractor) {
-            this(descriptor, extractor, 0, ExtractorDescriptor.DEFAULT_MIN_SIMILARITY_LINES);
-        }
     }
 
     @Override
@@ -285,9 +281,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      */
     @Override
     public DiffableContent extract(Blob blob) {
-        if (blob == null) {
-            return DiffableContent.positional(List.of(), false);
-        }
         BlobTextExtractor extractor = findExtractor(blob.getMimeType());
         if (extractor == null) {
             return null;
@@ -329,14 +322,14 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         if (config.normalizeImageAnalysisLevel() == 0) {
             return textResult;
         }
-        BlobTextExtractor imageExtractor = newBlob == null ? null : findImageExtractor(newBlob.getMimeType());
+        BlobTextExtractor imageExtractor = findImageExtractor(newBlob.getMimeType());
         if (imageExtractor == null) {
             return textResult;
         }
         try {
             int maxLines = config.getMaxLines();
-            DiffResult imageResult = differ.diff(extractImages(imageExtractor, oldBlob, maxLines),
-                    extractImages(imageExtractor, newBlob, maxLines));
+            DiffResult imageResult = differ.diff(imageExtractor.extract(oldBlob, maxLines),
+                    imageExtractor.extract(newBlob, maxLines));
             return differ.merge(textResult, imageResult);
         } catch (IOException | RuntimeException e) {
             // Deliberately asymmetric with extract(): a failing *text* extraction raises, because
@@ -345,11 +338,6 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             log.warn("Image inventory extraction failed for mime type {}", newBlob.getMimeType(), e);
             return textResult;
         }
-    }
-
-    /** A missing side (first version, blob added or removed) has an empty inventory, not none. */
-    protected DiffableContent extractImages(BlobTextExtractor extractor, Blob blob, int maxLines) throws IOException {
-        return blob == null ? DiffableContent.keyed(List.of(), false) : extractor.extract(blob, maxLines);
     }
 
     /**
@@ -362,7 +350,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      */
     protected boolean isReplaced(List<ResolvedExtractor> candidates, Blob oldBlob, Blob newBlob,
             DiffableContent oldContent, DiffableContent newContent, DiffResult result) {
-        if (oldBlob == null || newBlob == null || result.similarity() == null) {
+        if (result.similarity() == null) {
             return false;
         }
         if (Objects.equals(ExtractorDescriptor.normalizeMimeType(oldBlob.getMimeType()),

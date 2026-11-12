@@ -105,8 +105,8 @@ another mime type stay silent. Coverage: `TestBlobDiffSkipReporting`.
 `BlobDiffService#getEligibility(docType, xpath, oldBlob, newBlob)` combines the two per-blob
 verdicts, then returns `FORMAT_CHANGED` (`skippedFormatChanged`) when both are eligible but resolve
 to different extractor instances — one per contribution, compared by identity on one snapshot of
-the list. It is the **only** eligibility call of `BlobDiffTrigger` and of
-`BlobDiffWork#ineligibleStatus`: do not inline `DiffEligibility.combine` back into either, they
+the list. It is the **only** eligibility call of `BlobDiffTrigger` and of the work-time
+eligibility check in `BlobDiffWork#work`: do not inline `DiffEligibility.combine` back into either, they
 would drift apart. Precedence is `NOT_APPLICABLE` > `TOO_LARGE` > `UNSUPPORTED_TYPE` >
 `FORMAT_CHANGED` > `ELIGIBLE`. The check compares contributions, not mime types, so the shipped
 contributions *are* the comparability rules: `ConverterTextExtractor` is contributed three times
@@ -163,7 +163,7 @@ Coverage: `TestBlobDiffVersionPairing`, the four `COR-01` cases.
 Three skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
 `BlobDiffWork` when `service.diff()` returns `null` at work time; `skippedTooLarge` **became**
 reachable with SEC-01, because the work now re-evaluates the eligibility of the rehydrated pair
-(`BlobDiffWork#ineligibleStatus`) — a retry, or a work outliving a `maxBlobSize` change, can fail
+(the work-time eligibility check in `BlobDiffWork#work`) — a retry, or a work outliving a `maxBlobSize` change, can fail
 it; `skippedFormatChanged` is reachable the same way (item 61), by a retry or a work outliving a
 mime type moved to another contribution. The purge dialog offers all three, plus
 `skippedContentReplaced` (item 62), which is only ever a `bdiff:status`. This reverses an
