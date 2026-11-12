@@ -53,11 +53,11 @@ public interface BlobContentExtractor {
     /**
      * Extracts the comparable content of the given blob.
      * <p>
-     * <b>Declares {@code IOException}, deliberately not {@code Exception}.</b> It used to declare
-     * the latter, which forced every caller into a {@code catch (Exception)} - the shape the Nuxeo
-     * guidelines call out, because it also catches {@code InterruptedException} and swallows the
-     * cooperative-cancellation signal of the {@code blobDiff} worker threads. An implementation
-     * that needs to report a non-I/O failure should throw a {@link org.nuxeo.ecm.core.api.NuxeoException}.
+     * <b>Declares {@code IOException}, deliberately not {@code Exception}.</b> The latter would force
+     * every caller into a {@code catch (Exception)} - the shape the Nuxeo guidelines call out, because
+     * it also catches {@code InterruptedException} and swallows the cooperative-cancellation signal of
+     * the {@code blobDiff} worker threads. An implementation that needs to report a non-I/O failure
+     * should throw a {@link org.nuxeo.ecm.core.api.NuxeoException}.
      *
      * @param blob the blob to read, never {@code null}; an extractor needing a file reads it through
      *            {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob}, a pass-through when the

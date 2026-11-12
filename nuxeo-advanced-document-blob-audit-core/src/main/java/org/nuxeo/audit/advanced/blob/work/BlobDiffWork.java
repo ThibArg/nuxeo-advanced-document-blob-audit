@@ -75,9 +75,9 @@ public class BlobDiffWork extends AbstractWork {
     /**
      * Makes this work the replay of the {@code BlobDiff} {@code diffId}, under an id of its own.
      * <p>
-     * Under the nominal id, the WorkManager took the replay for a duplicate of the run that recorded
-     * the error: the stream implementation skips an idempotent work whose id is among the last ones
-     * its thread processed, so the retry was dropped in silence.
+     * Under the nominal id, the WorkManager would take the replay for a duplicate of the run that
+     * recorded the error: the stream implementation skips an idempotent work whose id is among the
+     * last ones its thread processed, so the retry would be dropped in silence.
      *
      * @since 2025.1
      */
@@ -103,9 +103,9 @@ public class BlobDiffWork extends AbstractWork {
      * Id of an already recorded {@code BlobDiff} for this exact correlation id, or {@code null}.
      * <p>
      * The WorkManager is <b>at-least-once</b>: a node crash, a redeployment or a retry can run the
-     * same work twice. Without this guard the second run simply created a second document - the
-     * computed name being already taken, the core silently renamed it - and the audit trail ended up
-     * with duplicated, indistinguishable entries.
+     * same work twice. Without this guard the second run would create a second document - the
+     * computed name being already taken, the core would silently rename it - and the audit trail
+     * would hold duplicated, indistinguishable entries.
      * <p>
      * The diff being replaced by {@code BlobDiff.Retry} is excluded on purpose: it carries the same
      * correlation id by design, and is precisely what this run must supersede.
@@ -158,9 +158,9 @@ public class BlobDiffWork extends AbstractWork {
      * writes in a new one.
      * <p>
      * Materialising and parsing two binaries can outlast the transaction timeout. Inside the work
-     * transaction that made the commit fail: nothing was recorded, not even an {@code error} diff, and
-     * every retry ran the whole extraction again. Idempotency is checked again before writing, since
-     * another run of this work may have recorded the diff in the meantime.
+     * transaction, the commit would then fail: nothing would be recorded, not even an {@code error}
+     * diff, and every retry would run the whole extraction again. Idempotency is checked again before
+     * writing, since another run of this work may have recorded the diff in the meantime.
      */
     @Override
     public void work() {
@@ -216,8 +216,8 @@ public class BlobDiffWork extends AbstractWork {
                 try {
                     result = service.diff(oldBlob, newBlob);
                     if (result == null) {
-                        // Since COR-01, a null can only mean "no extractor for that mime type": an
-                        // extraction that fails raises and lands in the catch below, as an error.
+                        // A null only means "no extractor for that mime type": an extraction that
+                        // fails raises and lands in the catch below, as an error.
                         status = STATUS_SKIPPED_TYPE;
                     } else if (result.replaced()) {
                         status = STATUS_SKIPPED_CONTENT_REPLACED;

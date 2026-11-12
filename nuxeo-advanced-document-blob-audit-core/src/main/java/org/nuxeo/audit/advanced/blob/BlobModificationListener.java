@@ -54,13 +54,10 @@ import org.nuxeo.runtime.api.Framework;
  * new version exists, it records the current last version. On {@code DOCUMENT_CHECKEDIN} it reads
  * the new version from the platform's {@code checkedInVersionRef} property and compares the two.
  * <p>
- * Capturing the previous version <em>before</em> the fact is what makes the pair exact. Earlier
- * versions of this listener hooked {@code documentCreated}, filtered on {@code isVersion()}, walked
- * back up to the live document and then re-derived the previous version from
- * {@code ORDER BY uid:major_version DESC, uid:minor_version DESC} - an assumption about how labels
- * are numbered, which had to bail out whenever it could not be trusted. Nothing is assumed any
- * more; {@link #previousVersionRefFallback} only exists for the two core call sites that pass no
- * option map, and it orders by {@code ecm:versionCreated}, a fact rather than a convention.
+ * Capturing the previous version <em>before</em> the fact is what makes the pair exact: nothing is
+ * assumed about how version labels are numbered. {@link #previousVersionRefFallback} only exists for
+ * the two core call sites that pass no option map, and it orders by {@code ecm:versionCreated}, a
+ * fact rather than a convention.
  * <p>
  * <b>Disabling.</b> See {@link #DISABLE_BLOB_DIFF_LISTENER} and {@link #runDisabled(Runnable)}.
  */

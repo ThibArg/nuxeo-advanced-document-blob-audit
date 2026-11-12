@@ -52,8 +52,8 @@ public class WordImageInventory extends AbstractImageInventory {
      * Streams every {@code word/media/} part, never materialising one.
      * <p>
      * An entry over {@link #maxImageBytes()} is dropped and flags the inventory as truncated: the
-     * report loses one line, which is the whole point - the previous {@code zip.readAllBytes()}
-     * allocated an array of the <b>inflated</b> size with no ceiling at all.
+     * report loses one line, where reading the entry whole would allocate an array of its
+     * <b>inflated</b> size, with no ceiling at all.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {

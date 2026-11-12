@@ -73,9 +73,8 @@ public class PdfImageInventory extends AbstractImageInventory {
      * PDFBox reads the document straight from the local file, so nothing of it is held in heap.
      * <p>
      * The {@code PDDocument} is a resource of <b>this</b> method, not an argument built in the call
-     * to {@link #collectPdf}: closing it there worked only because {@code try (document)} happened
-     * to be the first statement of that method, and any guard inserted ahead of it would have
-     * turned both call sites into leaks with no compiler help.
+     * to {@link #collectPdf}: closed by the callee, it would leak as soon as a guard is inserted
+     * ahead of the callee's {@code try}, with no compiler help.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
@@ -227,7 +226,7 @@ public class PdfImageInventory extends AbstractImageInventory {
      * Nothing is decoded, on purpose. PDFBox 3 runs every filter to completion into a heap buffer
      * ({@code Filter#decode}) before {@code createInputStream()} returns its first byte, so no budget
      * can apply to the decoded form: a few megabytes of {@code FlateDecode} declaring a 1x1 image
-     * inflated to gigabytes first, and {@code getWidth()} alone fully decodes a JPX image. The encoded
+     * inflate to gigabytes first, and {@code getWidth()} alone fully decodes a JPX image. The encoded
      * bytes are bounded by the file, and they are what the OOXML paths digest too - the image as
      * stored.
      * <p>

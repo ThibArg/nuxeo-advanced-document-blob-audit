@@ -21,8 +21,8 @@ import java.util.List;
  * Format-agnostic representation of a blob content, produced by a {@link BlobContentExtractor} and
  * consumed by {@link TextDiffer}.
  * <p>
- * This is the single contract every format must implement: adding Word, PDF, ODT or CSV support
- * means writing an extractor that returns this structure, and nothing else.
+ * This is the single contract every format must implement: supporting a new format means writing
+ * an extractor that returns this structure, and nothing else.
  *
  * @since 2025.1
  */

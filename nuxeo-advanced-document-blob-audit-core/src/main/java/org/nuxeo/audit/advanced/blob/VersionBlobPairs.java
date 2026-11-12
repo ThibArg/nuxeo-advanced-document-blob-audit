@@ -84,11 +84,10 @@ public final class VersionBlobPairs {
      * {@link #safeGetBlob} and is skipped downstream, so there is nothing to pre-filter.
      * <p>
      * With {@code *}, the paths are derived from the <b>schemas the new version carries</b>, those of
-     * facets added to the document included, and cached per schema. The previous implementation
-     * walked every schema and every property of both version documents and called
-     * {@code property.getValue()} on each, forcing the load of every complex and list property
-     * inside the user transaction, on every single check-in. Blobs inside a list are paired by
-     * {@link #pairListEntries}.
+     * facets added to the document included, and cached per schema, so that a check-in never walks
+     * every property of both versions: calling {@code property.getValue()} on each would force the
+     * load of every complex and list property inside the user transaction. Blobs inside a list are
+     * paired by {@link #pairListEntries}.
      *
      * @since 2025.1
      */
@@ -118,11 +117,11 @@ public final class VersionBlobPairs {
      * Pairs the blobs of a list by content, never by index alone.
      * <p>
      * An index is not an identity: once an entry is removed, inserted or moved, the same index holds
-     * another file on each side, and comparing them reported a change between two unrelated files.
-     * A blob present on both sides, wherever it sits, is unchanged. A new blob is compared with the
-     * one it replaces only when the list kept its shape and that one is gone from the new version;
-     * otherwise, if blobs also disappeared, it is audited without a diff. A new blob with nothing
-     * gone is an addition, which is not audited, like any added blob.
+     * another file on each side, and comparing them would report a change between two unrelated
+     * files. A blob present on both sides, wherever it sits, is unchanged. A new blob is compared with
+     * the one it replaces only when the list kept its shape and that one is gone from the new version;
+     * otherwise, if blobs also disappeared, it is audited without a diff. A new blob with nothing gone
+     * is an addition, which is not audited, like any added blob.
      */
     protected static void pairListEntries(String template, DocumentModel previous, DocumentModel current,
             List<BlobPair> pairs) {

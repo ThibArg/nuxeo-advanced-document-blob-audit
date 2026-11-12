@@ -67,9 +67,9 @@ public final class BlobDiffStore {
      * In-JVM guard around container creation, so that parallel works on the same node do not both
      * create the same dated folder in the common case.
      * <p>
-     * Folders are created <b>in the caller's session and transaction</b>: creating them in a separate
-     * transaction made them invisible to the caller's session (VCS caches / isolation), and every
-     * following {@code getDocument} failed with {@code DocumentNotFoundException}.
+     * Folders are created <b>in the caller's session and transaction</b>: created in a separate
+     * transaction, they would be invisible to the caller's session (VCS caches / isolation), and
+     * every following {@code getDocument} would fail with {@code DocumentNotFoundException}.
      * <p>
      * A residual race (another node, or a transaction not yet committed) can only produce a
      * renamed <i>dated</i> sibling (for instance {@code 14.1727...}). It still lives under the
@@ -81,15 +81,14 @@ public final class BlobDiffStore {
     /**
      * Dated path of a container, always in UTC and always in {@link Locale#ROOT}.
      * <p>
-     * The previous implementation built three {@code SimpleDateFormat} per call in the JVM default
-     * time zone. Two nodes of the same cluster in different zones would then write the diffs of a
-     * single instant into two different dated folders, and a purge "before yyyy-MM-dd" would not
-     * mean the same thing depending on which node answered.
+     * In the JVM default time zone, two nodes of the same cluster in different zones would write the
+     * diffs of a single instant into two different dated folders, and a purge "before yyyy-MM-dd"
+     * would not mean the same thing depending on which node answered.
      * <p>
-     * The locale matters for the same reason the zone does, and was the half of it left implicit:
-     * {@code ofPattern(String)} takes {@code Locale.getDefault(FORMAT)} and with it a
-     * {@code DecimalStyle}, so under a locale with a non-Latin numbering system the year, month and
-     * day would render as non-ASCII digits - inside a repository <b>path</b>.
+     * The locale matters for the same reason: {@code ofPattern(String)} takes
+     * {@code Locale.getDefault(FORMAT)} and with it a {@code DecimalStyle}, so under a locale with a
+     * non-Latin numbering system the year, month and day would render as non-ASCII digits - inside a
+     * repository <b>path</b>.
      */
     protected static final DateTimeFormatter CONTAINER_PATH_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd",
             Locale.ROOT).withZone(ZoneOffset.UTC);
@@ -97,9 +96,9 @@ public final class BlobDiffStore {
     /**
      * Number of times {@link #ensureRootContainer} retries after losing a creation race.
      * <p>
-     * The retry used to be an unbounded recursion: a repository that renames every creation - a
-     * misconfigured name generator, a permanent conflict - would recurse until the stack blew, on
-     * a code path that runs inside the diff work.
+     * Bounded on purpose: a repository that renames every creation - a misconfigured name generator,
+     * a permanent conflict - would otherwise retry for ever, on a code path that runs inside the diff
+     * work.
      */
     protected static final int ROOT_CREATION_ATTEMPTS = 3;
 
@@ -166,8 +165,8 @@ public final class BlobDiffStore {
 
     /**
      * Makes sure the root container carries exactly the expected local ACL: auditors group granted
-     * Read, Remove and RemoveChildren, inheritance blocked. Repairs it (and logs a WARN) when it
-     * was created by an older version, changed by hand, or the auditors group was reconfigured.
+     * Read, Remove and RemoveChildren, inheritance blocked. Repairs it (and logs a WARN) when it was
+     * changed by hand or the auditors group was reconfigured.
      *
      * @return {@code true} if the ACL had to be repaired
      */

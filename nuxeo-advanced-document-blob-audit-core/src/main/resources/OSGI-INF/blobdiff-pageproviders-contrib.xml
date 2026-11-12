@@ -20,8 +20,8 @@
     </coreQueryPageProvider>
 
     <!--
-      Search-engine backed page provider behind the Web UI "Content changes audit" page and the
-      source document tab.
+      SearchService page provider (the configured search client) behind the Web UI "Content changes
+      audit" page and the source document tab.
 
       SearchServicePageProvider lives in nuxeo-platform-query-api, not in the Elasticsearch bundle,
       so this component always registers: there is no missing class to guard against and a
@@ -29,9 +29,9 @@
       whole component, BLOB_DIFFS_FOR_DOCUMENT included, pending on any instance without a search
       engine, and in the unit tests.
 
-      What does need a search engine is the *execution*: the provider resolves SearchService at
-      query time and throws if none is configured. That is acceptable here, a real instance always
-      has one, but it is a query-time failure, not a registration-time one.
+      The query runs on the configured search client. The default one of LTS 2025 is "repository":
+      the listing works without a search engine, but that client has no aggregate capability, so
+      the four aggregates below come back empty until a search engine is configured.
     -->
     <genericPageProvider name="BLOB_DIFFS_ADMIN"
                          class="org.nuxeo.ecm.platform.query.nxql.SearchServicePageProvider">

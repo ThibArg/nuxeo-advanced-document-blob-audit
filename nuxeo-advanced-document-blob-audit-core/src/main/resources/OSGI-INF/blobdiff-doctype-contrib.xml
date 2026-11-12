@@ -12,7 +12,7 @@
       Repository indexes. Both fields are the sole predicate of a query that would otherwise scan
       every BlobDiff of the instance, the only usable index being the one on ecm:primaryType:
 
-        - correlationId: BlobDiffWork#existingDiffId, the idempotency guard, runs once per work.
+        - correlationId: BlobDiffWork#existingDiffId, the idempotency guard, runs twice per work.
           Its nominal outcome is *zero* match, which is precisely the case that forces a full scan.
         - sourceId: the single predicate of the BLOB_DIFFS_FOR_DOCUMENT core query page provider,
           public API for integrators.

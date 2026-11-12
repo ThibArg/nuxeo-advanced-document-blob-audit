@@ -148,10 +148,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
                 resolved.add(new ResolvedExtractor(descriptor, extractor, minSimilarity(descriptor),
                         minSimilarityLines(descriptor)));
             } catch (ReflectiveOperationException | RuntimeException e) {
-                // RuntimeException included on purpose: init() parses contributed properties -
-                // ConverterTextExtractor does Integer.parseInt on minLineLength - so a typo in an
-                // XML contribution used to escape here and fail the whole component start, which
-                // is exactly what logging and skipping this one extractor is meant to prevent.
+                // RuntimeException included on purpose: init() parses contributed properties
+                // (ConverterTextExtractor parses minLineLength), and a typo in an XML contribution
+                // must cost this one extractor, not fail the whole component start.
                 log.error("Cannot instantiate blob diff extractor: {}", descriptor.getId(), e);
             }
         }
@@ -201,10 +200,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * The extractor lists are kept: a work still running past the WorkManager drain needs them
-     * (item 49). Only the blob xpath templates of {@link VersionBlobPairs} go, a hot reload can
-     * redefine the schemas they are derived from, and the repository initialization handler is
-     * uninstalled.
+     * The extractor lists are kept: a work still running past the WorkManager drain needs them. Only
+     * the blob xpath templates of {@link VersionBlobPairs} go, a hot reload can redefine the schemas
+     * they are derived from, and the repository initialization handler is uninstalled.
      */
     @Override
     public void stop(ComponentContext context) throws InterruptedException {
@@ -288,10 +286,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     /**
      * {@code null} means <b>no extractor is registered</b> for the mime type, and nothing else.
      * <p>
-     * A failing extractor used to be reported the same way, so {@code BlobDiffWork} filed a real
-     * incident as {@code skippedUnsupportedType} - a status {@code BlobDiff.Retry} refuses, which
-     * made the failure permanent and invisible. Raising is what lets the work record {@code error}
-     * instead, through the {@code catch (RuntimeException)} it already has.
+     * A failing extractor raises instead. Reported the same way, it would make {@code BlobDiffWork}
+     * file a real incident as {@code skippedUnsupportedType} - a status {@code BlobDiff.Retry}
+     * refuses, which would make the failure permanent and invisible. Raising is what lets the work
+     * record {@code error}, through its {@code catch (RuntimeException)}.
      *
      * @return the extracted content, or {@code null} if and only if no extractor handles the mime type
      * @throws NuxeoException if an extractor was found but could not read the binary
@@ -311,8 +309,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     /**
      * Both binaries are materialised locally <b>once</b> and every extraction pass reads the local
      * copy: the {@link MaterializedBlob#of(Blob)} each extractor needing a file goes through is then
-     * a pass-through. Without this, a pair of S3-backed blobs meant one download per pass: four for
-     * two files as soon as the image inventory is on.
+     * a pass-through. Without this, a pair of S3-backed blobs would mean one download per pass: four
+     * for two files as soon as the image inventory is on.
      */
     @Override
     public DiffResult diff(Blob oldBlob, Blob newBlob) {
@@ -358,7 +356,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * Whether the pair changed mime type and shares too little to be worth a diff (item 62).
+     * Whether the pair changed mime type and shares too little to be worth a diff.
      * <p>
      * Only a pair read by one contribution reaches this point - two contributions are
      * {@code FORMAT_CHANGED} - so the rule of the new side's contribution is the rule of both. A

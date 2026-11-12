@@ -40,8 +40,8 @@ public final class BlobDiffTrigger {
     /**
      * What the trigger decided for one xpath.
      * <p>
-     * A nullable correlation id was not enough: it cannot tell "nothing to do" from "the binary
-     * changed but cannot be diffed", and the caller must audit the second case.
+     * A nullable correlation id alone cannot tell "nothing to do" from "the binary changed but
+     * cannot be diffed", and the caller must audit the second case.
      *
      * @param correlationId set when a {@link BlobDiffWork} was scheduled, {@code null} otherwise
      * @param skipReason one of {@code BlobAuditConstants.STATUS_SKIPPED_*} when the change must be
@@ -74,19 +74,18 @@ public final class BlobDiffTrigger {
      * Schedules a content diff if the blob really differs between two successive versions, or
      * reports a non-diffable change.
      * <p>
-     * <b>The order of the checks is significant.</b> Eligibility used to be evaluated before
-     * {@link #sameContent}; reporting a skip requires the opposite, otherwise every new version of
-     * an over-sized document would be audited as a binary change even when the binary did not move.
-     * The same holds for a format change: identical bytes re-uploaded under another mime type stay
-     * silent.
+     * <b>The order of the checks is significant.</b> Only an out-of-scope pair returns before
+     * {@link #sameContent}; a skip is reported after it, otherwise every new version of an over-sized
+     * document would be audited as a binary change even when the binary did not move. The same holds
+     * for a format change: identical bytes re-uploaded under another mime type stay silent.
      *
      * @param service the blob diff service, held by the caller
      * @return never {@code null}; see {@link Outcome}
      */
     public static Outcome scheduleIfNeeded(BlobDiffService service, DocumentModel liveDoc, String xpath,
             Blob oldBlob, Blob newBlob, VersionContext versions, String principal, long eventTime) {
-        // Additions/removals are deliberately not expanded into a complete-file diff. The feature currently
-        // audits replacement of an existing blob, as the original save-based implementation did.
+        // Additions/removals are deliberately not expanded into a complete-file diff: the feature
+        // audits the replacement of an existing blob.
         if (oldBlob == null || newBlob == null) {
             return Outcome.none();
         }

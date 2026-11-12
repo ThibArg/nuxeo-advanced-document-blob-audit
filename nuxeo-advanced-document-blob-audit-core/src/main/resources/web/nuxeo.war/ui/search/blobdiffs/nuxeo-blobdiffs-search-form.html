@@ -64,8 +64,8 @@
     </nuxeo-user-suggestion>
 
     <!--
-      One-way on purpose: a two-way binding sent false once unticked, which the provider turns into
-      "bdiff:truncated = 0" and hides every truncated diff. Unticked must mean no filter at all.
+      One-way on purpose: a two-way binding would send false once unticked, which the provider turns
+      into "bdiff:truncated = 0" and hides every truncated diff. Unticked must mean no filter at all.
     -->
     <paper-checkbox checked="[[_isTruncatedOnly(params.bdsearch:truncated)]]" on-change="_truncatedChanged">
       [[i18n('label.blobaudit.filters.truncatedOnly')]]
@@ -118,7 +118,7 @@
         }
       },
 
-      // Also heals a saved search that persisted the false the former binding sent.
+      // Also heals a saved search holding a false: unticked must mean no filter at all.
       observers: ['_dropFalseTruncated(params.bdsearch:truncated)'],
 
       _isTruncatedOnly: function (value) {

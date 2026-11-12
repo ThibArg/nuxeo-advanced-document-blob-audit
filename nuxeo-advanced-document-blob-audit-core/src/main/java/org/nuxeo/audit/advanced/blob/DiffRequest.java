@@ -135,7 +135,7 @@ public record DiffRequest(String repository, String sourceId, String sourceTitle
                 date == null ? System.currentTimeMillis() : date.getTimeInMillis(), string(diff, XP_CORRELATION_ID));
     }
 
-    /** The diff is titled {@code <source title> - <xpath>}; passed whole, every retry appended the xpath again. */
+    /** The diff is titled {@code <source title> - <xpath>}; passed whole, every retry would append the xpath again. */
     private static String sourceTitle(DocumentModel diff, String xpath) {
         String title = diff.getTitle();
         String suffix = " - " + xpath;

@@ -66,9 +66,9 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
      * Lists the pictures of every sheet drawing without ever parsing a sheet: {@code .xlsx} through
      * the package parts, binary {@code .xls} through the usermodel, which HSSF loads whole anyway.
      * <p>
-     * The usermodel parsed every sheet into an XMLBeans tree to reach drawings that are separate
-     * parts, so a workbook with a few hundred thousand cells cost hundreds of megabytes for a single
-     * picture.
+     * The usermodel parses every sheet into an XMLBeans tree to reach drawings that are separate
+     * parts, so a workbook with a few hundred thousand cells would cost hundreds of megabytes for a
+     * single picture.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
@@ -127,7 +127,7 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
      * either.
      * <p>
      * A two-cell anchor is keyed on its two cells. A one-cell anchor is keyed on its cell alone: the
-     * usermodel derived the second one from the size of the picture and the row heights and column
+     * usermodel derives the second one from the size of the picture and the row heights and column
      * widths of the sheet, which would mean parsing it. An absolute anchor gets an ordinal.
      *
      * @since 2025.1

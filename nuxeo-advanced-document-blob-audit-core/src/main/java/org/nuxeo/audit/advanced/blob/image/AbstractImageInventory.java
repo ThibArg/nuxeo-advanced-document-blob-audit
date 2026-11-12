@@ -56,12 +56,13 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
      * Upper bound on the size of a single embedded image as stored, in bytes: the <b>inflated</b> media
      * part for OOXML, the <b>encoded</b> stream for PDF, which is never decoded.
      * <p>
-     * Nothing else bounded it. The only guard upstream is {@code BlobDiffComponent#getEligibility},
-     * which compares {@code blob.getLength()} - the size of the container, deflated - to
-     * {@code maxBlobSize} (10 MB by default). Ten megabytes of deflate expand to several gigabytes,
-     * and {@code java.util.zip.ZipInputStream} has none of POI's {@code ZipSecureFile} protections.
-     * Times two concurrent works on the {@code blobDiff} queue, times the two retries of
-     * {@code getRetryCount()}, that was an OOM reachable by anyone able to version a {@code .docx}.
+     * Nothing else bounds it. The only guard upstream is the eligibility check of
+     * {@code BlobDiffComponent}, which compares {@code blob.getLength()} - the size of the container,
+     * deflated - to {@code maxBlobSize} (10 MB by default). Ten megabytes of deflate expand to several
+     * gigabytes, and {@code java.util.zip.ZipInputStream} has none of POI's {@code ZipSecureFile}
+     * protections. Without this cap, anyone able to version a {@code .docx} could exhaust the heap -
+     * times two concurrent works on the {@code blobDiff} queue, times the two retries of
+     * {@code getRetryCount()}.
      *
      * @since 2025.1
      */
@@ -254,8 +255,8 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
      * Returns a SHA-256 digester.
      * <p>
      * The JCA guarantees {@code SHA-256} on every conformant JDK, so a missing algorithm is an
-     * unrecoverable environment fault, not something eleven call sites should carry a checked
-     * exception for.
+     * unrecoverable environment fault, not something every caller should carry a checked exception
+     * for.
      *
      * @since 2025.1
      */

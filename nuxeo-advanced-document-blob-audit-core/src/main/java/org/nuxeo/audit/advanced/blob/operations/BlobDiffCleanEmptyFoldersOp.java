@@ -32,9 +32,9 @@ import org.nuxeo.ecm.core.api.PathRef;
 /**
  * Removes the dated {@code /change-diff/yyyy/MM/dd} folders left empty, day then month then year.
  * <p>
- * Split out of {@code BlobDiff.Purge} when the purge became asynchronous: the folders can only be
- * removed once the bulk command has finished emptying them. The Web UI calls this as soon as the
- * purge reaches {@code COMPLETED}; it is idempotent and can be run on its own.
+ * A separate operation because the purge is asynchronous: the folders can only be removed once the
+ * bulk command has finished emptying them. The Web UI calls this as soon as the purge reaches
+ * {@code COMPLETED}; it is idempotent and can be run on its own.
  * <p>
  * <b>Why this one does not need the Bulk Action Framework.</b> The fan-out is bounded by the
  * calendar: the root holds a handful of years, a year holds twelve months, a month holds thirty-one

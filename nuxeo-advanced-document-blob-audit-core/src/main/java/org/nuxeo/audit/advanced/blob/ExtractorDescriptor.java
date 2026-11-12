@@ -87,8 +87,9 @@ public class ExtractorDescriptor implements Descriptor {
     }
 
     /**
-     * Overlays a later contribution on this one. The default merge returned the later contribution
-     * alone, so an override re-declaring a single property lost the class, and the format became
+     * Overlays a later contribution on this one: a value it sets wins, its properties are added to
+     * this one's. The default {@link Descriptor#merge} returns the later contribution alone, so an
+     * override re-declaring a single property would lose the class, and the format would become
      * unsupported.
      *
      * @since 2025.1

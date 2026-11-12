@@ -38,19 +38,13 @@ import org.nuxeo.lib.stream.computation.Topology;
 import org.nuxeo.runtime.stream.StreamProcessorTopology;
 
 /**
- * Retention purge of {@code BlobDiff} documents, on the Bulk Action Framework.
+ * Retention purge of {@code BlobDiff} documents, on the Bulk Action Framework: deleting by batches
+ * inside the {@code BlobDiff.Purge} Automation operation, bound to the HTTP transaction, would time
+ * out at volume.
  * <p>
- * Replaces the unbounded {@code while (true) { ...; nextTransaction(); }} loop that used to run
- * inside the {@code BlobDiff.Purge} Automation operation, while the {@code @Context CoreSession}
- * was bound to the HTTP transaction: an HTTP timeout was guaranteed at volume.
- * <p>
- * <b>The action is deliberately not {@code httpEnabled}.</b> It is unreachable through
- * {@code Bulk.RunAction} and through the {@code /search/bulk/{action}} REST endpoint, for anyone
- * but an administrator. The only supported entry point is the {@code BlobDiff.Purge} operation,
- * which enforces {@code BlobDiffAccess.checkAuditor} and builds the query itself. Turning
- * {@code httpEnabled} on would publish a delete-by-NXQL API to every authenticated user; keeping it
- * off while routing the UI through {@code Bulk.RunAction} would reserve the purge to
- * administrators, which takes the feature away from the auditors it was built for.
+ * <b>The action is deliberately not {@code httpEnabled}</b>, see {@code blobdiff-bulk-contrib.xml}.
+ * The only supported entry point is the {@code BlobDiff.Purge} operation, which enforces
+ * {@code BlobDiffAccess.checkAuditor} and builds the query itself.
  *
  * @since 2025.1
  */
@@ -116,7 +110,7 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
         @Override
         protected void compute(CoreSession session, List<String> ids, Map<String, Serializable> properties) {
             // The framework only checks the abort for a command it no longer knows: buckets already
-            // scrolled were processed whatever the state, so a stopped purge kept deleting.
+            // scrolled are processed whatever the state, so a stopped purge would keep deleting.
             if (isAbortedCommand(getCurrentCommand().getId())) {
                 return;
             }

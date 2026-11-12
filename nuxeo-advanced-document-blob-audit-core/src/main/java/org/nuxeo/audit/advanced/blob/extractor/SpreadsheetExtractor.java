@@ -108,10 +108,10 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
      * <p>
      * POI's usermodel builds the XMLBeans tree of <b>every</b> sheet as soon as the workbook is
      * opened - from a file or not, which only spares buffering the compressed package - so its
-     * footprint followed the number of cells rather than what is extracted: a few hundred thousand
-     * cells cost hundreds of megabytes for the first {@code maxLines} of them. Binary {@code .xls}
-     * keeps the usermodel: HSSF reads the whole record stream regardless, and {@code maxBlobSize}
-     * bounds it.
+     * footprint would follow the number of cells rather than what is extracted: a few hundred
+     * thousand cells cost hundreds of megabytes for the first {@code maxLines} of them. Binary
+     * {@code .xls} keeps the usermodel: HSSF reads the whole record stream regardless, and
+     * {@code maxBlobSize} bounds it.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
@@ -221,7 +221,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
      * enough to parse and render a formula, built on first use only.
      * <p>
      * One deliberate difference: POI's {@code SharedFormula} turns a reference to another sheet into
-     * a plain one, so the usermodel rendered {@code Other!A1*2} shared down a column as {@code A2*2}.
+     * a plain one, so the usermodel renders {@code Other!A1*2} shared down a column as {@code A2*2}.
      * References are shifted here in place, and keep their sheet.
      *
      * @since 2025.1
@@ -347,7 +347,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     /**
      * The shared strings of a workbook, read within the budget of the extraction.
      * <p>
-     * POI's {@code ReadOnlySharedStringsTable} held the whole table before the first cell was read,
+     * POI's {@code ReadOnlySharedStringsTable} holds the whole table before the first cell is read,
      * outside both {@code maxLines} and {@code maxValueLength}, and the part inflates far past the
      * compressed size {@code maxBlobSize} bounds. Each string is kept here in the form its cell is
      * compared in - phonetic runs left out and escapes decoded like {@code XSSFRichTextString#getString},

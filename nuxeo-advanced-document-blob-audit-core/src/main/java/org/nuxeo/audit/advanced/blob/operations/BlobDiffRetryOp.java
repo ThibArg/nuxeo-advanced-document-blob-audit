@@ -125,10 +125,10 @@ public class BlobDiffRetryOp {
      * content then lands in {@code bdiff:diff} under {@code /change-diff}, where the caller can read
      * it.
      * <p>
-     * The document type and the {@code bdiff:status} were the only checks, and both are attacker
-     * controlled: {@code AbstractSession.createDocument} calls {@code parent.addChild(name, type)}
-     * without consulting the allowed subtypes - that is a {@code TypeManager} concern, so a UI one.
-     * An auditor, explicitly <b>not</b> an administrator, could therefore create a {@code BlobDiff}
+     * The document type and the {@code bdiff:status} are no guard, both are attacker controlled:
+     * {@code AbstractSession.createDocument} calls {@code parent.addChild(name, type)} without
+     * consulting the allowed subtypes - that is a {@code TypeManager} concern, so a UI one. Without
+     * this check, an auditor, explicitly <b>not</b> an administrator, could create a {@code BlobDiff}
      * in their own workspace, set {@code bdiff:status=error} plus the keys of their choice, and have
      * the platform decrypt any binary of the repository for them.
      * <p>

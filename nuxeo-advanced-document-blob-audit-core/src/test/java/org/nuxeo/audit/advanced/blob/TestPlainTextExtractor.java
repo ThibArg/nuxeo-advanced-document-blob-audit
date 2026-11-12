@@ -31,8 +31,7 @@ import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 
 /**
  * Unit tests for the text family: {@code .txt}, {@code .json}, {@code .xml}, {@code .csv} and
- * source files. The simplest and most faithful of the three extractors, since nothing is lost in
- * translation.
+ * source files. The simplest and most faithful extractor, since nothing is lost in translation.
  *
  * @since 2025.1
  */

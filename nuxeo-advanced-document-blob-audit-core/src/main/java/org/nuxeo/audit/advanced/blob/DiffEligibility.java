@@ -18,7 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 /**
  * Why a given document/xpath/blob can - or cannot - be content-diffed.
  * <p>
- * The distinction matters beyond the boolean {@code isDiffable}: a binary that really changed but
+ * The distinction matters beyond a yes/no answer: a binary that really changed but
  * cannot be diffed must still leave an audit entry, otherwise the absence of an entry is
  * indistinguishable from the absence of a change. Only {@link #NOT_APPLICABLE} stays fully silent,
  * because it means the feature was never meant to look at that property in the first place.

@@ -58,12 +58,12 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     protected Long maxBlobSize;
 
     /**
-     * Hard cap on extracted units.
+     * Hard cap on extracted units, per side.
      * <p>
-     * This bounds <b>running time</b>, which stays O(n*m) even with Hirschberg. Measured on JDK 17
-     * with one paragraph modified: 304 ms at 4 900 lines, ~1.1 s at 10 000, ~4.6 s at 20 000. A
-     * 200-page Word document extracts to roughly 5 000 paragraphs, so 10 000 leaves a 2x margin
-     * while keeping the worst case near one second per work.
+     * This bounds the <b>worst case</b> of the diff, a document rewritten from end to end: its running
+     * time stays O(n*m) even with Hirschberg, while a few edited paragraphs cost milliseconds whatever
+     * the size of the document. The figures are in {@link TextDiffer}. A 200-page Word document
+     * extracts to roughly 5 000 paragraphs, so 10 000 leaves a 2x margin.
      */
     @XNode("maxLines")
     protected Integer maxLines;
@@ -86,7 +86,8 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     protected Integer maxDiffChars;
 
     /**
-     * A single extracted unit longer than this is elided in the diff body.
+     * A single extracted unit longer than this is compacted when it is extracted (see
+     * {@link ContentLine#of(String, String, int)}) and elided in the diff body.
      *
      * @since 2025.1
      */
@@ -116,9 +117,10 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     }
 
     /**
-     * Overlays a later contribution on this one. The default merge returned the later contribution
-     * alone, so an override setting only {@code docTypes} silently disabled the feature and emptied
-     * {@code xpaths}, which then meant "every blob xpath".
+     * Overlays a later contribution on this one: a value it sets wins, a value it omits keeps this
+     * one's. The default {@link Descriptor#merge} returns the later contribution alone, so an
+     * override setting only {@code docTypes} would silently reset everything else - {@code enabled}
+     * to {@code false} among them.
      *
      * @since 2025.1
      */

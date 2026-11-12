@@ -120,12 +120,11 @@ public class TextDiffer {
      * this a diff of a few thousand entries reaches hundreds of megabytes - held in a
      * {@code StringBuilder}, copied by {@code toString()}, copied again into a blob.
      * <p>
-     * <b>Known limitation.</b> When both sides of a modification are longer than
-     * {@code maxValueLength} and only differ past it, the rendered entry shows two identical
-     * prefixes ({@code ~ key : X… -> X…}). The counters stay exact and {@code bdiff:changed} still
-     * reports the modification; only the rendering is uninformative. The built-in extractors avoid
-     * it: they bound values with {@link ContentLine#compact(String, int)}, whose digest tells the two
-     * sides apart and whose result is short enough to pass through here unchanged.
+     * <b>Long values that differ past the kept prefix.</b> The built-in extractors compact long values
+     * with a digest of the whole ({@link ContentLine#compact(String, int)}), short enough to pass
+     * through here unchanged, so two such values still render differently. Only an extractor that
+     * does not compact its values can show two identical prefixes ({@code ~ key : X… -> X…}); the
+     * counters and {@code bdiff:changed} stay exact either way.
      *
      * @since 2025.1
      */
@@ -394,9 +393,9 @@ public class TextDiffer {
      * <p>
      * This is what makes the dominant real case cheap. A 5 000 paragraph contract with one amended
      * paragraph shares 2 500 leading and 2 499 trailing paragraphs with its previous version: the
-     * quadratic alignment then runs on 1x1 instead of 5000x5000, 139 ms down to 4.7 ms. A fully
-     * rewritten document shares nothing, trims nothing and costs what it costed before - the
-     * optimisation is free, never a pessimisation.
+     * quadratic alignment then runs on 1x1 instead of 5000x5000 (figures in the class Javadoc). A
+     * fully rewritten document shares nothing and trims nothing, and only pays the two linear scans
+     * on top of the alignment - the optimisation is never a pessimisation.
      * <p>
      * <b>Why this is safe.</b> Identical lines produce no {@link Edit} at all, so removing them
      * cannot change the output. And when {@code a[0].equals(b[0])} there is always an optimal

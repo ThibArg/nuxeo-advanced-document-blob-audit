@@ -77,7 +77,7 @@ public class BlobAuditConstants {
 
     public static final String XP_DIFF_BLOB = "bdiff:diff";
 
-    /* Storage identity of the compared binaries, needed to replay a diff (since 1.2) */
+    /* Storage identity of the compared binaries, needed to replay a diff */
     public static final String XP_OLD_BLOB_PROVIDER = "bdiff:oldBlobProvider";
 
     public static final String XP_OLD_BLOB_KEY = "bdiff:oldBlobKey";

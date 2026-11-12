@@ -41,7 +41,7 @@ import com.fasterxml.jackson.core.JsonGenerator;
  * are computed with a privileged session: the reader of a BlobDiff is an auditor, who is entitled to
  * know that a source was deleted.
  * <p>
- * A {@code documentResolver} on {@code bdiff:sourceId} was deliberately not used: reference
+ * A {@code documentResolver} on {@code bdiff:sourceId} is deliberately not used: reference
  * validation would forbid recording an error diff for a source that no longer exists.
  *
  * @since 2025.1

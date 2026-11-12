@@ -75,7 +75,7 @@ public class PresentationExtractor implements BlobContentExtractor {
      * Streams the slides one by one, and stops at {@code maxLines}.
      * <p>
      * {@code XMLSlideShow} parses every slide, layout, master and notes page into an XMLBeans tree
-     * when it is opened, so its footprint followed the size of the deck rather than what is
+     * when it is opened, so its footprint would follow the size of the deck rather than what is
      * extracted - from a file as well, which only spares buffering the compressed package. Each
      * slide is read once with SAX; its lines are held until its title, which the marker line needs
      * before anything else, has been read.

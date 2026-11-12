@@ -8,9 +8,13 @@
     Retention purge of BlobDiff documents.
 
     httpEnabled is deliberately left to its default (false): the action must stay unreachable
-    through Bulk.RunAction and through the /search/bulk/{action} REST endpoint. The supported entry
-    point is the BlobDiff.Purge operation, which enforces the auditors check and builds the query.
-    See BlobDiffPurgeAction for the full rationale - do not turn this on.
+    through Bulk.RunAction and through the /search/bulk/{action} REST endpoint, for anyone but an
+    administrator. The supported entry point is the BlobDiff.Purge operation, which enforces the
+    auditors check and builds the query. Do not turn this on: it would publish a delete-by-NXQL API
+    to every authenticated user. Routing the UI through Bulk.RunAction with httpEnabled off is no
+    alternative either: it would reserve the purge to administrators, which takes the feature away
+    from the auditors it is built for. The computation also refuses to remove anything that is not
+    a BlobDiff, whatever the query of the command.
 
     exclusive: one purge at a time per repository. A second submission raises a
     ConcurrentUpdateException, which BlobDiff.Purge turns into a readable message. The underlying

@@ -43,15 +43,13 @@ import org.nuxeo.runtime.api.Framework;
  * Retention purge: schedules the permanent deletion of every {@code BlobDiff} dated strictly before
  * {@code before}, optionally restricted to one status.
  * <p>
- * <b>Asynchronous since 2025.3.</b> This operation used to delete by batches in an unbounded loop,
- * committing between batches while the {@code @Context CoreSession} was bound to the HTTP
- * transaction - an HTTP timeout was guaranteed at volume. It now submits a
- * {@link BlobDiffPurgeAction} bulk command and returns immediately with its id. Progress is read
- * through {@code BlobDiff.PurgeStatus}, the command can be stopped with {@code BlobDiff.PurgeAbort},
- * and the dated folders left empty are removed by {@code BlobDiff.CleanEmptyFolders}.
+ * <b>Asynchronous.</b> It submits a {@link BlobDiffPurgeAction} bulk command and returns immediately
+ * with its id: deleting by batches here, bound to the HTTP transaction, would time out at volume.
+ * Progress is read through {@code BlobDiff.PurgeStatus}, the command can be stopped with
+ * {@code BlobDiff.PurgeAbort}, and the dated folders left empty are removed by
+ * {@code BlobDiff.CleanEmptyFolders}.
  * <p>
- * Returns {@code {"commandId": "...", "state": "SCHEDULED"}}. Callers written against the previous
- * synchronous {@code {"deleted": n, "folders": m}} payload must be adapted.
+ * Returns {@code {"commandId": "...", "state": "SCHEDULED"}}.
  * <p>
  * The action is {@code exclusive}: submitting a second purge while one is running raises a readable
  * error rather than letting two commands fight over the same documents.
@@ -73,10 +71,10 @@ public class BlobDiffPurgeOp {
     private static final Logger log = LogManager.getLogger(BlobDiffPurgeOp.class);
 
     /**
-     * Boundary of the retention query, always in UTC - the same zone {@code BlobDiffComponent}
-     * uses to build the dated containers. Formatting it in the JVM default zone would shift the
-     * boundary by a day, and two nodes of a cluster in different zones would not purge the same
-     * set for a single "before" parameter.
+     * Boundary of the retention query, always in UTC - the same zone {@code BlobDiffStore} uses to
+     * build the dated containers. Formatting it in the JVM default zone would shift the boundary by a
+     * day, and two nodes of a cluster in different zones would not purge the same set for a single
+     * "before" parameter.
      * <p>
      * {@link Locale#ROOT} for the same class of reason: {@code ofPattern(String)} inherits
      * {@code Locale.getDefault(FORMAT)} and its {@code DecimalStyle}, so a locale with a non-Latin

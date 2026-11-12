@@ -263,9 +263,9 @@ public class TestBlobDiffManagement {
     }
 
     /*
-     * The purge itself moved to TestBlobDiffPurgeAction: it is asynchronous since 2025.3 and needs
-     * the Bulk Action Framework. Only the access check stays here, because it is enforced before
-     * anything is submitted.
+     * The purge itself is tested in TestBlobDiffPurgeAction: it is asynchronous and needs the Bulk
+     * Action Framework. Only the access check stays here, because it is enforced before anything is
+     * submitted.
      */
 
     /* ------------------------------------------------------------------ retry */

@@ -39,8 +39,8 @@ import org.xml.sax.SAXException;
 public class PresentationImageInventory extends AbstractImageInventory {
 
     /**
-     * Slides are streamed one by one with SAX: {@code XMLSlideShow} parsed the whole deck into
-     * XMLBeans trees before the first picture was read.
+     * Slides are streamed one by one with SAX: {@code XMLSlideShow} would parse the whole deck into
+     * XMLBeans trees before the first picture is read.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {

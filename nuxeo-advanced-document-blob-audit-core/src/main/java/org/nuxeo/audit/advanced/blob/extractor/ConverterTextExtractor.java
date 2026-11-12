@@ -36,9 +36,12 @@ import org.nuxeo.ecm.core.convert.api.ConversionService;
 import org.nuxeo.runtime.api.Framework;
 
 /**
- * Generic extractor delegating to the platform {@code ConversionService} ({@code any2text}, backed
- * by Tika). This is what covers Word, PDF, OpenDocument, RTF, PowerPoint... without a single line of
- * format-specific code: supporting one more format is one more {@code mimeType} element.
+ * Generic extractor delegating to the platform {@code ConversionService} ({@code any2text}, which
+ * dispatches to the platform's text converter for the mime type). This is what covers Word,
+ * OpenDocument, RTF, PDF and legacy {@code .ppt} without a single line of format-specific code: the
+ * class is contributed three times ({@code converter}, {@code pdf}, {@code legacyPresentation}), one
+ * contribution per comparability class, and supporting one more format is one more {@code mimeType}
+ * element.
  * <p>
  * Output is positional and paragraph-oriented. Layout, styles and tables are lost - this is a
  * textual diff, not a Word "track changes" equivalent, and a scanned PDF yields nothing without OCR.

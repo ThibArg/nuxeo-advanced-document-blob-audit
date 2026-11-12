@@ -45,8 +45,9 @@
     <config enabled="false">
       <maxBlobSize>10485760</maxBlobSize>
       <!--
-        maxLines bounds running time, which stays O(n*m) even with Hirschberg. Measured on JDK 17,
-        one paragraph modified: 304 ms at 4900 lines, ~1.1 s at 10000, ~4.6 s at 20000.
+        maxLines bounds the worst case of the diff, a document rewritten from end to end, whose
+        running time stays O(n*m) even with Hirschberg; a few edited paragraphs cost milliseconds
+        whatever the size of the document. Figures in the class Javadoc of TextDiffer.
         A 200-page Word document extracts to roughly 5000 paragraphs.
       -->
       <maxLines>10000</maxLines>
@@ -54,8 +55,9 @@
       <!--
         maxDiffEntries bounds how *many* differences are reported, never how long each one is: an
         Excel cell holds up to 32 767 characters and a Word paragraph is unbounded. maxDiffChars
-        caps the whole diff body, maxValueLength elides a single over-long unit. Together they make
-        the stored diff proportional to something known in advance instead of to the content.
+        caps the whole diff body, maxValueLength bounds a single over-long unit (compacted when it
+        is extracted, elided in the body). Together they make the stored diff proportional to
+        something known in advance instead of to the content.
       -->
       <maxDiffChars>4194304</maxDiffChars>
       <maxValueLength>4096</maxValueLength>
@@ -85,7 +87,7 @@
       <property name="useFormulas">true</property>
     </extractor>
 
-    <!-- PowerPoint OOXML: slide-aware, paragraph-level positional diff (Apache POI XSLF). -->
+    <!-- PowerPoint OOXML: slide-aware, paragraph-level positional diff, streamed with SAX. -->
     <extractor name="presentation" order="15"
                class="org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor">
       <mimeTypes>

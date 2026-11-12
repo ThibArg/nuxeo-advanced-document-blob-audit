@@ -89,9 +89,8 @@ public record FrozenBlob(String providerId, String key, String filename, String 
             return provider.readBlob(info);
         } catch (IOException | RuntimeException e) {
             // Narrow on purpose: readBlob declares IOException and nothing else. Catching Exception
-            // here also caught InterruptedException, on a WorkManager thread that is interrupted at
-            // shutdown - the work then filed a bogus "error" diff instead of letting the cancel
-            // through.
+            // would also catch InterruptedException on a WorkManager thread interrupted at shutdown,
+            // and file a bogus "error" diff instead of letting the cancel through.
             log.warn("Cannot resolve {} from provider {}", filename, providerId, e);
             return null;
         }

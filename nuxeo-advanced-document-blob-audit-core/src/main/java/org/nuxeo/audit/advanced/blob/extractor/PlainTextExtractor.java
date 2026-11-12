@@ -35,7 +35,7 @@ import org.nuxeo.ecm.core.api.Blob;
  * Line-based extractor for text formats: {@code .txt}, {@code .json}, {@code .xml}, {@code .csv},
  * {@code .md}, source files, etc. Positional content: the differ aligns it with Hirschberg.
  * <p>
- * The cheapest and most faithful of the three extractors, since nothing is lost in translation.
+ * The cheapest and most faithful extractor, since nothing is lost in translation.
  *
  * @since 2025.1
  */
@@ -86,10 +86,10 @@ public class PlainTextExtractor implements BlobContentExtractor {
      * <p>
      * Delegates to {@link BlobCharsets#of(Blob)}, which is shared with
      * {@link ConverterTextExtractor}: {@code blob.getEncoding()} can be empty, or a name no JVM
-     * knows. Passing it straight to {@code InputStreamReader} threw
-     * {@code UnsupportedEncodingException} (an {@code IOException}, so the extraction failed and
-     * the whole diff was reported in error) or {@code IllegalCharsetNameException} (unchecked, so
-     * it escaped the extractor entirely). A bad encoding declaration must degrade to a readable
+     * knows. Passed straight to {@code InputStreamReader}, it would throw
+     * {@code UnsupportedEncodingException} (an {@code IOException}, so the extraction would fail and
+     * the whole diff be reported in error) or {@code IllegalCharsetNameException} (unchecked, so it
+     * would escape the extractor entirely). A bad encoding declaration must degrade to a readable
      * diff, not lose the audit.
      * <p>
      * Kept as an instance method so a subclass can still impose its own charset policy.

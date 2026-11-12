@@ -92,7 +92,7 @@
         return (mimeType || '').split(';')[0].trim().toLowerCase();
       },
 
-      /** Whether the two versions hold different formats (item 62). Both must be known. */
+      /** Whether the two versions hold different formats. Both must be known. */
       formatChanged: function (oldMimeType, newMimeType) {
         return !!oldMimeType && !!newMimeType &&
           this.normalizeMimeType(oldMimeType) !== this.normalizeMimeType(newMimeType);

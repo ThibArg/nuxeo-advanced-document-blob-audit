@@ -1,7 +1,7 @@
 <!--
   Retention purge (BlobDiff.Purge) with warning and explicit acknowledgment.
 
-  Asynchronous since 2025.3: BlobDiff.Purge submits a bulk command and returns its id, this
+  Asynchronous: BlobDiff.Purge submits a bulk command and returns its id, this
   element polls BlobDiff.PurgeStatus until the command completes, then removes the dated folders
   left empty with BlobDiff.CleanEmptyFolders. A running purge can be stopped with
   BlobDiff.PurgeAbort, or simply left to finish in the background.
@@ -30,7 +30,7 @@
     <nuxeo-operation id="statusOp" op="BlobDiff.PurgeStatus"></nuxeo-operation>
     <nuxeo-operation id="abortOp" op="BlobDiff.PurgeAbort"></nuxeo-operation>
     <nuxeo-operation id="cleanOp" op="BlobDiff.CleanEmptyFolders"></nuxeo-operation>
-    <!-- While a purge runs, only "background" and "stop" close the dialog: Esc used to drop the command. -->
+    <!-- While a purge runs, only "background" and "stop" close the dialog: Esc would lose track of the command. -->
     <nuxeo-dialog id="dialog" with-backdrop no-auto-focus
                   no-cancel-on-esc-key="[[_running]]" no-cancel-on-outside-click="[[_running]]">
       <h2>[[i18n('label.blobaudit.purge.title')]]</h2>
@@ -43,13 +43,13 @@
           <paper-item key="error">[[i18n('label.blobaudit.status.error')]]</paper-item>
           <!-- The three skip statuses are reachable on a BlobDiff, through BlobDiffWork, which
                re-evaluates the eligibility of the rehydrated pair before extracting: a retry, or a
-               work outliving a configuration change, can find it too large (SEC-01), unsupported,
+               work outliving a configuration change, can find it too large, unsupported,
                or read by two different extractor contributions. skippedUnsupportedType is also set
                when a side has no extractor left at diff time. -->
           <paper-item key="skippedUnsupportedType">[[i18n('label.blobaudit.status.skippedUnsupportedType')]]</paper-item>
           <paper-item key="skippedTooLarge">[[i18n('label.blobaudit.status.skippedTooLarge')]]</paper-item>
           <paper-item key="skippedFormatChanged">[[i18n('label.blobaudit.status.skippedFormatChanged')]]</paper-item>
-          <!-- Set by BlobDiffWork once the diff is computed (item 62). -->
+          <!-- Set by BlobDiffWork once the diff is computed. -->
           <paper-item key="skippedContentReplaced">[[i18n('label.blobaudit.status.skippedContentReplaced')]]</paper-item>
         </nuxeo-select>
         <div class="blobdiff-warning">
