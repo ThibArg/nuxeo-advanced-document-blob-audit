@@ -456,8 +456,11 @@ the first element of the first `mc:Choice` is read, in place of the block, and n
 `mc:Fallback`; only top-level shapes count for the title and for the notes body.
 `TestPresentationStreaming` keeps the former usermodel code as the reference and compares the two
 on a hand-written slide — it caught a wrong reading of the alternate content once already, keep it
-green. The title needs its own first pass, which skips every shape that is not a title placeholder
-without reading it. The XLSX inventory never opens a sheet: it reaches the drawing through the
+green. Each slide is parsed once: its lines are held, at most the room left under `maxLines`,
+until its title is known, because the `## Slide` marker carries it and comes first. Once a slide
+overflows, `SlideText` reads the rest of it the way the title alone needs — other text and tables
+skipped unread, the shape in progress included — and stops at the title: keeping on building the
+discarded paragraphs is what `testStreamingStopsAtMaxLines` catches. The XLSX inventory never opens a sheet: it reaches the drawing through the
 relationships of the sheet part. A one-cell anchor is therefore keyed on its cell alone and an
 absolute anchor gets an ordinal, the second cell of the usermodel being derived from the sheet
 geometry. Packages are opened through `OoxmlPackages`, from the local file of a `MaterializedBlob`
