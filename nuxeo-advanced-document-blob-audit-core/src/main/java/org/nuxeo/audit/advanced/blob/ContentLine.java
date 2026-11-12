@@ -63,14 +63,33 @@ public record ContentLine(String key, String value) {
         if (value == null || value.length() <= maxValueLength) {
             return value;
         }
-        String marker = "… [" + value.length() + " chars, sha256:" + digest(value) + "]";
-        return value.substring(0, Math.max(0, maxValueLength - marker.length())) + marker;
+        byte[] sha256 = sha256().digest(value.getBytes(StandardCharsets.UTF_8));
+        return compacted(value, value.length(), sha256, maxValueLength);
     }
 
-    private static String digest(String value) {
+    /**
+     * Returns what {@link #compact(String, int)} returns for a value longer than {@code maxValueLength},
+     * from its beginning, its length and its SHA-256: for a value read piece by piece and never held
+     * whole.
+     *
+     * @param head the value, or at least its first {@code maxValueLength} characters
+     * @param length the length of the whole value
+     * @param sha256 the SHA-256 of the whole value encoded in UTF-8
+     * @since 2025.1
+     */
+    public static String compacted(CharSequence head, long length, byte[] sha256, int maxValueLength) {
+        String marker = "… [" + length + " chars, sha256:" + HexFormat.of().formatHex(sha256, 0, 8) + "]";
+        return head.subSequence(0, Math.max(0, maxValueLength - marker.length())) + marker;
+    }
+
+    /**
+     * Returns a new SHA-256 digest, the one {@link #compact(String, int)} uses.
+     *
+     * @since 2025.1
+     */
+    public static MessageDigest sha256() {
         try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash, 0, 8);
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new NuxeoException("SHA-256 is not available on this JVM", e);
         }

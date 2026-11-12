@@ -16,6 +16,8 @@
 package org.nuxeo.audit.advanced.blob.extractor;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +31,7 @@ import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 
@@ -109,12 +112,11 @@ public class PresentationExtractor implements BlobContentExtractor {
         } catch (OoxmlPackages.Stop e) {
             // the slide overflows and its title is known: the adds below reach maxLines
         }
-        String title = content.title;
-        if (!collector.add(SLIDE_MARKER + (title == null || title.isBlank() ? "" : ": " + title.trim()))) {
+        if (!collector.addCompacted(content.marker == null ? SLIDE_MARKER : content.marker)) {
             return false;
         }
         for (String line : content.lines) {
-            if (!collector.add(line)) {
+            if (!collector.addCompacted(line)) {
                 return false;
             }
         }
@@ -143,8 +145,9 @@ public class PresentationExtractor implements BlobContentExtractor {
      * <p>
      * Notes lines go straight to the collector. Slide lines are held until the slide has been read:
      * the marker line, which comes first, carries the title, and the title shape can sit anywhere in
-     * the slide. Its paragraphs are captured on the way, joined with {@code \n}. At most the room left
-     * in the collector is held; past it, the rest of the slide is read the way the title alone needs -
+     * the slide. Its paragraphs are captured on the way, in a {@link TitleText}. At most the room left
+     * in the collector is held, each line compacted as it arrives, so that a slide holds what the
+     * collector would; past that room, the rest of the slide is read the way the title alone needs -
      * other text and tables skipped unread - and the parse stops as soon as the title is known.
      */
     protected static class SlideText extends SlideHandler {
@@ -153,7 +156,7 @@ public class PresentationExtractor implements BlobContentExtractor {
 
         protected final boolean notes;
 
-        /** Slide mode: the lines of the slide, at most {@link #capacity} of them. */
+        /** Slide mode: the lines of the slide, compacted, at most {@link #capacity} of them. */
         protected final List<String> lines = new ArrayList<>();
 
         /** Slide mode: the room left in the collector when the slide starts, marker included. */
@@ -163,15 +166,16 @@ public class PresentationExtractor implements BlobContentExtractor {
         protected boolean overflowing;
 
         /** Slide mode: the paragraphs of the title shape read so far. */
-        protected final StringBuilder titleText = new StringBuilder();
+        protected final TitleText titleText;
 
-        /** Slide mode: the text of the first title placeholder, {@code null} until it has been read. */
-        protected String title;
+        /** Slide mode: the marker line, compacted, {@code null} until the title shape has been read. */
+        protected String marker;
 
         protected SlideText(Collector collector, boolean notes) {
             this.collector = collector;
             this.notes = notes;
             this.capacity = collector.remaining();
+            this.titleText = new TitleText(collector.maxValueLength);
         }
 
         @Override
@@ -201,11 +205,8 @@ public class PresentationExtractor implements BlobContentExtractor {
         @Override
         protected void paragraph(boolean topLevel, String placeholder, String text) throws SAXException {
             // Blank paragraphs belong to the title too.
-            if (!notes && title == null && isTitle(topLevel, placeholder)) {
-                if (!titleText.isEmpty()) {
-                    titleText.append('\n');
-                }
-                titleText.append(text);
+            if (!notes && marker == null && isTitle(topLevel, placeholder)) {
+                titleText.add(text);
             }
             if (!text.isBlank()) {
                 add((notes ? NOTES_PREFIX : "") + text.trim());
@@ -214,8 +215,8 @@ public class PresentationExtractor implements BlobContentExtractor {
 
         @Override
         protected void textShapeEnd(boolean topLevel, String placeholder) throws SAXException {
-            if (!notes && title == null && isTitle(topLevel, placeholder)) {
-                title = titleText.toString();
+            if (!notes && marker == null && isTitle(topLevel, placeholder)) {
+                marker = titleText.marker();
                 if (overflowing) {
                     throw new OoxmlPackages.Stop();
                 }
@@ -236,13 +237,133 @@ public class PresentationExtractor implements BlobContentExtractor {
                     throw new OoxmlPackages.Stop();
                 }
             } else if (lines.size() < capacity) {
-                lines.add(line);
+                lines.add(ContentLine.compact(line, collector.maxValueLength));
             } else {
                 // Discarded: the slide is cut anyway, but its title has to be read before the parse ends.
                 overflowing = true;
-                if (title != null) {
+                if (marker != null) {
                     throw new OoxmlPackages.Stop();
                 }
+            }
+        }
+    }
+
+    /**
+     * The title of a slide, read paragraph by paragraph, holding no more of it than the marker line
+     * needs: its first {@code maxValueLength} characters, its length and its SHA-256.
+     * <p>
+     * {@link #marker()} is exactly what {@link ContentLine#compact(String, int)} makes of
+     * {@code SLIDE_MARKER + ": " + title.trim()}, {@code title} being the paragraphs joined with
+     * {@code \n}, or {@code SLIDE_MARKER} alone for a blank title. Characters up to U+0020 before the
+     * first other one are skipped, and the digest is copied before the ones that follow the last other
+     * one, so that both ends are left out the way {@code trim()} leaves them out.
+     * <p>
+     * Pieces are only ever split next to a character up to U+0020, never inside a surrogate pair, so
+     * encoding them one by one gives the bytes of the whole.
+     *
+     * @since 2025.1
+     */
+    protected static class TitleText {
+
+        protected static final String PREFIX = SLIDE_MARKER + ": ";
+
+        protected final int maxValueLength;
+
+        /** The beginning of the marker, trailing characters up to U+0020 included. */
+        protected final StringBuilder head = new StringBuilder(PREFIX);
+
+        protected final MessageDigest digest = ContentLine.sha256();
+
+        /** The length of the marker, trailing characters up to U+0020 included. */
+        protected long size = PREFIX.length();
+
+        /** Nothing appended yet: no separator before the next paragraph, like the joined title. */
+        protected boolean empty = true;
+
+        /** Whether every character so far is whitespace, as {@code String#isBlank()} tells it. */
+        protected boolean blank = true;
+
+        /** Whether a character over U+0020 has been read: the ones up to it are trimmed. */
+        protected boolean started;
+
+        /** The digest and the length of the marker up to its last character over U+0020, once more follow. */
+        protected MessageDigest trimmedDigest;
+
+        protected long trimmedSize;
+
+        protected TitleText(int maxValueLength) {
+            this.maxValueLength = maxValueLength;
+            digest.update(PREFIX.getBytes(StandardCharsets.UTF_8));
+        }
+
+        protected void add(String paragraph) {
+            if (!empty) {
+                append("\n");
+            }
+            append(paragraph);
+        }
+
+        protected void append(String text) {
+            empty &= text.isEmpty();
+            for (int i = 0; blank && i < text.length(); i++) {
+                blank = Character.isWhitespace(text.charAt(i));
+            }
+            int start = 0;
+            if (!started) {
+                while (start < text.length() && text.charAt(start) <= ' ') {
+                    start++;
+                }
+                started = start < text.length();
+            }
+            int end = text.length();
+            while (end > start && text.charAt(end - 1) <= ' ') {
+                end--;
+            }
+            if (end > start) {
+                feed(text, start, end);
+                trimmedDigest = null;
+            }
+            if (started && end < text.length()) {
+                if (trimmedDigest == null) {
+                    trimmedDigest = copy(digest);
+                    trimmedSize = size;
+                }
+                feed(text, end, text.length());
+            }
+        }
+
+        protected void feed(String text, int start, int end) {
+            size += end - start;
+            int room = maxValueLength - head.length();
+            if (room > 0) {
+                head.append(text, start, Math.min(end, start + room));
+            }
+            digest.update(text.substring(start, end).getBytes(StandardCharsets.UTF_8));
+        }
+
+        /** Returns how many characters of the title are held: at most {@code maxValueLength}, prefix included. */
+        public int length() {
+            return head.length();
+        }
+
+        /** Returns the marker line, compacted. Called once: it completes the digest. */
+        protected String marker() {
+            if (blank) {
+                return SLIDE_MARKER;
+            }
+            MessageDigest whole = trimmedDigest == null ? digest : trimmedDigest;
+            long length = trimmedDigest == null ? size : trimmedSize;
+            if (length <= maxValueLength) {
+                return head.substring(0, (int) length);
+            }
+            return ContentLine.compacted(head, length, whole.digest(), maxValueLength);
+        }
+
+        protected static MessageDigest copy(MessageDigest digest) {
+            try {
+                return (MessageDigest) digest.clone();
+            } catch (CloneNotSupportedException e) {
+                throw new NuxeoException("SHA-256 digests cannot be copied on this JVM", e);
             }
         }
     }
@@ -267,11 +388,16 @@ public class PresentationExtractor implements BlobContentExtractor {
         }
 
         protected boolean add(String value) {
+            return addCompacted(ContentLine.compact(value, maxValueLength));
+        }
+
+        /** Adds a value {@link ContentLine#compact(String, int)} has already bounded. */
+        protected boolean addCompacted(String value) {
             if (lines.size() >= maxLines) {
                 truncated = true;
                 return false;
             }
-            lines.add(ContentLine.of(null, value, maxValueLength));
+            lines.add(ContentLine.of(value));
             return true;
         }
     }

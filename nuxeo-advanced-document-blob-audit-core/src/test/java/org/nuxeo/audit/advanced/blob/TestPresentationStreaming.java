@@ -35,6 +35,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.sl.usermodel.PictureData.PictureType;
 import org.apache.poi.sl.usermodel.Placeholder;
 import org.apache.poi.xslf.usermodel.SlideLayout;
@@ -54,8 +55,11 @@ import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.junit.After;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
+import org.nuxeo.audit.advanced.blob.extractor.SlideHandler;
 import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
+import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
+import org.xml.sax.SAXException;
 
 import com.sun.management.ThreadMXBean;
 
@@ -72,6 +76,8 @@ import com.sun.management.ThreadMXBean;
 public class TestPresentationStreaming {
 
     protected static final int MAX_LINES = 10000;
+
+    protected static final int MAX_VALUE_LENGTH = 1000;
 
     protected static final byte[] PNG = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
@@ -397,5 +403,114 @@ public class TestPresentationStreaming {
         long allocated = allocated() - before;
         assertEquals(1, content.size());
         assertTrue("listing one picture allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
+    }
+
+    /**
+     * Reads the first slide of a deck with {@code SlideText}, recording the most it holds at once.
+     * What a handler holds while it parses cannot be seen from the extracted lines, nor from the
+     * allocations: every paragraph is built whole before it is compacted, whenever that happens.
+     */
+    protected static class Holding extends PresentationExtractor {
+
+        protected int longestLine;
+
+        protected int longestTitle;
+
+        protected void read(Blob blob) throws Exception {
+            // Qualified: an extractor inherits a MAX_VALUE_LENGTH of its own, the property name.
+            Held held = new Held(new Collector(MAX_LINES, TestPresentationStreaming.MAX_VALUE_LENGTH) {
+            });
+            OPCPackage pkg = OoxmlPackages.open(blob.getFile());
+            try {
+                OoxmlPackages.parse(SlideHandler.slides(pkg).get(0), held);
+            } catch (OoxmlPackages.Stop e) {
+                // the slide overflows and its title is known
+            } finally {
+                pkg.revert();
+            }
+        }
+
+        protected class Held extends SlideText {
+
+            protected Held(Collector collector) {
+                super(collector, false);
+            }
+
+            @Override
+            protected void paragraph(boolean topLevel, String placeholder, String text) throws SAXException {
+                super.paragraph(topLevel, placeholder, text);
+                for (String line : lines) {
+                    longestLine = Math.max(longestLine, line.length());
+                }
+                longestTitle = Math.max(longestTitle, titleText.length());
+            }
+        }
+    }
+
+    /** Distinct paragraphs of a given length. */
+    protected static List<String> longParagraphs(int count, int length, String label) {
+        List<String> paragraphs = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            String text = label + " " + i + " ";
+            paragraphs.add(run(text + "x".repeat(length - text.length())));
+        }
+        return paragraphs;
+    }
+
+    protected static String textShape(int id, String placeholder, List<String> paragraphs) {
+        return textShape(id, placeholder, paragraphs.toArray(String[]::new));
+    }
+
+    /**
+     * Item 91: reading each slide once (item 78) held its lines raw until its title was known, where
+     * they used to be compacted as they were produced: a slide held each of its paragraphs whole.
+     */
+    @Test
+    public void testASlideHoldsItsLinesCompacted() throws Exception {
+        Blob blob = onDisk(deck("long.pptx", false,
+                textShape(2, null, longParagraphs(20, 5000, "body")) + textShape(3, "title", run("Title"))));
+        Holding holding = new Holding();
+
+        holding.read(blob);
+
+        assertTrue("held a line of " + holding.longestLine + " characters", holding.longestLine <= MAX_VALUE_LENGTH);
+    }
+
+    /** Item 91: the paragraphs of the title shape were joined whole, however many and long they were. */
+    @Test
+    public void testASlideHoldsNoMoreOfItsTitleThanItsMarkerNeeds() throws Exception {
+        Blob blob = onDisk(deck("title.pptx", false, textShape(2, "title", longParagraphs(20, 5000, "title"))));
+        Holding holding = new Holding();
+
+        holding.read(blob);
+
+        assertTrue("held " + holding.longestTitle + " characters of the title",
+                holding.longestTitle <= MAX_VALUE_LENGTH);
+    }
+
+    /**
+     * Item 91: the title is streamed into its marker, and the marker is still exactly the compacted
+     * {@code SLIDE_MARKER + ": " + title.trim()} of the usermodel: over the limit or under it, with
+     * blank paragraphs and spaces at either end, at the limit once trimmed only, blank.
+     */
+    @Test
+    public void testAStreamedTitleGivesTheMarkerOfTheWholeTitle() throws Exception {
+        List<String> padded = new ArrayList<>(List.of("", run("  ")));
+        padded.addAll(longParagraphs(5, 400, "title"));
+        padded.addAll(List.of("", run(" \t "), ""));
+        List<List<String>> titles = List.of(longParagraphs(5, 400, "title"), padded,
+                List.of(run("  Short  "), "", run("   ")), List.of(run("x".repeat(990)), run("  ")),
+                List.of(run("   "), ""));
+        PresentationExtractor extractor = new PresentationExtractor();
+        extractor.init(Map.of("maxValueLength", String.valueOf(MAX_VALUE_LENGTH)));
+
+        for (List<String> title : titles) {
+            Blob blob = deck("title.pptx", false, textShape(2, "title", title) + textShape(3, null, run("Body")));
+            List<String> expected = usermodelText(blob, false).stream()
+                                                              .map(line -> ContentLine.compact(line, MAX_VALUE_LENGTH))
+                                                              .toList();
+
+            assertEquals(expected, values(extractor.extract(onDisk(blob), MAX_LINES)));
+        }
     }
 }

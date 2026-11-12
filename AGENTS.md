@@ -394,7 +394,9 @@ hands the configured `maxValueLength` to every extractor through `init()`, as th
 `ContentLine.of(key, value, maxValueLength)`. Past the limit, `compact` keeps the beginning, the
 full length and the first 16 hex characters of the SHA-256 of the whole value, so equality still
 means equality, and the result stays within `maxValueLength`, which lets `TextDiffer#elide` leave
-it alone. A new extractor must do the same, or nothing bounds what it holds.
+it alone. A new extractor must do the same, or nothing bounds what it holds — and that includes
+what it holds *before* a value is final: the XLSX shared strings (item 90) and the lines of a slide
+waiting for its title (item 91) are compacted when they are read, not when they are added.
 Coverage: `TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
 `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`.
 
@@ -461,8 +463,12 @@ the first element of the first `mc:Choice` is read, in place of the block, and n
 `mc:Fallback`; only top-level shapes count for the title and for the notes body.
 `TestPresentationStreaming` keeps the former usermodel code as the reference and compares the two
 on a hand-written slide — it caught a wrong reading of the alternate content once already, keep it
-green. Each slide is parsed once: its lines are held, at most the room left under `maxLines`,
-until its title is known, because the `## Slide` marker carries it and comes first. Once a slide
+green. Each slide is parsed once: its lines are held, compacted, at most the room left under
+`maxLines`, until its title is known, because the `## Slide` marker carries it and comes first. The
+title is never held whole either (item 91): `TitleText` keeps its first `maxValueLength` characters,
+its length and a running SHA-256, with a copy of the digest taken before trailing characters up to
+U+0020, so that `marker()` is exactly what `ContentLine.compact` makes of the trimmed whole —
+`ContentLine#compacted` is the one format both use, keep it so. Once a slide
 overflows, `SlideText` reads the rest of it the way the title alone needs — other text and tables
 skipped unread, the shape in progress included — and stops at the title: keeping on building the
 discarded paragraphs is what `testStreamingStopsAtMaxLines` catches. The XLSX inventory never opens a sheet: it reaches the drawing through the
@@ -471,7 +477,8 @@ absolute anchor gets an ordinal, the second cell of the usermodel being derived 
 geometry. Packages are opened through `OoxmlPackages`, from the local file of a `MaterializedBlob`
 only, and released with `revert()`; `close()` on a read-only package logs a WARN before doing the
 same.
-Coverage: `TestPresentationStreaming`, `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
+Coverage: `TestPresentationStreaming` (its three item 91 cases: what a slide holds, and a streamed
+title against the usermodel one), `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
 `#testAOneCellAnchorIsKeyedOnItsCell`.
 
 **The converter output is read line by line** (item 38). `ConverterTextExtractor` reads it with a
@@ -504,7 +511,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 310 tests (27 test classes)
+mvn -o install                                     # full build, 313 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
