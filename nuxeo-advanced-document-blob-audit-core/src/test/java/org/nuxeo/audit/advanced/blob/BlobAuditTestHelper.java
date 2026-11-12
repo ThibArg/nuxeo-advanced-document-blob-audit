@@ -128,10 +128,10 @@ public class BlobAuditTestHelper {
     /**
      * Same bytes, but backed by a real file, so {@code blob.getFile()} is not {@code null}.
      * <p>
-     * The extractors read POI formats from the file when there is one - random access, read only -
-     * and fall back to the stream otherwise. Every other fixture builder here produces an in-memory
-     * blob, so the file branch, which is the one that actually runs in production behind
-     * {@code MaterializedBlob}, would never be exercised without this.
+     * In production the extractors are handed blobs that are already local, {@code BlobDiffComponent#diff}
+     * having materialised both sides. Every other fixture builder here produces an in-memory blob,
+     * which the extractors copy to a temporary file first; this one exercises the pass-through, as in
+     * production.
      * <p>
      * The file goes to the Nuxeo temporary directory through {@link Framework#createTempFile}, not
      * to {@code java.io.tmpdir} as resolved at JVM start. Call {@link #deleteTempFiles()} from an

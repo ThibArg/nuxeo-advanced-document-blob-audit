@@ -20,21 +20,29 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.NuxeoException;
+import org.nuxeo.ecm.core.api.impl.blob.AbstractBlob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.runtime.api.Framework;
@@ -45,7 +53,8 @@ import org.nuxeo.runtime.test.runner.RuntimeFeature;
 /**
  * Unit tests for {@link MaterializedBlob} (item 10).
  * <p>
- * Needs the runtime, because materialising goes through {@code Framework.createTempFile}.
+ * Runs on the runtime alone, without a repository: the temporary copies go to its temporary
+ * directory, as on a server.
  *
  * @since 2025.1
  */
@@ -81,9 +90,10 @@ public class TestMaterializedBlob {
     @Test
     public void testNonLocalBlobIsCopiedToAFile() throws Exception {
         try (MaterializedBlob materialized = MaterializedBlob.of(remoteLike("f.txt"))) {
-            File file = materialized.blob().getFile();
+            File file = materialized.file();
 
             assertNotNull("a non file-backed blob must be materialised", file);
+            assertEquals(file, materialized.blob().getFile());
             assertTrue(file.exists());
             assertEquals("hello", new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
         }
@@ -106,7 +116,7 @@ public class TestMaterializedBlob {
     public void testTemporaryCopyIsDeletedOnClose() {
         File file;
         try (MaterializedBlob materialized = MaterializedBlob.of(remoteLike("f.txt"))) {
-            file = materialized.blob().getFile();
+            file = materialized.file();
             assertTrue(file.exists());
         }
 
@@ -126,6 +136,7 @@ public class TestMaterializedBlob {
 
         try (MaterializedBlob materialized = MaterializedBlob.of(source)) {
             assertSame("an already local blob must not be copied", source, materialized.blob());
+            assertEquals(file, materialized.file());
         }
 
         assertTrue("the source file must never be deleted", file.exists());
@@ -141,7 +152,7 @@ public class TestMaterializedBlob {
             private static final long serialVersionUID = 1L;
 
             @Override
-            public InputStream getStream() throws java.io.IOException {
+            public InputStream getStream() throws IOException {
                 reads.incrementAndGet();
                 return super.getStream();
             }
@@ -158,6 +169,44 @@ public class TestMaterializedBlob {
     public void testNullBlobIsSupported() {
         try (MaterializedBlob materialized = MaterializedBlob.of(null)) {
             assertNull(materialized.blob());
+            assertNull(materialized.file());
+        }
+    }
+
+    /**
+     * There is no in-heap fallback: a copy that fails raises, so that the diff is filed in error and
+     * can be retried, and its temporary file is not left behind.
+     */
+    @Test
+    public void testACopyThatFailsRaises() throws Exception {
+        AtomicInteger reads = new AtomicInteger();
+        Blob unreadable = new AbstractBlob() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public InputStream getStream() throws IOException {
+                reads.incrementAndGet();
+                throw new IOException("blob store unreachable");
+            }
+        };
+        unreadable.setMimeType("text/plain");
+        unreadable.setFilename("f.txt");
+        Set<String> before = temporaryCopies();
+
+        assertThrows(NuxeoException.class, () -> MaterializedBlob.of(unreadable));
+
+        assertEquals("the copy must have been attempted", 1, reads.get());
+        assertEquals("the temporary copy must not be left behind", before, temporaryCopies());
+    }
+
+    /** Returns the names of the temporary copies in the directory {@link MaterializedBlob} writes to. */
+    protected Set<String> temporaryCopies() throws IOException {
+        File probe = Framework.createTempFile("blobdiff-test-", ".probe");
+        tempFiles.add(probe);
+        try (Stream<Path> files = Files.list(probe.getParentFile().toPath())) {
+            return files.map(path -> path.getFileName().toString())
+                        .filter(name -> name.startsWith("blobaudit-") && name.endsWith(".bin"))
+                        .collect(Collectors.toSet());
         }
     }
 }

@@ -63,6 +63,7 @@ import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
+import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTDefinedName;
@@ -117,23 +118,13 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         List<ContentLine> lines = new ArrayList<>();
         boolean truncated;
-        File file = blob.getFile();
-        if (file != null) {
+        try (MaterializedBlob local = MaterializedBlob.of(blob)) {
+            File file = local.file();
             if (FileMagic.valueOf(file) == FileMagic.OOXML) {
                 truncated = stream(OoxmlPackages.open(file), maxLines, lines);
             } else {
                 try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
                     truncated = collect(workbook, maxLines, lines);
-                }
-            }
-        } else {
-            try (InputStream in = FileMagic.prepareToCheckMagic(blob.getStream())) {
-                if (FileMagic.valueOf(in) == FileMagic.OOXML) {
-                    truncated = stream(OoxmlPackages.open(in), maxLines, lines);
-                } else {
-                    try (Workbook workbook = WorkbookFactory.create(in)) {
-                        truncated = collect(workbook, maxLines, lines);
-                    }
                 }
             }
         }

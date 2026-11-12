@@ -31,7 +31,6 @@ import org.apache.poi.openxml4j.opc.PackagePart;
 import org.apache.poi.openxml4j.opc.PackageRelationship;
 import org.apache.poi.openxml4j.opc.TargetMode;
 import org.apache.poi.util.XMLHelper;
-import org.nuxeo.ecm.core.api.Blob;
 import org.xml.sax.Attributes;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.InputSource;
@@ -42,9 +41,9 @@ import org.xml.sax.XMLReader;
  * Opens OOXML packages and streams their XML parts, for the extractors that read a bounded part of
  * a document and must therefore not let POI's usermodel build the model of all of it.
  * <p>
- * A package is opened read only from the local file when there is one, so its parts are inflated
- * on demand. The caller releases it with {@link OPCPackage#revert()}: {@code close()} on a read-only
- * package logs a warning and then does exactly that.
+ * Packages are opened read only from a local file (see {@link MaterializedBlob}), so their parts are
+ * inflated on demand. The caller releases a package with {@link OPCPackage#revert()}: {@code close()}
+ * on a read-only package logs a warning and then does exactly that.
  *
  * @since 2025.1
  */
@@ -69,21 +68,6 @@ public final class OoxmlPackages {
     }
 
     /**
-     * Opens the package of the blob, from its local file when it has one.
-     *
-     * @since 2025.1
-     */
-    public static OPCPackage open(Blob blob) throws IOException {
-        File file = blob.getFile();
-        if (file != null) {
-            return open(file);
-        }
-        try (InputStream in = blob.getStream()) {
-            return open(in);
-        }
-    }
-
-    /**
      * Opens the package read only, in random access.
      *
      * @since 2025.1
@@ -93,19 +77,6 @@ public final class OoxmlPackages {
             return OPCPackage.open(file, PackageAccess.READ);
         } catch (InvalidFormatException e) {
             throw new IOException("Not a readable OOXML package: " + file.getName(), e);
-        }
-    }
-
-    /**
-     * Buffers the whole package: only the fallback for a blob that could not be materialised.
-     *
-     * @since 2025.1
-     */
-    public static OPCPackage open(InputStream in) throws IOException {
-        try {
-            return OPCPackage.open(in);
-        } catch (InvalidFormatException e) {
-            throw new IOException("Not a readable OOXML package", e);
         }
     }
 

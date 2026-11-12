@@ -444,7 +444,7 @@ kept for `.xls`) produces: `TestSpreadsheetStreaming` compares the two on a hand
 deliberate exception: shared formulas are rebuilt with an in-place shift rather than POI's
 `SharedFormula`, which turns a reference to another sheet into a plain one. The parser comes from
 `XMLHelper.newXMLReader()` (no DTD, no external entity) — never build one by hand.
-Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`, `TestExtractorFileBacking`.
+Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`.
 
 **PPTX, and the XLSX image inventory, are streamed too** (item 35). `XMLSlideShow` parses every
 slide when it opens a deck. `SlideHandler` walks the shape tree of a slide with SAX the way
@@ -457,8 +457,9 @@ green. The title needs its own first pass, which skips every shape that is not a
 without reading it. The XLSX inventory never opens a sheet: it reaches the drawing through the
 relationships of the sheet part. A one-cell anchor is therefore keyed on its cell alone and an
 absolute anchor gets an ordinal, the second cell of the usermodel being derived from the sheet
-geometry. Packages are opened through `OoxmlPackages` and released with `revert()`; `close()` on a
-read-only package logs a WARN before doing the same.
+geometry. Packages are opened through `OoxmlPackages`, from the local file of a `MaterializedBlob`
+only, and released with `revert()`; `close()` on a read-only package logs a WARN before doing the
+same.
 Coverage: `TestPresentationStreaming`, `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
 `#testAOneCellAnchorIsKeyedOnItsCell`.
 
@@ -492,7 +493,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 313 tests (28 test classes)
+mvn -o install                                     # full build, 309 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
@@ -507,7 +508,7 @@ Tests needing no Nuxeo runtime (fast, pure JUnit):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
-  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestExtractorFileBacking,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
 ```
 
 All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys

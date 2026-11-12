@@ -45,8 +45,6 @@ import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSStream;
-import org.apache.pdfbox.io.RandomAccessRead;
-import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
@@ -385,23 +383,13 @@ public class ImageInventoryExtractor implements BlobContentExtractor {
         List<ContentLine> images = new ArrayList<>();
         boolean truncated;
         boolean[] dropped = new boolean[1];
-        File file = blob.getFile();
-        if (file != null) {
+        try (MaterializedBlob local = MaterializedBlob.of(blob)) {
+            File file = local.file();
             if (FileMagic.valueOf(file) == FileMagic.OOXML) {
                 truncated = streamSpreadsheetImages(OoxmlPackages.open(file), images, maxLines, dropped);
             } else {
                 try (Workbook workbook = WorkbookFactory.create(file, null, true)) {
                     truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
-                }
-            }
-        } else {
-            try (InputStream in = FileMagic.prepareToCheckMagic(blob.getStream())) {
-                if (FileMagic.valueOf(in) == FileMagic.OOXML) {
-                    truncated = streamSpreadsheetImages(OoxmlPackages.open(in), images, maxLines, dropped);
-                } else {
-                    try (Workbook workbook = WorkbookFactory.create(in)) {
-                        truncated = collectSpreadsheetImages(workbook, images, maxLines, dropped);
-                    }
                 }
             }
         }
@@ -713,34 +701,19 @@ public class ImageInventoryExtractor implements BlobContentExtractor {
     }
 
     /**
-     * PDFBox reads the document straight from the file, so nothing of it is held in heap.
+     * PDFBox reads the document straight from the local file, so nothing of it is held in heap.
      * <p>
      * The {@code PDDocument} is a resource of <b>this</b> method, not an argument built in the call
      * to {@link #collectPdf}: closing it there worked only because {@code try (document)} happened
      * to be the first statement of that method, and any guard inserted ahead of it would have
      * turned both call sites into leaks with no compiler help.
-     * <p>
-     * The fallback branch still buffers the whole PDF, because a random-access read is what the
-     * parser needs and there is no local file to give it. That is the cost of a failed
-     * materialisation, and the reason it is only a fallback.
      */
     protected DiffableContent extractPdf(Blob blob, int maxLines) throws IOException {
         List<ContentLine> images = new ArrayList<>();
         boolean truncated;
         boolean[] dropped = new boolean[1];
-        try (MaterializedBlob local = MaterializedBlob.of(blob)) {
-            File file = local.blob().getFile();
-            if (file != null) {
-                try (PDDocument document = Loader.loadPDF(file)) {
-                    truncated = collectPdf(document, images, maxLines, dropped);
-                }
-            } else {
-                try (InputStream in = blob.getStream();
-                        RandomAccessRead source = new RandomAccessReadBuffer(in);
-                        PDDocument document = Loader.loadPDF(source)) {
-                    truncated = collectPdf(document, images, maxLines, dropped);
-                }
-            }
+        try (MaterializedBlob local = MaterializedBlob.of(blob); PDDocument document = Loader.loadPDF(local.file())) {
+            truncated = collectPdf(document, images, maxLines, dropped);
         }
         return DiffableContent.keyed(images, truncated || dropped[0]);
     }
@@ -965,21 +938,23 @@ public class ImageInventoryExtractor implements BlobContentExtractor {
         List<ContentLine> images = new ArrayList<>();
         boolean truncated = false;
         boolean[] dropped = new boolean[1];
-        OPCPackage pkg = OoxmlPackages.open(blob);
-        try {
-            ImageBudget budget = new ImageBudget(new HashMap<>());
-            int slideNumber = 0;
-            for (PackagePart slide : SlideHandler.slides(pkg)) {
-                slideNumber++;
-                OoxmlPackages.parse(slide, new SlidePictures(slide, "powerpoint:slide:" + slideNumber + ":image:",
-                        images, maxLines, dropped, budget));
+        try (MaterializedBlob local = MaterializedBlob.of(blob)) {
+            OPCPackage pkg = OoxmlPackages.open(local.file());
+            try {
+                ImageBudget budget = new ImageBudget(new HashMap<>());
+                int slideNumber = 0;
+                for (PackagePart slide : SlideHandler.slides(pkg)) {
+                    slideNumber++;
+                    OoxmlPackages.parse(slide, new SlidePictures(slide, "powerpoint:slide:" + slideNumber + ":image:",
+                            images, maxLines, dropped, budget));
+                }
+            } catch (OoxmlPackages.Stop e) {
+                truncated = true;
+            } catch (SAXException e) {
+                throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
+            } finally {
+                pkg.revert();
             }
-        } catch (OoxmlPackages.Stop e) {
-            truncated = true;
-        } catch (SAXException e) {
-            throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
-        } finally {
-            pkg.revert();
         }
         return DiffableContent.keyed(images, truncated || dropped[0]);
     }

@@ -26,6 +26,7 @@ import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
 import org.nuxeo.audit.advanced.blob.ContentLine;
 import org.nuxeo.audit.advanced.blob.DiffableContent;
 import org.nuxeo.audit.advanced.blob.TextDiffer;
+import org.nuxeo.audit.advanced.blob.io.MaterializedBlob;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.xml.sax.SAXException;
@@ -78,17 +79,19 @@ public class PresentationExtractor implements BlobContentExtractor {
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
         Collector collector = new Collector(maxLines, maxValueLength);
-        OPCPackage pkg = OoxmlPackages.open(blob);
-        try {
-            for (PackagePart slide : SlideHandler.slides(pkg)) {
-                if (!collectSlide(slide, collector)) {
-                    break;
+        try (MaterializedBlob local = MaterializedBlob.of(blob)) {
+            OPCPackage pkg = OoxmlPackages.open(local.file());
+            try {
+                for (PackagePart slide : SlideHandler.slides(pkg)) {
+                    if (!collectSlide(slide, collector)) {
+                        break;
+                    }
                 }
+            } catch (SAXException e) {
+                throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
+            } finally {
+                pkg.revert();
             }
-        } catch (SAXException e) {
-            throw OoxmlPackages.unreadable(e, "OOXML presentation: " + blob.getFilename());
-        } finally {
-            pkg.revert();
         }
         return DiffableContent.positional(collector.lines, collector.truncated);
     }

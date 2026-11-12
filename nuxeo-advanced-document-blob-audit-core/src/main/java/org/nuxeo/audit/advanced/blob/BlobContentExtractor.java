@@ -59,7 +59,9 @@ public interface BlobContentExtractor {
      * cooperative-cancellation signal of the {@code blobDiff} worker threads. An implementation
      * that needs to report a non-I/O failure should throw a {@link org.nuxeo.ecm.core.api.NuxeoException}.
      *
-     * @param blob the blob to read, never {@code null}
+     * @param blob the blob to read, never {@code null}; an extractor needing a file reads it through
+     *            {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob}, a pass-through when the
+     *            blob is already local
      * @param maxLines the maximum number of {@link ContentLine} to produce; implementations must
      *            stop past this limit and flag the result as truncated. Each value should also be
      *            bounded at creation, through {@link ContentLine#of(String, String, int)}: past

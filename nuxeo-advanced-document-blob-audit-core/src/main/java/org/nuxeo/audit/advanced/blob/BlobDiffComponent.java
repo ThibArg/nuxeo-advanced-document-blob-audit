@@ -310,8 +310,9 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     /**
      * Both binaries are materialised locally <b>once</b> and every extraction pass reads the local
-     * copy. Without this, a pair of S3-backed blobs meant one download per pass: four for two files
-     * as soon as the image inventory is on.
+     * copy: the {@link MaterializedBlob#of(Blob)} each extractor needing a file goes through is then
+     * a pass-through. Without this, a pair of S3-backed blobs meant one download per pass: four for
+     * two files as soon as the image inventory is on.
      */
     @Override
     public DiffResult diff(Blob oldBlob, Blob newBlob) {
