@@ -31,10 +31,10 @@ public enum DiffEligibility {
     ELIGIBLE(null),
 
     /** The blob is bigger than {@code maxBlobSize}: report the change, do not diff it. */
-    TOO_LARGE(BlobAuditConstants.STATUS_SKIPPED_SIZE),
+    TOO_LARGE(DiffStatus.SKIPPED_TOO_LARGE),
 
     /** No contributed extractor handles the mime type: report the change, do not diff it. */
-    UNSUPPORTED_TYPE(BlobAuditConstants.STATUS_SKIPPED_TYPE),
+    UNSUPPORTED_TYPE(DiffStatus.SKIPPED_UNSUPPORTED_TYPE),
 
     /**
      * Both sides are supported, but by different extractor contributions: report the change, do not
@@ -43,7 +43,7 @@ public enum DiffEligibility {
      *
      * @since 2025.1
      */
-    FORMAT_CHANGED(BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED),
+    FORMAT_CHANGED(DiffStatus.SKIPPED_FORMAT_CHANGED),
 
     /**
      * Out of scope entirely - feature disabled, document type or xpath not covered, no blob. Stays
@@ -51,10 +51,11 @@ public enum DiffEligibility {
      */
     NOT_APPLICABLE(null);
 
-    protected final String skipReason;
+    /** The skip to report, {@code null} for {@link #ELIGIBLE} and {@link #NOT_APPLICABLE}. */
+    protected final DiffStatus status;
 
-    DiffEligibility(String skipReason) {
-        this.skipReason = skipReason;
+    DiffEligibility(DiffStatus status) {
+        this.status = status;
     }
 
     /**
@@ -62,12 +63,12 @@ public enum DiffEligibility {
      * reported.
      */
     public String getSkipReason() {
-        return skipReason;
+        return status == null ? null : status.value();
     }
 
     /** {@code true} when the binary change must be audited even though it cannot be diffed. */
     public boolean isReportable() {
-        return skipReason != null;
+        return status != null;
     }
 
     /**

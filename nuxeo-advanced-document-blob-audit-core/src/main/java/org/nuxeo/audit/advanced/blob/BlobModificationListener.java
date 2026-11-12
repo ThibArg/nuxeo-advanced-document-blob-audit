@@ -24,11 +24,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_OLD_MIME_TYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_SKIP_REASON;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_XPATH;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_FORMAT_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_LIST_CHANGED;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_NOT_MANAGED;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_SIZE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_SKIPPED_TYPE;
 
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -316,22 +312,7 @@ public class BlobModificationListener implements EventListener {
     }
 
     protected String commentSuffix(BlobDiffTrigger.Outcome outcome) {
-        if (STATUS_SKIPPED_SIZE.equals(outcome.skipReason())) {
-            return "binary changed (too large)";
-        }
-        if (STATUS_SKIPPED_TYPE.equals(outcome.skipReason())) {
-            return "binary changed (unsupported format)";
-        }
-        if (STATUS_SKIPPED_FORMAT_CHANGED.equals(outcome.skipReason())) {
-            return "binary changed (format changed)";
-        }
-        if (STATUS_SKIPPED_NOT_MANAGED.equals(outcome.skipReason())) {
-            return "binary changed (blob not managed by a provider)";
-        }
-        if (STATUS_SKIPPED_LIST_CHANGED.equals(outcome.skipReason())) {
-            return "binary changed (list entries also removed or moved, previous file unknown)";
-        }
-        return "binary content modified between versions";
+        return (outcome.skipReason() == null ? DiffStatus.OK : DiffStatus.of(outcome.skipReason())).auditComment();
     }
 
     protected String filenameOf(Blob blob) {
