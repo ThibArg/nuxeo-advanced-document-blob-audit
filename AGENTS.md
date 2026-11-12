@@ -405,11 +405,14 @@ declared `throws Exception` until item 28, which forced `catch (Exception)` on a
 `FrozenBlob#resolve`): it runs on a
 WorkManager thread that *is* interrupted at shutdown, and it swallowed the cancel to file a bogus
 `error` diff. An extractor that needs to report a non-I/O failure throws a `NuxeoException`.
-`ImageInventoryExtractor` wraps the only other checked exception it could raise,
-`NoSuchAlgorithmException` on `"SHA-256"` — guaranteed by the JCA, so an environment fault, not
-something eleven signatures should carry.
+`AbstractImageInventory#newDigest` wraps the only other checked exception the image inventories
+could raise, `NoSuchAlgorithmException` on `"SHA-256"` — guaranteed by the JCA, so an environment
+fault, not something eleven signatures should carry.
 
 **The image budget is uniform across the four formats, and dropping an image never renumbers.**
+One class per format (`WordImageInventory`, `SpreadsheetImageInventory`,
+`PresentationImageInventory`, `PdfImageInventory`) extends `AbstractImageInventory`, which owns the
+budgets, the digests and the `Inventory` accumulator.
 `maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The
 XLSX and PPTX paths resolve the picture part from its relationship and stream it through
 `digestOoxmlPicture(PackagePart, …)`, never through `PictureData#getData()`, which materialises the
@@ -493,7 +496,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 309 tests (27 test classes)
+mvn -o install                                     # full build, 308 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```

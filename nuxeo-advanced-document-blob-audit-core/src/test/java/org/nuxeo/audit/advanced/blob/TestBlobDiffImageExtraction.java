@@ -33,7 +33,7 @@ import org.apache.poi.xwpf.usermodel.Document;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
+import org.nuxeo.audit.advanced.blob.image.PdfImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.runtime.test.runner.Deploy;
@@ -112,7 +112,7 @@ public class TestBlobDiffImageExtraction {
 
     @Test
     public void testContributedImageExtractorIsTheInventoryOne() {
-        assertTrue(component().findImageExtractor("application/pdf") instanceof ImageInventoryExtractor);
+        assertTrue(component().findImageExtractor("application/pdf") instanceof PdfImageInventory);
     }
 
     /** A format with no image inventory must not fall back on a catch-all. */

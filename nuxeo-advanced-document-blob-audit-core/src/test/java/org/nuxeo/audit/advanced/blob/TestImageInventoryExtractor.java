@@ -59,7 +59,11 @@ import org.apache.poi.xwpf.usermodel.Document;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.After;
 import org.junit.Test;
-import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
+import org.nuxeo.audit.advanced.blob.image.AbstractImageInventory;
+import org.nuxeo.audit.advanced.blob.image.PdfImageInventory;
+import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
+import org.nuxeo.audit.advanced.blob.image.SpreadsheetImageInventory;
+import org.nuxeo.audit.advanced.blob.image.WordImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.runtime.api.Framework;
@@ -95,7 +99,21 @@ public class TestImageInventoryExtractor {
     protected static final byte[] PNG_2 = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
-    protected final ImageInventoryExtractor extractor = new ImageInventoryExtractor();
+    /** The image inventory contributed for the mime type of the fixture, as the component selects it. */
+    protected static AbstractImageInventory inventory(Blob blob) {
+        return switch (blob.getMimeType()) {
+            case BlobAuditTestHelper.DOCX_MIME -> new WordImageInventory();
+            case BlobAuditTestHelper.XLSX_MIME -> new SpreadsheetImageInventory();
+            case BlobAuditTestHelper.PPTX_MIME -> new PresentationImageInventory();
+            case "application/pdf" -> new PdfImageInventory();
+            default -> throw new IllegalArgumentException("No image inventory for " + blob.getMimeType());
+        };
+    }
+
+    /** Extracts the image inventory of the fixture with the inventory of its format. */
+    protected static DiffableContent extract(Blob blob, int maxLines) throws IOException {
+        return inventory(blob).extract(blob, maxLines);
+    }
 
     protected Blob docx(String filename, byte[]... images) throws Exception {
         try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -187,7 +205,7 @@ public class TestImageInventoryExtractor {
 
     @Test
     public void testWordImageIsInventoriedByMediaPart() throws Exception {
-        DiffableContent content = extractor.extract(docx("image.docx", PNG), MAX_LINES);
+        DiffableContent content = extract(docx("image.docx", PNG), MAX_LINES);
         assertEquals(1, content.size());
         assertTrue(content.lines().get(0).key().startsWith("word:image:"));
         assertTrue(content.lines().get(0).value().startsWith("sha256:"));
@@ -206,7 +224,7 @@ public class TestImageInventoryExtractor {
             workbook.write(out);
             blob = BlobAuditTestHelper.blob(out.toByteArray(), BlobAuditTestHelper.XLSX_MIME, "image.xlsx");
         }
-        DiffableContent content = extractor.extract(blob, MAX_LINES);
+        DiffableContent content = extract(blob, MAX_LINES);
         assertEquals(1, content.size());
         assertEquals("excel:image:Budget:B4:F18", content.lines().get(0).key());
     }
@@ -231,9 +249,9 @@ public class TestImageInventoryExtractor {
     public void testWordInventoryIsBoundedByMaxLines() throws Exception {
         Blob blob = docx("two.docx", PNG, PNG_2);
 
-        assertEquals(2, extractor.extract(blob, MAX_LINES).size());
+        assertEquals(2, extract(blob, MAX_LINES).size());
 
-        DiffableContent truncated = extractor.extract(blob, 1);
+        DiffableContent truncated = extract(blob, 1);
         assertEquals(1, truncated.size());
         assertTrue(truncated.truncated());
     }
@@ -242,23 +260,23 @@ public class TestImageInventoryExtractor {
     public void testPdfInventoryIsBoundedByMaxLines() throws Exception {
         Blob blob = pdf("two.pdf", PNG, PNG_2);
 
-        assertEquals(2, extractor.extract(blob, MAX_LINES).size());
+        assertEquals(2, extract(blob, MAX_LINES).size());
 
-        DiffableContent truncated = extractor.extract(blob, 1);
+        DiffableContent truncated = extract(blob, 1);
         assertEquals(1, truncated.size());
         assertTrue(truncated.truncated());
     }
 
     @Test
     public void testUntruncatedInventoryIsNotFlagged() throws Exception {
-        assertFalse(extractor.extract(docx("one.docx", PNG), MAX_LINES).truncated());
+        assertFalse(extract(docx("one.docx", PNG), MAX_LINES).truncated());
     }
 
     /* ==================== PDF ==================== */
 
     @Test
     public void testPdfImageIsInventoriedByPage() throws Exception {
-        DiffableContent content = extractor.extract(pdf("image.pdf", PNG, PNG_2), MAX_LINES);
+        DiffableContent content = extract(pdf("image.pdf", PNG, PNG_2), MAX_LINES);
 
         assertTrue(content.keyed());
         assertEquals(2, content.size());
@@ -269,8 +287,8 @@ public class TestImageInventoryExtractor {
 
     @Test
     public void testPdfImageReplacementIsReported() throws Exception {
-        DiffResult result = new TextDiffer().diff(extractor.extract(pdf("a.pdf", PNG), MAX_LINES),
-                extractor.extract(pdf("b.pdf", PNG_2), MAX_LINES));
+        DiffResult result = new TextDiffer().diff(extract(pdf("a.pdf", PNG), MAX_LINES),
+                extract(pdf("b.pdf", PNG_2), MAX_LINES));
 
         assertEquals(1, result.changed());
     }
@@ -278,8 +296,8 @@ public class TestImageInventoryExtractor {
     /** The encoding parameters are part of the digest: their rendering must not depend on the file. */
     @Test
     public void testTheSamePdfImageInTwoFilesIsNotReportedAsChanged() throws Exception {
-        DiffResult result = new TextDiffer().diff(extractor.extract(pdf("a.pdf", PNG), MAX_LINES),
-                extractor.extract(pdf("b.pdf", PNG), MAX_LINES));
+        DiffResult result = new TextDiffer().diff(extract(pdf("a.pdf", PNG), MAX_LINES),
+                extract(pdf("b.pdf", PNG), MAX_LINES));
 
         assertTrue(result.isEmpty());
     }
@@ -296,7 +314,7 @@ public class TestImageInventoryExtractor {
         ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         long before = threads.getCurrentThreadAllocatedBytes();
 
-        DiffableContent content = extractor.extract(blob, MAX_LINES);
+        DiffableContent content = extract(blob, MAX_LINES);
 
         long allocated = threads.getCurrentThreadAllocatedBytes() - before;
         assertEquals("the image must be inventoried from its encoded bytes, not dropped", 1, content.size());
@@ -320,7 +338,7 @@ public class TestImageInventoryExtractor {
             blob = save(document, "loop.pdf");
         }
 
-        DiffableContent content = extractor.extract(blob, MAX_LINES);
+        DiffableContent content = extract(blob, MAX_LINES);
 
         assertEquals(1, content.size());
         assertTrue("a cut loop leaves a partial inventory", content.truncated());
@@ -343,7 +361,7 @@ public class TestImageInventoryExtractor {
             blob = save(document, "branching.pdf");
         }
 
-        DiffableContent content = extractor.extract(blob, MAX_LINES);
+        DiffableContent content = extract(blob, MAX_LINES);
 
         assertEquals(0, content.size());
         assertFalse(content.truncated());
@@ -360,38 +378,47 @@ public class TestImageInventoryExtractor {
             blob = save(document, "shared.pdf");
         }
 
-        List<ContentLine> lines = extractor.extract(blob, MAX_LINES).lines();
+        List<ContentLine> lines = extract(blob, MAX_LINES).lines();
 
         assertEquals(List.of("pdf:page:1:image:1", "pdf:page:2:image:1"),
                 lines.stream().map(ContentLine::key).toList());
         assertEquals(lines.get(0).value(), lines.get(1).value());
     }
 
-    @Test
-    public void testUnsupportedMimeTypeYieldsAnEmptyInventory() throws Exception {
-        Blob blob = BlobAuditTestHelper.textBlob("hello", "text/plain", "f.txt");
-
-        assertEquals(0, extractor.extract(blob, MAX_LINES).size());
-    }
-
     /* ==================== Budget on a single image (SEC-02, SEC-04) ==================== */
 
     /**
-     * The extractor with a lowered ceiling, so a fixture can cross it without the test having to
-     * build - and the test JVM to inflate - a real multi-gigabyte bomb.
+     * The inventory of the fixture's format with a lowered ceiling, so a fixture can cross it without
+     * the test having to build - and the test JVM to inflate - a real multi-gigabyte bomb.
      */
-    protected static class CappedExtractor extends ImageInventoryExtractor {
-
-        protected final long cap;
-
-        protected CappedExtractor(long cap) {
-            this.cap = cap;
-        }
-
-        @Override
-        protected long maxImageBytes() {
-            return cap;
-        }
+    protected static AbstractImageInventory capped(Blob blob, long cap) {
+        return switch (blob.getMimeType()) {
+            case BlobAuditTestHelper.DOCX_MIME -> new WordImageInventory() {
+                @Override
+                protected long maxImageBytes() {
+                    return cap;
+                }
+            };
+            case BlobAuditTestHelper.XLSX_MIME -> new SpreadsheetImageInventory() {
+                @Override
+                protected long maxImageBytes() {
+                    return cap;
+                }
+            };
+            case BlobAuditTestHelper.PPTX_MIME -> new PresentationImageInventory() {
+                @Override
+                protected long maxImageBytes() {
+                    return cap;
+                }
+            };
+            case "application/pdf" -> new PdfImageInventory() {
+                @Override
+                protected long maxImageBytes() {
+                    return cap;
+                }
+            };
+            default -> throw new IllegalArgumentException("No image inventory for " + blob.getMimeType());
+        };
     }
 
     /** A real PNG of the requested square size, filled with seeded noise so that it does not compress. */
@@ -426,9 +453,9 @@ public class TestImageInventoryExtractor {
         Blob blob = docx("bomb.docx", new byte[64 * 1024], PNG);
 
         assertEquals("the fixture must hold two media parts at default settings", 2,
-                extractor.extract(blob, MAX_LINES).size());
+                extract(blob, MAX_LINES).size());
 
-        DiffableContent content = new CappedExtractor(1024).extract(blob, MAX_LINES);
+        DiffableContent content = capped(blob, 1024).extract(blob, MAX_LINES);
 
         assertEquals("the over-sized part must be dropped and the normal one kept", 1, content.size());
         assertTrue("dropping a part must be reported as a truncation", content.truncated());
@@ -446,9 +473,9 @@ public class TestImageInventoryExtractor {
         Blob blob = pdf("bomb.pdf", png(64));
 
         assertEquals("the fixture must hold one image at default settings", 1,
-                extractor.extract(blob, MAX_LINES).size());
+                extract(blob, MAX_LINES).size());
 
-        DiffableContent content = new CappedExtractor(256).extract(blob, MAX_LINES);
+        DiffableContent content = capped(blob, 256).extract(blob, MAX_LINES);
 
         assertEquals("an image over the budget must be dropped", 0, content.size());
         assertTrue("dropping an image must be reported as a truncation", content.truncated());
@@ -457,7 +484,7 @@ public class TestImageInventoryExtractor {
     /**
      * The same budget, on the two formats it was never applied to.
      * <p>
-     * The DOCX and PDF paths dropped an entry past {@link ImageInventoryExtractor#maxImageBytes()};
+     * The DOCX and PDF paths dropped an entry past {@link AbstractImageInventory#maxImageBytes()};
      * the XLSX and PPTX ones called {@code PictureData#getData()}, which materialises the whole
      * inflated image. POI caps that at its own {@code MAX_IMAGE_SIZE} - 100 MB in 5.5.1 - so it was
      * never the unbounded allocation SEC-02 was, but it was three times this extractor's budget and
@@ -470,9 +497,9 @@ public class TestImageInventoryExtractor {
         Blob blob = xlsxWithPictures("bomb.xlsx", new byte[64 * 1024], PNG);
 
         assertEquals("the fixture must hold two pictures at default settings", 2,
-                extractor.extract(blob, MAX_LINES).size());
+                extract(blob, MAX_LINES).size());
 
-        DiffableContent content = new CappedExtractor(1024).extract(blob, MAX_LINES);
+        DiffableContent content = capped(blob, 1024).extract(blob, MAX_LINES);
 
         assertEquals("the over-sized picture must be dropped and the normal one kept", 1, content.size());
         assertTrue("dropping a picture must be reported as a truncation", content.truncated());
@@ -484,9 +511,9 @@ public class TestImageInventoryExtractor {
         Blob blob = pptxWithPictures("bomb.pptx", new byte[64 * 1024], PNG);
 
         assertEquals("the fixture must hold two pictures at default settings", 2,
-                extractor.extract(blob, MAX_LINES).size());
+                extract(blob, MAX_LINES).size());
 
-        DiffableContent content = new CappedExtractor(1024).extract(blob, MAX_LINES);
+        DiffableContent content = capped(blob, 1024).extract(blob, MAX_LINES);
 
         assertEquals("the over-sized picture must be dropped and the normal one kept", 1, content.size());
         assertTrue("dropping a picture must be reported as a truncation", content.truncated());
@@ -501,16 +528,16 @@ public class TestImageInventoryExtractor {
     public void testDroppingAPictureDoesNotRenumberTheFollowingOnes() throws Exception {
         Blob blob = pptxWithPictures("mixed.pptx", new byte[64 * 1024], PNG);
 
-        List<String> full = new CappedExtractor(128 * 1024).extract(blob, MAX_LINES)
-                                                           .lines()
-                                                           .stream()
-                                                           .map(ContentLine::key)
-                                                           .toList();
-        List<String> capped = new CappedExtractor(1024).extract(blob, MAX_LINES)
-                                                       .lines()
-                                                       .stream()
-                                                       .map(ContentLine::key)
-                                                       .toList();
+        List<String> full = capped(blob, 128 * 1024).extract(blob, MAX_LINES)
+                                                    .lines()
+                                                    .stream()
+                                                    .map(ContentLine::key)
+                                                    .toList();
+        List<String> capped = capped(blob, 1024).extract(blob, MAX_LINES)
+                                                .lines()
+                                                .stream()
+                                                .map(ContentLine::key)
+                                                .toList();
 
         assertEquals(2, full.size());
         assertEquals("the surviving key must be identical to the one it has when nothing is dropped",
@@ -557,8 +584,8 @@ public class TestImageInventoryExtractor {
         Blob before = BlobAuditTestHelper.blob(xlsxBytes(true, PNG, PNG_2), BlobAuditTestHelper.XLSX_MIME, "a.xlsx");
         Blob after = BlobAuditTestHelper.blob(xlsxBytes(true, PNG_2, PNG_2), BlobAuditTestHelper.XLSX_MIME, "b.xlsx");
 
-        DiffableContent content = extractor.extract(before, MAX_LINES);
-        DiffResult result = new TextDiffer().diff(content, extractor.extract(after, MAX_LINES));
+        DiffableContent content = extract(before, MAX_LINES);
+        DiffResult result = new TextDiffer().diff(content, extract(after, MAX_LINES));
 
         assertEquals(List.of("excel:image:Budget:A1:C5", "excel:image:Budget:A1:C5#2"), keys(content));
         assertEquals(1, result.changed());
@@ -575,7 +602,7 @@ public class TestImageInventoryExtractor {
                           .replaceAll("</(\\w+:)?twoCellAnchor>", "</$1oneCellAnchor>")
                           .replaceAll("<(\\w+:)?to>.*?</(\\w+:)?to>", "<$1ext cx=\"914400\" cy=\"914400\"/>"));
 
-        DiffableContent content = extractor.extract(
+        DiffableContent content = extract(
                 BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "one-cell.xlsx"), MAX_LINES);
 
         assertEquals(List.of("excel:image:Budget:A1"), keys(content));
@@ -604,7 +631,7 @@ public class TestImageInventoryExtractor {
         ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         long before = threads.getCurrentThreadAllocatedBytes();
 
-        DiffableContent content = extractor.extract(blob, MAX_LINES);
+        DiffableContent content = extract(blob, MAX_LINES);
 
         long allocated = threads.getCurrentThreadAllocatedBytes() - before;
         assertEquals(1, content.size());
@@ -612,18 +639,6 @@ public class TestImageInventoryExtractor {
     }
 
     /* ==================== Images read once, within a budget per file (RES-05) ==================== */
-
-    /** Counts the images actually read, whatever the format. */
-    protected static class CountingExtractor extends ImageInventoryExtractor {
-
-        protected int reads;
-
-        @Override
-        protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
-            reads++;
-            return super.digestStream(digest, in);
-        }
-    }
 
     /**
      * RES-05 (code review 2026-10): every placement of an image was read and hashed again. A scanned
@@ -639,7 +654,16 @@ public class TestImageInventoryExtractor {
             }
             blob = save(document, "background.pdf");
         }
-        CountingExtractor counting = new CountingExtractor();
+        // Counts the images actually read.
+        var counting = new PdfImageInventory() {
+            protected int reads;
+
+            @Override
+            protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
+                reads++;
+                return super.digestStream(digest, in);
+            }
+        };
 
         List<ContentLine> lines = counting.extract(blob, MAX_LINES).lines();
 
@@ -660,7 +684,15 @@ public class TestImageInventoryExtractor {
             show.write(out);
             bytes = out.toByteArray();
         }
-        CountingExtractor counting = new CountingExtractor();
+        var counting = new PresentationImageInventory() {
+            protected int reads;
+
+            @Override
+            protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
+                reads++;
+                return super.digestStream(digest, in);
+            }
+        };
 
         DiffableContent content = counting.extract(
                 BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.PPTX_MIME, "logo.pptx"), MAX_LINES);
@@ -687,7 +719,15 @@ public class TestImageInventoryExtractor {
             workbook.write(out);
             bytes = out.toByteArray();
         }
-        CountingExtractor counting = new CountingExtractor();
+        var counting = new SpreadsheetImageInventory() {
+            protected int reads;
+
+            @Override
+            protected String digestStream(MessageDigest digest, InputStream in) throws IOException {
+                reads++;
+                return super.digestStream(digest, in);
+            }
+        };
 
         DiffableContent content = counting.extract(
                 BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "logo.xlsx"), MAX_LINES);
@@ -709,8 +749,8 @@ public class TestImageInventoryExtractor {
         }
         for (Blob blob : List.of(docx("many.docx", images), pdf("many.pdf", images),
                 pptxWithPictures("many.pptx", images))) {
-            DiffableContent all = extractor.extract(blob, MAX_LINES);
-            DiffableContent capped = new CappedExtractor(8 * 1024).extract(blob, MAX_LINES);
+            DiffableContent all = extract(blob, MAX_LINES);
+            DiffableContent capped = capped(blob, 8 * 1024).extract(blob, MAX_LINES);
 
             assertEquals(blob.getFilename(), 40, all.size());
             assertFalse(blob.getFilename(), all.truncated());

@@ -54,7 +54,7 @@ import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.junit.After;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
-import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
+import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 
 import com.sun.management.ThreadMXBean;
@@ -353,7 +353,7 @@ public class TestPresentationStreaming {
     public void testStreamedImagesAreTheUsermodelOnes() throws Exception {
         Blob blob = deck("rich.pptx", true, RICH_SHAPES);
 
-        List<ContentLine> streamed = new ImageInventoryExtractor().extract(onDisk(blob), MAX_LINES).lines();
+        List<ContentLine> streamed = new PresentationImageInventory().extract(onDisk(blob), MAX_LINES).lines();
 
         assertEquals(usermodelImages(blob), streamed);
         assertEquals("the first choice, the group and the slide itself", 3,
@@ -392,7 +392,7 @@ public class TestPresentationStreaming {
         Blob blob = onDisk(deck("big.pptx", false, paragraphs(200_000) + picture(3, "r:embed=\"" + RID + "\"")));
         long before = allocated();
 
-        DiffableContent content = new ImageInventoryExtractor().extract(blob, MAX_LINES);
+        DiffableContent content = new PresentationImageInventory().extract(blob, MAX_LINES);
 
         long allocated = allocated() - before;
         assertEquals(1, content.size());

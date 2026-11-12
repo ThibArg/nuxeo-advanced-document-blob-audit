@@ -32,7 +32,7 @@ import org.apache.poi.xslf.usermodel.XSLFTableRow;
 import org.apache.poi.xslf.usermodel.XSLFTextBox;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
-import org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor;
+import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 
 /**
@@ -52,7 +52,7 @@ public class TestPresentationDiff {
 
     protected final PresentationExtractor extractor = new PresentationExtractor();
 
-    protected final ImageInventoryExtractor images = new ImageInventoryExtractor();
+    protected final PresentationImageInventory images = new PresentationImageInventory();
 
     protected final TextDiffer differ = new TextDiffer();
 

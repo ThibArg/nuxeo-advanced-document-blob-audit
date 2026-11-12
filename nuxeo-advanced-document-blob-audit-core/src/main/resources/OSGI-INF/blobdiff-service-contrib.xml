@@ -164,21 +164,21 @@
   </extension>
 
   <!--
-    Image inventories, bounded by the same maxLines as the text. One contribution per format so
-    that a single one can be turned off - the PDF inventory is the most expensive - without losing
-    the others.
+    Image inventories, bounded by the same maxLines as the text. One class and one contribution per
+    format, so that a single one can be turned off - the PDF inventory is the most expensive -
+    without losing the others.
   -->
   <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
 
     <extractor name="imageWord" order="10"
-               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+               class="org.nuxeo.audit.advanced.blob.image.WordImageInventory">
       <mimeTypes>
         <mimeType>application/vnd.openxmlformats-officedocument.wordprocessingml.document</mimeType>
       </mimeTypes>
     </extractor>
 
     <extractor name="imageSpreadsheet" order="10"
-               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+               class="org.nuxeo.audit.advanced.blob.image.SpreadsheetImageInventory">
       <mimeTypes>
         <mimeType>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</mimeType>
         <mimeType>application/vnd.ms-excel</mimeType>
@@ -187,7 +187,7 @@
     </extractor>
 
     <extractor name="imagePresentation" order="10"
-               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+               class="org.nuxeo.audit.advanced.blob.image.PresentationImageInventory">
       <mimeTypes>
         <mimeType>application/vnd.openxmlformats-officedocument.presentationml.presentation</mimeType>
         <mimeType>application/vnd.ms-powerpoint.presentation.macroenabled.12</mimeType>
@@ -198,7 +198,7 @@
     </extractor>
 
     <extractor name="imagePdf" order="10"
-               class="org.nuxeo.audit.advanced.blob.image.ImageInventoryExtractor">
+               class="org.nuxeo.audit.advanced.blob.image.PdfImageInventory">
       <mimeTypes>
         <mimeType>application/pdf</mimeType>
       </mimeTypes>
