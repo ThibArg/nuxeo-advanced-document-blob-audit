@@ -17,14 +17,12 @@
       .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
     </style>
 
-    <!-- Web UI does not request our enricher on the current document: fetch it once more with it -->
-    <nuxeo-document id="doc" doc-id="[[document.uid]]" enrichers="blobDiffSource" response="{{_full}}"></nuxeo-document>
     <nuxeo-operation id="retryOp" op="BlobDiff.Retry"></nuxeo-operation>
 
     <nuxeo-card heading="[[i18n('label.blobaudit.view.heading')]]">
       <div class="grid">
         <label>[[i18n('label.blobaudit.diff.source')]]</label>
-        <nuxeo-blobdiff-source-link source="[[_full.contextParameters.blobDiffSource]]"
+        <nuxeo-blobdiff-source-link source="[[document.contextParameters.blobDiffSource]]"
                                     source-id="[[document.properties.bdiff:sourceId]]"></nuxeo-blobdiff-source-link>
 
         <label>[[i18n('label.blobaudit.diff.xpath')]]</label>
@@ -91,13 +89,7 @@
       is: 'nuxeo-blobdiff-view-layout',
       behaviors: [Nuxeo.LayoutBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior, Nuxeo.BlobAudit.Behavior],
       properties: {
-        document: { type: Object, observer: '_documentChanged' },
-        _full: Object
-      },
-      _documentChanged: function (doc) {
-        if (doc && doc.uid) {
-          this.$.doc.get();
-        }
+        document: Object
       },
       // 0 is a measured score, the most telling one: only null and undefined mean "not measured".
       _hasSimilarity: function (similarity) {
