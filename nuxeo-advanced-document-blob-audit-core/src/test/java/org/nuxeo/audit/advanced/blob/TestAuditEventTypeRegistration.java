@@ -40,7 +40,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * effective descriptor from the template for every contribution carrying {@code extends}. On an
  * instance whose directory storage was empty, the vocabulary ended up holding this single row and
  * the platform's 51 were gone. The row is now created at startup by
- * {@link BlobDiffInitComponent#registerAuditEventType()}.
+ * {@link BlobDiffComponent#registerAuditEventType()}.
  * <p>
  * {@code AuditCoreFeature} brings both {@code DirectoryFeature} and the
  * {@code directories-contrib.xml} of {@code org.nuxeo.ecm.platform.audit}, so the platform rows are

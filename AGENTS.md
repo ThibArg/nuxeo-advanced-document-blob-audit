@@ -35,7 +35,7 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
     `BlobModificationListener`, `VersionBlobPairs` (which blobs of two versions to compare),
     `BlobDiffTrigger`, `TextDiffer`; subpackages `bulk/`, `extractor/`, `image/`, `io/`, `operations/`,
     `work/`.
-  - `src/main/resources/OSGI-INF/` — 12 components + `deployment-fragment.xml` + `l10n/`.
+  - `src/main/resources/OSGI-INF/` — 11 components + `deployment-fragment.xml` + `l10n/`.
   - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
     **server-side** i18n, appended by `deployment-fragment.xml` to
     `nuxeo.war/WEB-INF/classes/messages*.properties`. This is the bundle
@@ -253,7 +253,7 @@ plugin and false of a greenfield one. Measured on empty storage: `eventTypes` he
 platform's 51 were gone.
 
 `blobContentModified` is therefore created at runtime, by
-`BlobDiffInitComponent#registerAuditEventType` — guarded by `hasEntry`, wrapped in
+`BlobDiffComponent#registerAuditEventType` — guarded by `hasEntry`, wrapped in
 `TransactionHelper.runInTransaction` + `Framework.doPrivileged`, and with any `RuntimeException`
 logged rather than propagated, because a vocabulary row must never break startup. The same rule
 applies to `eventCategories`, `nature`, `subject` and every other platform vocabulary.
@@ -499,7 +499,7 @@ with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a 
 runtime test: it supplies `template-vocabulary`, which the platform ships in
 `org.nuxeo.ecm.default.config` — a bundle nothing in this test stack deploys, and without which the
 `eventTypes` directory never registers. `DirectoryRegistry` reports that at `DEBUG` only, so the
-symptom was `BlobDiffInitComponent` logging a `DirectoryException` at `ERROR` once per test class.
+symptom was `registerAuditEventType` logging a `DirectoryException` at `ERROR` once per test class.
 `TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
 `TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
 `BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`. Its abort test deploys

@@ -28,7 +28,7 @@ import org.nuxeo.runtime.test.runner.RunnerFeature;
  * It also supplies {@code template-vocabulary}, which the platform's {@code eventTypes} directory
  * extends and which ships in {@code org.nuxeo.ecm.default.config} - a bundle nothing in this stack
  * deploys. Without it {@code eventTypes} never registers, {@code DirectoryRegistry} says so at
- * {@code DEBUG} only, and {@link BlobDiffInitComponent#registerAuditEventType()} has no vocabulary
+ * {@code DEBUG} only, and {@link BlobDiffComponent#registerAuditEventType()} has no vocabulary
  * to add its row to.
  *
  * @since 2025.1
