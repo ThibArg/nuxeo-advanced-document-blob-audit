@@ -42,12 +42,7 @@ public class TestBlobDiffConfigDescriptor {
 
     @Test
     public void testAuditorsGroupDefaultsToAdministrators() {
-        BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, config.getAuditorsGroup());
-        config.auditorsGroup = "  ";
-        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, config.getAuditorsGroup());
-        config.auditorsGroup = " auditors ";
-        assertEquals("auditors", config.getAuditorsGroup());
+        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, BlobDiffAccess.auditorsGroup());
     }
 
     /**
@@ -65,7 +60,6 @@ public class TestBlobDiffConfigDescriptor {
         shipped.maxBlobSize = 2048L;
         shipped.maxLines = 50;
         shipped.imageInventory = Boolean.TRUE;
-        shipped.auditorsGroup = "auditors";
         shipped.xpaths = new ArrayList<>(List.of("file:content", "files:files/*/file"));
 
         BlobDiffConfigDescriptor override = new BlobDiffConfigDescriptor();
@@ -78,7 +72,6 @@ public class TestBlobDiffConfigDescriptor {
         assertEquals(2048, merged.getMaxBlobSize());
         assertEquals(70, merged.getMaxLines());
         assertTrue(merged.isImageInventory());
-        assertEquals("auditors", merged.getAuditorsGroup());
         assertEquals(List.of("Contract"), merged.getDocTypes());
         assertEquals("an omitted list keeps the earlier one", List.of("file:content", "files:files/*/file"),
                 merged.getXPaths());

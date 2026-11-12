@@ -409,7 +409,7 @@ public class TestBlobDiffService {
                 Arrays.stream(localAcl.getACEs())
                       .anyMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
                               && SecurityConstants.EVERYTHING.equals(ace.getPermission()) && !ace.isGranted()));
-        String group = blobDiffService.getConfig().getAuditorsGroup();
+        String group = BlobDiffAccess.auditorsGroup();
         for (String permission : new String[] { SecurityConstants.READ, SecurityConstants.REMOVE,
                 SecurityConstants.REMOVE_CHILDREN }) {
             assertTrue("auditors must be granted " + permission,

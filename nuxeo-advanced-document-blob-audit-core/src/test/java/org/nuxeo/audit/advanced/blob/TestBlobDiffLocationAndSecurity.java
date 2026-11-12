@@ -338,7 +338,7 @@ public class TestBlobDiffLocationAndSecurity {
     @Test
     public void testAuditorsGroupMemberCanReadAndDelete() throws Exception {
         String sourceId = jdoeEditsAFile("audited");
-        String group = blobDiffService.getConfig().getAuditorsGroup();
+        String group = BlobDiffAccess.auditorsGroup();
         NuxeoPrincipal auditor = new UserPrincipal("auditor", List.of(group), false, false);
         try (CloseableCoreSession s = coreFeature.openCoreSession(auditor)) {
             List<DocumentModel> diffs = diffsForSource(s, sourceId);

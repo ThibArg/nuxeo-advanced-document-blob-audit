@@ -487,7 +487,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     protected List<ACE> expectedAces() {
-        String group = getConfig().getAuditorsGroup();
+        String group = BlobDiffAccess.auditorsGroup();
         return List.of(new ACE(group, SecurityConstants.READ, true),
                 new ACE(group, SecurityConstants.REMOVE, true),
                 new ACE(group, SecurityConstants.REMOVE_CHILDREN, true), ACE.BLOCK);

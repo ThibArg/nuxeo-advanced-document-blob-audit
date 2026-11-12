@@ -102,9 +102,9 @@ public class BlobAuditConstants {
     public static final String CONTAINER_TYPE = "Folder";
 
     /**
-     * Default group granted access on the diff container, overridable through the
-     * {@code auditorsGroup} element of the {@code config} extension point. The diffs contain business
-     * content extracted from the source documents: choose the audience deliberately.
+     * Default group granted access on the diff container, used when the configuration property
+     * {@link #AUDITORS_GROUP_PROPERTY} is not set. The diffs contain business content extracted from
+     * the source documents: choose the audience deliberately.
      */
     public static final String DEFAULT_AUDITORS_GROUP = "administrators";
 

@@ -20,6 +20,7 @@ import java.util.List;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.services.config.ConfigurationService;
 
 /**
  * Who may manage diffs: platform administrators, members of the {@code administrators} group and
@@ -58,8 +59,21 @@ public final class BlobDiffAccess {
         }
     }
 
-    protected static String auditorsGroup() {
-        BlobDiffService service = Framework.getService(BlobDiffService.class);
-        return service == null ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP : service.getConfig().getAuditorsGroup();
+    /**
+     * Returns the auditors group: the configuration property
+     * {@value BlobAuditConstants#AUDITORS_GROUP_PROPERTY}, also read by Web UI as
+     * {@code Nuxeo.UI.config.blobaudit.auditorsGroup}, or {@code administrators} when it is not set.
+     *
+     * @since 2025.1
+     */
+    public static String auditorsGroup() {
+        String property = null;
+        if (Framework.isInitialized()) {
+            ConfigurationService configuration = Framework.getService(ConfigurationService.class);
+            if (configuration != null) {
+                property = configuration.getString(BlobAuditConstants.AUDITORS_GROUP_PROPERTY).orElse(null);
+            }
+        }
+        return property == null || property.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP : property.trim();
     }
 }

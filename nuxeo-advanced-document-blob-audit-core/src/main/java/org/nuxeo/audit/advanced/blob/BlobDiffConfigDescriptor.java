@@ -21,9 +21,7 @@ import java.util.List;
 import org.nuxeo.common.xmap.annotation.XNode;
 import org.nuxeo.common.xmap.annotation.XNodeList;
 import org.nuxeo.common.xmap.annotation.XObject;
-import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.model.Descriptor;
-import org.nuxeo.runtime.services.config.ConfigurationService;
 
 /**
  * Global configuration. Everything is opt-in and bounded on purpose: diffing binaries is expensive
@@ -104,15 +102,6 @@ public class BlobDiffConfigDescriptor implements Descriptor {
     @XNode("imageInventory")
     protected Boolean imageInventory;
 
-    /**
-     * Group granted access to the {@code /change-diff} container: Read, Remove and RemoveChildren,
-     * so it can list, open and delete diffs (retention, admin UI). Members of the platform
-     * administrators groups bypass ACLs anyway; this setting matters when a dedicated group (for
-     * instance {@code auditors}) is the intended audience.
-     */
-    @XNode("auditorsGroup")
-    protected String auditorsGroup;
-
     /** Empty or {@value #ANY} means "every document type". */
     @XNodeList(value = "docTypes/docType", type = ArrayList.class, componentType = String.class)
     protected List<String> docTypes = new ArrayList<>();
@@ -144,7 +133,6 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         merged.maxDiffChars = either(other.maxDiffChars, maxDiffChars);
         merged.maxValueLength = either(other.maxValueLength, maxValueLength);
         merged.imageInventory = either(other.imageInventory, imageInventory);
-        merged.auditorsGroup = either(other.auditorsGroup, auditorsGroup);
         merged.docTypes = Descriptor.getIfEmpty(other.docTypes, docTypes);
         merged.xpaths = Descriptor.getIfEmpty(other.xpaths, xpaths);
         return merged;
@@ -187,26 +175,6 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public List<String> getDocTypes() {
         return docTypes;
-    }
-
-    /**
-     * Resolution order: {@code <auditorsGroup>} of this descriptor, then the configuration property
-     * {@value BlobAuditConstants#AUDITORS_GROUP_PROPERTY} (also exposed to Web UI as
-     * {@code Nuxeo.UI.config.blobaudit.auditorsGroup}, which is why it is the recommended place),
-     * then {@code administrators}.
-     */
-    public String getAuditorsGroup() {
-        if (auditorsGroup != null && !auditorsGroup.isBlank()) {
-            return auditorsGroup.trim();
-        }
-        String property = null;
-        if (Framework.isInitialized()) {
-            ConfigurationService configuration = Framework.getService(ConfigurationService.class);
-            if (configuration != null) {
-                property = configuration.getString(BlobAuditConstants.AUDITORS_GROUP_PROPERTY).orElse(null);
-            }
-        }
-        return property == null || property.isBlank() ? BlobAuditConstants.DEFAULT_AUDITORS_GROUP : property.trim();
     }
 
     /** The blob xpaths diffed, {@value #DEFAULT_XPATH} when none is configured. */
