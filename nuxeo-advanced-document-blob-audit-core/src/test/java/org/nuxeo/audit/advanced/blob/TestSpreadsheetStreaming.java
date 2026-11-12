@@ -23,12 +23,16 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.onDisk;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -63,6 +67,10 @@ public class TestSpreadsheetStreaming {
     protected static final int MAX_LINES = 10000;
 
     protected static final String SHEET_NAMESPACE = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    protected static final String DATA_SHEET = "xl/worksheets/sheet1.xml";
+
+    protected static final String SHARED_STRINGS = "xl/sharedStrings.xml";
 
     /**
      * Every kind of cell the handler distinguishes, written the way Excel writes them and POI's
@@ -132,16 +140,31 @@ public class TestSpreadsheetStreaming {
 
     /** Replaces the first sheet of the template with the given XML. */
     protected static Blob workbook(String dataSheet, String filename) throws Exception {
+        return workbook(filename, Map.of(DATA_SHEET, out -> out.write(dataSheet)));
+    }
+
+    /** Writes the content of a part, streamed so that a large one never sits in heap. */
+    @FunctionalInterface
+    protected interface PartWriter {
+        void write(Writer out) throws IOException;
+    }
+
+    /** Replaces parts of the template, by entry name. */
+    protected static Blob workbook(String filename, Map<String, PartWriter> parts) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(template()));
                 ZipOutputStream rewritten = new ZipOutputStream(out)) {
             ZipEntry entry;
             while ((entry = in.getNextEntry()) != null) {
                 rewritten.putNextEntry(new ZipEntry(entry.getName()));
-                if ("xl/worksheets/sheet1.xml".equals(entry.getName())) {
-                    rewritten.write(dataSheet.getBytes(UTF_8));
-                } else {
+                PartWriter part = parts.get(entry.getName());
+                if (part == null) {
                     in.transferTo(rewritten);
+                } else {
+                    // Not closed: that would close the zip stream.
+                    Writer writer = new OutputStreamWriter(rewritten, UTF_8);
+                    part.write(writer);
+                    writer.flush();
                 }
                 rewritten.closeEntry();
             }
@@ -239,5 +262,81 @@ public class TestSpreadsheetStreaming {
         assertEquals(100, content.size());
         assertTrue(content.truncated());
         assertTrue("extracting 100 cells allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
+    }
+
+    /**
+     * Item 90: the shared strings table was read whole before the first cell, outside both
+     * {@code maxLines} and {@code maxValueLength}. The bound above is built on numbers, whose cells
+     * never reach that table.
+     */
+    @Test
+    public void testSharedStringsAreReadWithinTheExtractionBudget() throws Exception {
+        int count = 250_000;
+        Blob blob = onDisk(workbook("strings.xlsx", Map.of( //
+                SHARED_STRINGS, out -> {
+                    out.write("<sst xmlns=\"" + SHEET_NAMESPACE + "\" count=\"" + count + "\" uniqueCount=\"" + count
+                            + "\">");
+                    for (int i = 0; i < count; i++) {
+                        out.write("<si><t>" + sharedString(i) + "</t></si>");
+                    }
+                    out.write("</sst>");
+                }, //
+                DATA_SHEET, out -> {
+                    out.write("<worksheet xmlns=\"" + SHEET_NAMESPACE + "\"><sheetData>");
+                    for (int r = 1; r <= 1000; r++) {
+                        out.write("<row r=\"" + r + "\"><c r=\"A" + r + "\" t=\"s\"><v>" + (r - 1) + "</v></c></row>");
+                    }
+                    out.write("</sheetData></worksheet>");
+                })));
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long before = threads.getCurrentThreadAllocatedBytes();
+
+        DiffableContent content = new SpreadsheetExtractor().extract(blob, 100);
+
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        assertEquals(100, content.size());
+        assertTrue(content.truncated());
+        assertEquals(sharedString(0), content.lines().get(0).value());
+        assertEquals(sharedString(99), content.lines().get(99).value());
+        assertTrue("extracting 100 cells allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
+    }
+
+    /**
+     * Item 90: a cell whose shared string lies past the budget ends the extraction where it stands,
+     * flagged truncated, rather than being compared on a placeholder that would hide a change. With
+     * {@code maxValueLength} at 100 and {@code maxLines} at 4, the table may hold 400 characters,
+     * each string costing 32 more: the fourth string is left unread, and the extraction stops at the
+     * cell using it although {@code maxLines} is not reached.
+     */
+    @Test
+    public void testACellPastTheSharedStringBudgetEndsTheExtraction() throws Exception {
+        String second = "b".repeat(100);
+        Blob blob = onDisk(workbook("cut.xlsx", Map.of( //
+                SHARED_STRINGS, out -> out.write("<sst xmlns=\"" + SHEET_NAMESPACE + "\"><si><t>first</t></si>" //
+                        + "<si><t>" + second + "</t></si><si><t>" + "c".repeat(100) + "</t></si>" //
+                        + "<si><t>" + "d".repeat(100) + "</t></si></sst>"), //
+                DATA_SHEET, out -> out.write("<worksheet xmlns=\"" + SHEET_NAMESPACE + "\"><sheetData>" //
+                        + "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row>" //
+                        + "<row r=\"2\"><c r=\"A2\"><v>5</v></c><c r=\"B2\" t=\"s\"><v>3</v></c></row>" //
+                        + "<row r=\"3\"><c r=\"A3\" t=\"s\"><v>2</v></c></row>" //
+                        + "</sheetData></worksheet>"))));
+        SpreadsheetExtractor extractor = new SpreadsheetExtractor();
+        extractor.init(Map.of("maxValueLength", "100"));
+
+        DiffableContent content = extractor.extract(blob, 4);
+
+        assertEquals(List.of(ContentLine.of("Data!A1", "first"), ContentLine.of("Data!B1", second),
+                ContentLine.of("Data!A2", "5")), content.lines());
+        assertTrue(content.truncated());
+    }
+
+    /** 200 distinct characters; the random letters keep the part well under POI's 100:1 inflation ratio (22:1). */
+    protected static String sharedString(int index) {
+        Random random = new Random(index);
+        StringBuilder text = new StringBuilder("%07d-".formatted(index));
+        for (int i = 0; i < 8; i++) {
+            text.append((char) ('a' + random.nextInt(26)));
+        }
+        return text.append("x".repeat(184)).toString();
     }
 }

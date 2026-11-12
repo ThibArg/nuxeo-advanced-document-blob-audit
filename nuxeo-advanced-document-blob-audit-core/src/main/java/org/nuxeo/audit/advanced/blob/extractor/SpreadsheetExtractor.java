@@ -16,10 +16,12 @@
 package org.nuxeo.audit.advanced.blob.extractor;
 
 import static org.apache.poi.ooxml.POIXMLTypeLoader.DEFAULT_XML_OPTIONS;
+import static org.apache.poi.xssf.usermodel.XSSFRelation.NS_SPREADSHEETML;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PushbackInputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +31,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.opc.PackagePart;
 import org.apache.poi.poifs.filesystem.FileMagic;
 import org.apache.poi.ss.SpreadsheetVersion;
 import org.apache.poi.ss.formula.FormulaParser;
@@ -49,11 +52,12 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.model.StylesTable;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFEvaluationWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFRelation;
+import org.apache.poi.xssf.usermodel.XSSFRichTextString;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.xmlbeans.XmlException;
 import org.nuxeo.audit.advanced.blob.BlobContentExtractor;
@@ -140,8 +144,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
                 workbook = WorkbookDocument.Factory.parse(in, DEFAULT_XML_OPTIONS).getWorkbook();
             }
             boolean date1904 = workbook.isSetWorkbookPr() && workbook.getWorkbookPr().getDate1904();
-            // Without phonetic runs, like XSSFRichTextString#getString in the usermodel.
-            ReadOnlySharedStringsTable strings = new ReadOnlySharedStringsTable(pkg, false);
+            SharedStringTable strings = SharedStringTable.read(pkg, maxLines, maxValueLength);
             StylesTable styles = reader.getStylesTable();
             SharedFormulas formulas = new SharedFormulas(workbook);
             DataFormatter formatter = new DataFormatter();
@@ -342,6 +345,138 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     }
 
     /**
+     * The shared strings of a workbook, read within the budget of the extraction.
+     * <p>
+     * POI's {@code ReadOnlySharedStringsTable} held the whole table before the first cell was read,
+     * outside both {@code maxLines} and {@code maxValueLength}, and the part inflates far past the
+     * compressed size {@code maxBlobSize} bounds. Each string is kept here in the form its cell is
+     * compared in - phonetic runs left out and escapes decoded like {@code XSSFRichTextString#getString},
+     * then trimmed and compacted - and charged its length plus {@link #ENTRY_COST}, so that a table of
+     * short strings is bounded too. The parse stops once {@code maxLines × maxValueLength} is spent; a
+     * cell needing a string past that point ends the extraction, the way {@code maxLines} does.
+     *
+     * @since 2025.1
+     */
+    protected static class SharedStringTable extends DefaultHandler {
+
+        /** Charged for each string on top of its length: roughly its object, its array and its slot. */
+        protected static final int ENTRY_COST = 32;
+
+        protected final int maxValueLength;
+
+        protected final long budget;
+
+        protected final List<String> strings = new ArrayList<>();
+
+        protected final StringBuilder text = new StringBuilder();
+
+        protected long spent;
+
+        /** Whether strings were left unread past the last one kept. */
+        protected boolean cut;
+
+        protected boolean inTable;
+
+        protected boolean inText;
+
+        protected boolean inPhoneticRun;
+
+        protected SharedStringTable(int maxValueLength, long budget) {
+            this.maxValueLength = maxValueLength;
+            this.budget = budget;
+        }
+
+        /** Reads the table of the package, like {@code ReadOnlySharedStringsTable} finds it. */
+        protected static SharedStringTable read(OPCPackage pkg, int maxLines, int maxValueLength)
+                throws IOException, SAXException {
+            SharedStringTable table = new SharedStringTable(maxValueLength, (long) maxLines * maxValueLength);
+            List<PackagePart> parts = pkg.getPartsByContentType(XSSFRelation.SHARED_STRINGS.getContentType());
+            if (parts.isEmpty()) {
+                return table;
+            }
+            try (PushbackInputStream in = new PushbackInputStream(parts.get(0).getInputStream(), 1)) {
+                // An empty part is no table, not an unreadable one.
+                int first = in.read();
+                if (first >= 0) {
+                    in.unread(first);
+                    OoxmlPackages.parse(in, table);
+                }
+            } catch (OoxmlPackages.Stop e) {
+                table.cut = true;
+            }
+            return table;
+        }
+
+        /** @return the string, or {@code null} when the budget left it unread */
+        protected String get(int index) {
+            if (index >= 0 && index < strings.size()) {
+                return strings.get(index);
+            }
+            if (index < 0 || !cut) {
+                throw new IllegalStateException("No shared string " + index + " among " + strings.size());
+            }
+            return null;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            if (!NS_SPREADSHEETML.equals(uri)) {
+                return;
+            }
+            switch (localName) {
+                case "sst" -> inTable = true;
+                case "si" -> text.setLength(0);
+                case "t" -> inText = true;
+                case "rPh" -> inPhoneticRun = true;
+                default -> {
+                    // nothing to collect
+                }
+            }
+        }
+
+        @Override
+        public void characters(char[] ch, int start, int length) {
+            if (inTable && inText && !inPhoneticRun) {
+                text.append(ch, start, length);
+            }
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String qName) throws SAXException {
+            if (!NS_SPREADSHEETML.equals(uri)) {
+                return;
+            }
+            switch (localName) {
+                case "si" -> {
+                    if (inTable) {
+                        keep(text.toString());
+                    }
+                }
+                case "t" -> inText = false;
+                case "rPh" -> inPhoneticRun = false;
+                default -> {
+                    // nothing to close
+                }
+            }
+        }
+
+        protected void keep(String raw) throws SAXException {
+            String value = ContentLine.compact(decode(raw).trim(), maxValueLength);
+            long cost = value.length() + ENTRY_COST;
+            if (spent + cost > budget) {
+                throw new OoxmlPackages.Stop();
+            }
+            spent += cost;
+            strings.add(value);
+        }
+
+        /** Decodes {@code _xHHHH_} escapes, the only change {@code XSSFRichTextString#getString} makes. */
+        protected static String decode(String raw) {
+            return raw.contains("_x") ? new XSSFRichTextString(raw).getString() : raw;
+        }
+    }
+
+    /**
      * SAX handler of one worksheet, producing the same values as {@link #formatCell} does on the
      * usermodel: formula text when {@code useFormulas} is on, otherwise the cell formatted by
      * {@link DataFormatter} from its cached value and style.
@@ -356,7 +491,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
 
         protected final int maxLines;
 
-        protected final ReadOnlySharedStringsTable strings;
+        protected final SharedStringTable strings;
 
         protected final StylesTable styles;
 
@@ -405,9 +540,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
 
         protected String formulaRef;
 
-        protected SheetHandler(String sheetName, List<ContentLine> lines, int maxLines,
-                ReadOnlySharedStringsTable strings, StylesTable styles, DataFormatter formatter, boolean date1904,
-                SharedFormulas formulas) {
+        protected SheetHandler(String sheetName, List<ContentLine> lines, int maxLines, SharedStringTable strings,
+                StylesTable styles, DataFormatter formatter, boolean date1904, SharedFormulas formulas) {
             this.sheetName = sheetName;
             this.lines = lines;
             this.maxLines = maxLines;
@@ -497,7 +631,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             lines.add(ContentLine.of(sheetName + "!" + ref, cellText, maxValueLength));
         }
 
-        protected String cellText() {
+        protected String cellText() throws SAXException {
             if (useFormulas) {
                 String formulaText = formulaText();
                 if (formulaText != null) {
@@ -553,13 +687,13 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return written.isEmpty() ? null : written;
         }
 
-        protected String formattedValue() {
+        protected String formattedValue() throws SAXException {
             String raw = value.toString();
             if (type == null || "n".equals(type)) {
                 return raw.isEmpty() ? "" : number(raw);
             }
             return switch (type) {
-                case "s" -> raw.isEmpty() ? "" : strings.getItemAt(Integer.parseInt(raw.trim())).getString();
+                case "s" -> raw.isEmpty() ? "" : sharedString(raw);
                 case "inlineStr" -> inline.length() > 0 ? inline.toString() : raw;
                 case "b" -> {
                     if (raw.isEmpty()) {
@@ -569,6 +703,15 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
                 }
                 default -> raw;
             };
+        }
+
+        /** Ends the extraction at a string the budget left unread, the way {@code maxLines} does. */
+        protected String sharedString(String raw) throws SAXException {
+            String text = strings.get(Integer.parseInt(raw.trim()));
+            if (text == null) {
+                throw new OoxmlPackages.Stop();
+            }
+            return text;
         }
 
         protected String number(String raw) {

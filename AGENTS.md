@@ -447,6 +447,11 @@ kept for `.xls`) produces: `TestSpreadsheetStreaming` compares the two on a hand
 deliberate exception: shared formulas are rebuilt with an in-place shift rather than POI's
 `SharedFormula`, which turns a reference to another sheet into a plain one. The parser comes from
 `XMLHelper.newXMLReader()` (no DTD, no external entity) — never build one by hand.
+The shared strings are read by `SharedStringTable`, never by POI's `ReadOnlySharedStringsTable`, which
+holds the whole part before the first cell (item 90): each string is kept decoded, trimmed and
+compacted, charged its length plus 32, within `maxLines × maxValueLength`. A cell whose string lies
+past that budget ends the extraction, flagged truncated, the way `maxLines` does — never a placeholder
+value, which would make two different strings compare equal.
 Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`.
 
 **PPTX, and the XLSX image inventory, are streamed too** (item 35). `XMLSlideShow` parses every
@@ -499,7 +504,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 308 tests (27 test classes)
+mvn -o install                                     # full build, 310 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```
