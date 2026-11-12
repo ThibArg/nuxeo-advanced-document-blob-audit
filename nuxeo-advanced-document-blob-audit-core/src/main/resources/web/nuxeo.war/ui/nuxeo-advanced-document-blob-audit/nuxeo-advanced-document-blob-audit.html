@@ -86,3 +86,19 @@
     <nuxeo-blobdiff-document-history name="blobdiffs" document="[[document]]" user="[[user]]"></nuxeo-blobdiff-document-history>
   </template>
 </nuxeo-slot-content>
+
+<!--
+  Overrides the platform's editDocumentAction (same name and slot: a later registration with the
+  same name replaces it) with the same button, minus BlobDiff documents: a diff is a record, it has
+  no edit layout. Web UI only shows Edit to holders of WriteProperties, so this concerns
+  administrators. Re-check this override when upgrading Web UI.
+-->
+<nuxeo-slot-content name="editDocumentAction" slot="DOCUMENT_ACTIONS" order="10">
+  <template>
+    <nuxeo-filter document="[[document]]" expression="Nuxeo.BlobAudit.isEditable(document)">
+      <template>
+        <nuxeo-document-edit-button document="[[document]]"></nuxeo-document-edit-button>
+      </template>
+    </nuxeo-filter>
+  </template>
+</nuxeo-slot-content>
