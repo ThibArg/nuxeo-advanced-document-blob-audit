@@ -295,7 +295,7 @@ public class TestBlobDiffSkipReporting {
         assertTrue((Long) diff.getPropertyValue(BlobAuditConstants.XP_CHANGED) > 0);
         assertNull("the body must not be stored", diff.getPropertyValue(BlobAuditConstants.XP_DIFF_BLOB));
         assertEquals(JSON_MIME, diff.getPropertyValue(BlobAuditConstants.XP_OLD_MIMETYPE));
-        assertEquals(XML_MIME, diff.getPropertyValue(BlobAuditConstants.XP_MIMETYPE));
+        assertEquals(XML_MIME, diff.getPropertyValue(BlobAuditConstants.XP_NEW_MIMETYPE));
     }
 
     /** A {@code .txt} holding JSON, edited and saved as {@code .json}: a genuine diff. */

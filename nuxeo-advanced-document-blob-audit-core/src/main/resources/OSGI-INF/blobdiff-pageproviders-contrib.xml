@@ -86,7 +86,7 @@
             <property name="size">10</property>
           </properties>
         </aggregate>
-        <aggregate id="bdiff_mimetype_agg" type="terms" parameter="bdiff:mimeType">
+        <aggregate id="bdiff_mimetype_agg" type="terms" parameter="bdiff:newMimeType">
           <field schema="blobdiffsearch" name="mimetype_agg" />
           <properties>
             <property name="size">20</property>

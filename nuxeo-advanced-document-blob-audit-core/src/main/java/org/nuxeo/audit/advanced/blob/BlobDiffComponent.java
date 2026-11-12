@@ -28,9 +28,9 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CHANGED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DIFF_BLOB;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_MIMETYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_MIMETYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_DIGEST;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_REMOVED;
@@ -635,7 +635,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(date);
         diffDoc.setPropertyValue(XP_DATE, calendar);
-        diffDoc.setPropertyValue(XP_MIMETYPE, newBlob != null ? newBlob.getMimeType() : null);
+        diffDoc.setPropertyValue(XP_NEW_MIMETYPE, newBlob != null ? newBlob.getMimeType() : null);
         FrozenBlobs keys = frozen == null ? FrozenBlobs.NONE : frozen;
         diffDoc.setPropertyValue(XP_OLD_FILENAME, oldBlob != null ? oldBlob.getFilename() : keys.oldFilename());
         diffDoc.setPropertyValue(XP_NEW_FILENAME, newBlob != null ? newBlob.getFilename() : keys.newFilename());
@@ -650,7 +650,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_BLOB_KEY, keys.newKey());
         diffDoc.setPropertyValue(BlobAuditConstants.XP_NEW_LENGTH, keys.newLength() < 0 ? null : keys.newLength());
         if (newBlob == null && keys.newMimeType() != null) {
-            diffDoc.setPropertyValue(XP_MIMETYPE, keys.newMimeType());
+            diffDoc.setPropertyValue(XP_NEW_MIMETYPE, keys.newMimeType());
         }
         if (result != null) {
             diffDoc.setPropertyValue(XP_SUMMARY, result.summary());

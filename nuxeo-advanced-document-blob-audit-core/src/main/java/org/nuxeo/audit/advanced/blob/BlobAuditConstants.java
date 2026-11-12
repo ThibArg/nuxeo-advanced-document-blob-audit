@@ -52,8 +52,6 @@ public class BlobAuditConstants {
 
     public static final String XP_DATE = "bdiff:date";
 
-    public static final String XP_MIMETYPE = "bdiff:mimeType";
-
     public static final String XP_OLD_FILENAME = "bdiff:oldFilename";
 
     public static final String XP_NEW_FILENAME = "bdiff:newFilename";
@@ -85,6 +83,9 @@ public class BlobAuditConstants {
     public static final String XP_OLD_BLOB_KEY = "bdiff:oldBlobKey";
 
     public static final String XP_OLD_MIMETYPE = "bdiff:oldMimeType";
+
+    /** @since 2025.1 */
+    public static final String XP_NEW_MIMETYPE = "bdiff:newMimeType";
 
     public static final String XP_OLD_LENGTH = "bdiff:oldLength";
 

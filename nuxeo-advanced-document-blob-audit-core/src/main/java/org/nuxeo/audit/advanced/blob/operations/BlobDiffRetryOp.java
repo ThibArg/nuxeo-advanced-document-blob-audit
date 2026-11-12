@@ -20,12 +20,12 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.DIFF_DOCTYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.STATUS_ERROR;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_CORRELATION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_DATE;
-import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_MIMETYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_KEY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_BLOB_PROVIDER;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_DIGEST;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_FILENAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_LENGTH;
+import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_MIMETYPE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_ID;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_NEW_VERSION_LABEL;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_OLD_BLOB_KEY;
@@ -100,8 +100,6 @@ public class BlobDiffRetryOp {
                     "This BlobDiff has no stored binary keys (created before 1.2), it cannot be retried", 400);
         }
         Calendar date = (Calendar) diff.getPropertyValue(XP_DATE);
-        String newMime = str(diff, XP_MIMETYPE);
-        String oldMime = str(diff, XP_OLD_MIMETYPE);
         VersionContext versions = new VersionContext(
                 str(diff, XP_PREVIOUS_VERSION_ID),
                 str(diff, XP_PREVIOUS_VERSION_LABEL),
@@ -110,9 +108,10 @@ public class BlobDiffRetryOp {
                 str(diff, XP_VERSION_SERIES_ID));
         BlobDiffWork work = new BlobDiffWork(repo(diff), str(diff, XP_SOURCE_ID), sourceTitle(diff),
                 str(diff, XP_XPATH),
-                oldProvider, oldKey, str(diff, XP_OLD_FILENAME), oldMime == null ? newMime : oldMime,
+                oldProvider, oldKey, str(diff, XP_OLD_FILENAME), str(diff, XP_OLD_MIMETYPE),
                 str(diff, XP_OLD_DIGEST), length(diff, XP_OLD_LENGTH), newProvider, newKey,
-                str(diff, XP_NEW_FILENAME), newMime, str(diff, XP_NEW_DIGEST), length(diff, XP_NEW_LENGTH),
+                str(diff, XP_NEW_FILENAME), str(diff, XP_NEW_MIMETYPE), str(diff, XP_NEW_DIGEST),
+                length(diff, XP_NEW_LENGTH),
                 str(diff, XP_USER), date == null ? System.currentTimeMillis() : date.getTimeInMillis(),
                 str(diff, XP_CORRELATION_ID), versions);
         work.withReplaceDiffId(diff.getId());

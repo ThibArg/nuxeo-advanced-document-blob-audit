@@ -25,7 +25,6 @@
   <xs:element name="date" type="xs:dateTime" />
 
   <!-- Blob identity: digests double as a short-circuit, a rename changes neither -->
-  <xs:element name="mimeType" type="xs:string" />
   <xs:element name="oldFilename" type="xs:string" />
   <xs:element name="newFilename" type="xs:string" />
   <xs:element name="oldDigest" type="xs:string" />
@@ -46,12 +45,13 @@
   <xs:element name="similarity" type="xs:double" />
 
   <!--
-    Storage identity of the two compared binaries (since 1.2). Lets a diff in error be replayed
+    Storage identity of the two compared binaries. Lets a diff in error be replayed
     (BlobDiff.Retry) even when the binaries could not be read at the time.
   -->
   <xs:element name="oldBlobProvider" type="xs:string" />
   <xs:element name="oldBlobKey" type="xs:string" />
   <xs:element name="oldMimeType" type="xs:string" />
+  <xs:element name="newMimeType" type="xs:string" />
   <xs:element name="oldLength" type="xs:long" />
   <xs:element name="newBlobProvider" type="xs:string" />
   <xs:element name="newBlobKey" type="xs:string" />

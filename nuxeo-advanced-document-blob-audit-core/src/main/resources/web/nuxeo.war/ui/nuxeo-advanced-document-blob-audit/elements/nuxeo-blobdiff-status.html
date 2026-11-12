@@ -8,9 +8,9 @@
     <template is="dom-if" if="[[document.properties.bdiff:truncated]]">
       <span class="blobdiff-badge info">[[i18n('label.blobaudit.truncated')]]</span>
     </template>
-    <template is="dom-if" if="[[_formatChanged(document.properties.bdiff:oldMimeType, document.properties.bdiff:mimeType)]]">
+    <template is="dom-if" if="[[_formatChanged(document.properties.bdiff:oldMimeType, document.properties.bdiff:newMimeType)]]">
       <span class="blobdiff-badge info"
-            title$="[[document.properties.bdiff:oldMimeType]] → [[document.properties.bdiff:mimeType]]">[[_formatLabel(document.properties.bdiff:oldMimeType, document.properties.bdiff:mimeType, document.properties.bdiff:oldFilename, document.properties.bdiff:newFilename)]]</span>
+            title$="[[document.properties.bdiff:oldMimeType]] → [[document.properties.bdiff:newMimeType]]">[[_formatLabel(document.properties.bdiff:oldMimeType, document.properties.bdiff:newMimeType, document.properties.bdiff:oldFilename, document.properties.bdiff:newFilename)]]</span>
     </template>
     <template is="dom-if" if="[[!hideCounters]]">
       <span class="blobdiff-counters">
