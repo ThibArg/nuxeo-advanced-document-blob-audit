@@ -418,8 +418,11 @@ budgets, the digests and the `Inventory` accumulator.
 `maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The
 XLSX and PPTX paths resolve the picture part from its relationship and stream it through
 `digestOoxmlPicture(PackagePart, …)`, never through `PictureData#getData()`, which materialises the
-whole inflated image (POI caps it at 100 MB). Only binary `.xls` goes through `digestBytes`, its
-bytes being in the HSSF model already. In all four collectors the key counter — the XLSX ordinal,
+whole inflated image (POI caps it at 100 MB). Only binary `.xls` goes through `digestBytes`: it has
+no part to stream, and `HSSFPictureData#getData()` hands back a fresh **copy** of the picture on
+every call (it strips a Mac PNG header), so it is called inside the `digestOnce` supplier only,
+memoized on `HSSFPicture#getPictureIndex()` — never on the returned array (item 92). In all four
+collectors the key counter — the XLSX ordinal,
 the `#2` occurrence suffix of XLSX and PPTX keys, the PDF positional ordinal — is advanced
 **before** the drop check, so a dropped image on one side cannot shift every following key.
 **A PDF image is never decoded** (item 30): `digestPdfImage` hashes its encoding parameters and its
@@ -431,15 +434,17 @@ replays them on every later reference, skips a form already on the current path,
 `MAX_FORM_DEPTH`. `maxLines` counts every placement, dropped ones included, so replays stay bounded
 too. Never recurse into `form.getResources()` without going through `collectPdfForm`.
 **Each image is read once per file, and all of them within a budget** (item 37). Every format
-creates one `ImageBudget` per extraction: `digestOnce` memoizes digests by part name (OOXML) or by
-stream identity (PDF), and `meter` charges every byte read against `maxTotalImageBytes()` — eight
+creates one `ImageBudget` per extraction: `digestOnce` memoizes digests by part name (OOXML), by
+picture index (`.xls`) or by stream identity (PDF), and `meter` charges every byte read against
+`maxTotalImageBytes()` — eight
 times `maxImageBytes()`, 256 MB — after which the inventory stops, flagged `truncated`. Never read
 image bytes except through `digestOnce` and a metered stream. `digestStream` reads at most
 `maxImageBytes() + 1` bytes, so a dropped image costs the budget no more than the cap.
 Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
 `#testDroppingAPictureDoesNotRenumberTheFollowingOnes`,
 `#testAPdfFlateBombIsDigestedWithoutBeingDecoded`, the three `#testAPdfForm*` /
-`#testABranchingPdfFormGraph*` cases, the three `#test*IsReadOnce` cases and
+`#testABranchingPdfFormGraph*` cases, the four `#test*IsReadOnce` cases,
+`#testAPictureAnchoredManyTimesInAnXlsIsCopiedOnce` and
 `#testTheImagesOfOneFileAreReadWithinATotalBudget`.
 
 **XLSX text is streamed, never read through POI's usermodel** (item 34). `SpreadsheetExtractor`
@@ -511,7 +516,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 313 tests (27 test classes)
+mvn -o install                                     # full build, 315 tests (27 test classes)
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
 ```

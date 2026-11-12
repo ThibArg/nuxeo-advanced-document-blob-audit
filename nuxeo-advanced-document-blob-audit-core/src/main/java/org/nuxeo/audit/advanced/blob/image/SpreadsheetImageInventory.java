@@ -25,6 +25,7 @@ import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.poi.hssf.usermodel.HSSFPicture;
 import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.openxml4j.opc.PackagePart;
@@ -275,8 +276,11 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
                     // look changed.
                     String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
                     String key = occurrence(seen, "excel:image:" + sheet.getSheetName() + ":" + location);
-                    byte[] bytes = data.getData();
-                    String digest = digestOnce(budget, bytes, () -> {
+                    // getData() copies the picture on every call: memoized on the picture index, and
+                    // only called on the first placement.
+                    int index = picture instanceof HSSFPicture hssf ? hssf.getPictureIndex() : -1;
+                    String digest = digestOnce(budget, index >= 0 ? Integer.valueOf(index) : key, () -> {
+                        byte[] bytes = data.getData();
                         budget.spend(bytes.length);
                         return digestBytes(bytes, key);
                     });
@@ -291,10 +295,13 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
     }
 
     /**
-     * Digests a picture whose bytes are already in heap, the binary {@code .xls} and {@code .ppt}
-     * case: those have no package part, and their content is held by the in-memory workbook anyway,
-     * so reading it adds no unbounded allocation. The length is still checked, so an over-sized
-     * image is reported the same way whatever the container.
+     * Digests a picture whose bytes are already in heap, the binary {@code .xls} case: it has no
+     * package part to stream. The length is still checked, so an over-sized image is reported the
+     * same way whatever the container.
+     * <p>
+     * Not free for all that: {@code HSSFPictureData#getData()} returns a <b>copy</b> of the picture
+     * whenever it is 16 bytes or more long, to look for a Mac PNG header, so the caller reads it once
+     * per picture through {@link #digestOnce}, keyed on the picture index.
      *
      * @return the digest, or {@code null} if the image is over budget and must be dropped
      * @since 2025.1

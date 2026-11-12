@@ -49,6 +49,9 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.poi.hssf.usermodel.HSSFClientAnchor;
+import org.apache.poi.hssf.usermodel.HSSFPatriarch;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.CreationHelper;
 import org.apache.poi.sl.usermodel.PictureData.PictureType;
@@ -734,6 +737,62 @@ public class TestImageInventoryExtractor {
 
         assertEquals(20, content.size());
         assertEquals(1, counting.reads);
+    }
+
+    /** A binary {@code .xls} with one picture anchored on {@code placements} successive rows. */
+    protected static Blob xlsAnchoredManyTimes(byte[] image, int placements) throws Exception {
+        try (HSSFWorkbook workbook = new HSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            HSSFPatriarch drawing = workbook.createSheet("Budget").createDrawingPatriarch();
+            int picture = workbook.addPicture(image, HSSFWorkbook.PICTURE_TYPE_PNG);
+            for (int row = 0; row < placements; row++) {
+                drawing.createPicture(new HSSFClientAnchor(0, 0, 0, 0, (short) 0, row, (short) 1, row + 1), picture);
+            }
+            workbook.write(out);
+            return BlobAuditTestHelper.blob(out.toByteArray(), "application/vnd.ms-excel", "logo.xls");
+        }
+    }
+
+    /**
+     * Item 92: the binary {@code .xls} path memoized on the array {@code getData()} returns, which is a
+     * fresh copy for a PNG carrying the 16-byte header Mac applications write: every placement was
+     * digested again.
+     */
+    @Test
+    public void testAPictureAnchoredManyTimesInAnXlsIsReadOnce() throws Exception {
+        byte[] macPng = new byte[16 + PNG.length];
+        System.arraycopy(PNG, 0, macPng, 16, PNG.length);
+        var counting = new SpreadsheetImageInventory() {
+            protected int reads;
+
+            @Override
+            protected String digestBytes(byte[] bytes, String key) {
+                reads++;
+                return super.digestBytes(bytes, key);
+            }
+        };
+
+        DiffableContent content = counting.extract(xlsAnchoredManyTimes(macPng, 20), MAX_LINES);
+
+        assertEquals(20, content.size());
+        assertEquals(1, content.lines().stream().map(ContentLine::value).distinct().count());
+        assertEquals(1, counting.reads);
+    }
+
+    /**
+     * Item 92: {@code getData()} was called on every placement, before the memo, and it copies the
+     * picture each time: an 800 KB picture anchored 100 times cost 80 MB, which no budget charged.
+     */
+    @Test
+    public void testAPictureAnchoredManyTimesInAnXlsIsCopiedOnce() throws Exception {
+        Blob blob = xlsAnchoredManyTimes(png(512), 100);
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long before = threads.getCurrentThreadAllocatedBytes();
+
+        DiffableContent content = new SpreadsheetImageInventory().extract(blob, MAX_LINES);
+
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        assertEquals(100, content.size());
+        assertTrue("listing 100 placements allocated " + allocated + " bytes", allocated < 24L * 1024 * 1024);
     }
 
     /**
