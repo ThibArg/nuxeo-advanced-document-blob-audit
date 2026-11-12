@@ -89,7 +89,7 @@
   <script>
     Polymer({
       is: 'nuxeo-blobdiff-view-layout',
-      behaviors: [Nuxeo.LayoutBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior],
+      behaviors: [Nuxeo.LayoutBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior, Nuxeo.BlobAudit.Behavior],
       properties: {
         document: { type: Object, observer: '_documentChanged' },
         _full: Object
@@ -98,12 +98,6 @@
         if (doc && doc.uid) {
           this.$.doc.get();
         }
-      },
-      _versionPair: function (previousLabel, newLabel) {
-        return (previousLabel || '?') + ' → ' + (newLabel || '?');
-      },
-      _versionIds: function (previousId, newId) {
-        return [previousId, newId].filter(Boolean).join(' → ');
       },
       // 0 is a measured score, the most telling one: only null and undefined mean "not measured".
       _hasSimilarity: function (similarity) {
@@ -115,21 +109,12 @@
       _isReplaced: function (status) {
         return status === 'skippedContentReplaced';
       },
-      _canRetry: function (doc) {
-        var p = doc && doc.properties;
-        return !!p && Nuxeo.BlobAudit.isRetryable(p['bdiff:status']) && !!p['bdiff:oldBlobKey'] &&
-          !!p['bdiff:newBlobKey'];
-      },
       _retry: function () {
-        this.$.retryOp.input = this.document.uid;
-        this.$.retryOp.execute()
-          .then(function () {
-            this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
+        this._retryDiff(this.document.uid).then(function (done) {
+          if (done) {
             Nuxeo.BlobAudit.openSearch();
-          }.bind(this))
-          .catch(function (err) {
-            this.fire('notify', { message: this.i18n('label.blobaudit.retry.failed') + ' ' + (err && err.message || '') });
-          }.bind(this));
+          }
+        }.bind(this));
       },
       _delete: function () {
         this.$.deleteDialog.open([this.document]).then(function (deleted) {

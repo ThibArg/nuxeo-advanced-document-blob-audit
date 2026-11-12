@@ -158,7 +158,7 @@
     Polymer({
       is: 'nuxeo-blobdiffs-search-results',
       // Nuxeo.LayoutBehavior transitively brings Routing, Filters, Format and I18n.
-      behaviors: [Nuxeo.LayoutBehavior],
+      behaviors: [Nuxeo.LayoutBehavior, Nuxeo.BlobAudit.Behavior],
       properties: {
         /** The nuxeo-page-provider element, injected by nuxeo-search-results-layout. */
         nxProvider: Object,
@@ -182,20 +182,6 @@
         ];
       },
 
-      _versionPair: function (previousLabel, newLabel) {
-        return (previousLabel || '?') + ' → ' + (newLabel || '?');
-      },
-
-      _versionIds: function (previousId, newId) {
-        return [previousId, newId].filter(Boolean).join(' → ');
-      },
-
-      _canRetry: function (item) {
-        var p = item && item.properties;
-        return !!p && Nuxeo.BlobAudit.isRetryable(p['bdiff:status']) && !!p['bdiff:oldBlobKey'] &&
-          !!p['bdiff:newBlobKey'];
-      },
-
       _refresh: function () {
         var results = this.$.results;
         if (results) {
@@ -213,17 +199,11 @@
       },
 
       _retry: function (e) {
-        this.$.retryOp.input = e.model.item.uid;
-        this.$.retryOp.execute()
-          .then(function () {
-            this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
+        this._retryDiff(e.model.item.uid).then(function (done) {
+          if (done) {
             this.async(this._refresh, 1500);
-          }.bind(this))
-          .catch(function (err) {
-            this.fire('notify', {
-              message: this.i18n('label.blobaudit.retry.failed') + ' ' + ((err && err.message) || '')
-            });
-          }.bind(this));
+          }
+        }.bind(this));
       },
 
       _deleteSelection: function () {

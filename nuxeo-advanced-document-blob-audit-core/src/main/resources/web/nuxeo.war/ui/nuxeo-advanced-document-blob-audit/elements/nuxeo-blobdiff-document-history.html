@@ -43,7 +43,7 @@
   <script>
     Polymer({
       is: 'nuxeo-blobdiff-document-history',
-      behaviors: [Nuxeo.I18nBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior],
+      behaviors: [Nuxeo.I18nBehavior, Nuxeo.FormatBehavior, Nuxeo.RoutingBehavior, Nuxeo.BlobAudit.Behavior],
       properties: {
         document: { type: Object, observer: '_refresh' },
         user: Object,
@@ -58,12 +58,6 @@
       _openAll: function () {
         // Replace: the tab lists every diff of the document, the audit must show the same ones.
         Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': this.document.uid }, true);
-      },
-      _versionPair: function (previousLabel, newLabel) {
-        return (previousLabel || '?') + ' → ' + (newLabel || '?');
-      },
-      _versionIds: function (previousId, newId) {
-        return [previousId, newId].filter(Boolean).join(' → ');
       }
     });
   </script>

@@ -127,6 +127,39 @@
         if (line.indexOf('- ') === 0) { return 'remove'; }
         if (line.indexOf('~ ') === 0) { return 'change'; }
         return 'same';
+      },
+
+      /** Methods shared by the elements of the plugin, mixed in through behaviors. */
+      Behavior: {
+        _versionPair: function (previousLabel, newLabel) {
+          return (previousLabel || '?') + ' → ' + (newLabel || '?');
+        },
+
+        _versionIds: function (previousId, newId) {
+          return [previousId, newId].filter(Boolean).join(' → ');
+        },
+
+        _canRetry: function (doc) {
+          var p = doc && doc.properties;
+          return !!p && Nuxeo.BlobAudit.isRetryable(p['bdiff:status']) && !!p['bdiff:oldBlobKey'] &&
+            !!p['bdiff:newBlobKey'];
+        },
+
+        /** Runs BlobDiff.Retry through the element's #retryOp, notifies, and resolves to true on success. */
+        _retryDiff: function (uid) {
+          this.$.retryOp.input = uid;
+          return this.$.retryOp.execute()
+            .then(function () {
+              this.fire('notify', { message: this.i18n('label.blobaudit.retry.done') });
+              return true;
+            }.bind(this))
+            .catch(function (err) {
+              this.fire('notify', {
+                message: this.i18n('label.blobaudit.retry.failed') + ' ' + ((err && err.message) || '')
+              });
+              return false;
+            }.bind(this));
+        }
       }
     };
   })();
