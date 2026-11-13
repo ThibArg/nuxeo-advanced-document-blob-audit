@@ -30,6 +30,7 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
 import java.io.Serializable;
+import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
@@ -112,6 +113,24 @@ public class TestBlobDiffService {
         } finally {
             component.start(null);
         }
+    }
+
+    /**
+     * Item 101: {@code start} publishes the extractor lists that the {@code blobDiff} works read, and a
+     * restart can do so while works drain. A data race cannot be reproduced on demand, so what makes
+     * the publication safe is pinned instead: {@code volatile} fields, lists never modified once
+     * published.
+     */
+    @Test
+    public void testTheExtractorListsArePublishedSafely() throws Exception {
+        BlobDiffComponent component = (BlobDiffComponent) blobDiffService;
+        for (String field : List.of("extractors", "imageExtractors")) {
+            assertTrue(field + " must be volatile",
+                    Modifier.isVolatile(BlobDiffComponent.class.getDeclaredField(field).getModifiers()));
+        }
+        List<BlobDiffComponent.ResolvedExtractor> published = component.extractors;
+        assertThrows(UnsupportedOperationException.class, () -> published.add(published.get(0)));
+        assertThrows(UnsupportedOperationException.class, () -> component.imageExtractors.clear());
     }
 
     @Test

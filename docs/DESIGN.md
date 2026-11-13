@@ -285,7 +285,10 @@ nothing to record. Do not harmonise the two.
 
 `BlobDiffComponent#stop` keeps the extractor lists: both WorkManagers drain their works for a while
 before the components stop, and a work still running past that would otherwise find no extractor and
-file `skippedUnsupportedType`.
+file `skippedUnsupportedType`. For the same reason a restart may replace the lists while works read
+them: they are `volatile` fields holding lists built whole and never modified (`List.copyOf`), so a
+work sees either list complete, and its extractors initialised
+(`TestBlobDiffService#testTheExtractorListsArePublishedSafely`).
 
 ## 5. Diff engine
 

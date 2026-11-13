@@ -64,9 +64,15 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     public static final String XP_CONFIG = "config";
 
-    protected List<ResolvedExtractor> extractors;
+    /**
+     * The text extractors, by order. Written by {@link #start}, read by the {@code blobDiff} works:
+     * {@code volatile}, and never modified once published, so that a work sees a complete list and
+     * the extractors initialised before it, even when a restart replaces it while works drain.
+     */
+    protected volatile List<ResolvedExtractor> extractors;
 
-    protected List<ResolvedExtractor> imageExtractors;
+    /** The image inventory extractors, by order; published like {@link #extractors}. */
+    protected volatile List<ResolvedExtractor> imageExtractors;
 
     /**
      * Creates the restricted container at repository initialisation, installed while the component
@@ -160,7 +166,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             }
         }
         resolved.sort(Comparator.comparingInt(r -> r.descriptor().getOrder()));
-        return resolved;
+        return List.copyOf(resolved);
     }
 
     /**

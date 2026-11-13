@@ -206,9 +206,11 @@ Why: `docs/DESIGN.md` §1.
 returns `null` only when no extractor is registered (filed `skippedUnsupportedType`); a failing
 extractor raises, filed `error`, retryable. The image inventory logs a `WARN` and keeps the text
 result. Do not harmonise the two. `BlobDiffComponent#stop` keeps the extractor lists for the works
-still draining. Coverage: `TestBlobDiffManagement#testAnExtractionFailureIsRetryable`,
+still draining, and `start` publishes them as `volatile` fields holding immutable lists. Coverage:
+`TestBlobDiffManagement#testAnExtractionFailureIsRetryable`,
 `TestBlobDiffService#testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported`,
-`#testAStoppingComponentKeepsItsExtractors`, `TestBlobDiffImageExtraction`. Why: `docs/DESIGN.md` §4.
+`#testAStoppingComponentKeepsItsExtractors`, `#testTheExtractorListsArePublishedSafely`,
+`TestBlobDiffImageExtraction`. Why: `docs/DESIGN.md` §4.
 
 ### Container, security, purge
 
@@ -391,7 +393,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 326 tests, 27 test classes
+mvn -o install                                     # full build: 327 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -544,4 +546,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 101.
+`git log --grep '^Item '`. Next free number: 102.
