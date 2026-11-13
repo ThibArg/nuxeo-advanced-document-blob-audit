@@ -1,503 +1,349 @@
 # AGENTS.md — nuxeo-advanced-document-blob-audit
 
 Working notes for AI agents picking this repository up. Read this before touching the code.
-Functional documentation lives in `README.md`.
+Documentation homes: `README.md` for users and administrators, `docs/DESIGN.md` for the *why*,
+this file for the rules to keep — each pointing to the section of `docs/DESIGN.md` that explains it.
 
 ## What this plugin does
 
 Audits **what actually changed inside a binary** between two successive Nuxeo versions of a
-document: Excel cell by cell, PowerPoint slide by slide, Word/PDF paragraph by paragraph, text
-formats line by line.
+document: Excel cell by cell, PowerPoint slide by slide, Word paragraph by paragraph, PDF line by line
+as rendered, text formats line by line.
 
 Pipeline:
 
 1. `BlobModificationListener` (synchronous, on `aboutToCheckIn` + `documentCheckedIn`, both fired
-   on the live document) compares the digests of the blob on the previous and the new version.
-2. If they differ, it fires a `blobContentModified` audit entry (**no business data**: only xpath,
-   filenames, mime types and a `diffCorrelationId`) and schedules a `BlobDiffWork`.
-3. `BlobDiffWork` (asynchronous, queue `blobDiff`) extracts and compares the two binaries, then
-   stores the unified diff as a **blob** on a dedicated `BlobDiff` document under the
-   ACL-restricted `/change-diff/YYYY/MM/DD/` container.
+   on the live document) establishes the version pair, and `VersionBlobPairs` lists the blobs to
+   compare.
+2. For each pair, `BlobDiffTrigger#scheduleIfNeeded` checks the eligibility and the digests. A real
+   change fires a `blobContentModified` audit entry (**no business data**: xpath, filenames, mime
+   types, and either a `diffCorrelationId` or a `skipReason`). A diffable one also schedules a
+   `BlobDiffWork` carrying a `DiffRequest` (one `FrozenBlob` per side).
+3. `BlobDiffWork` (queue `blobDiff`, after commit) re-reads both binaries by storage key, extracts
+   and compares them with no transaction open (`BlobDiffService#diff`, `TextDiffer`), and
+   `BlobDiffStore` writes the result as a `BlobDiff` document under the ACL-restricted
+   `/change-diff/YYYY/MM/DD/` (UTC) container.
 
-A binary that changed but cannot be diffed (over `maxBlobSize`, no extractor for the mime type, or
-the two versions read by different extractor contributions) produces the **audit entry only**, with
-a `skipReason` extended info and no `diffCorrelationId`. See the "Skip reporting" invariant below.
+A binary that changed but cannot be diffed (over `maxBlobSize`, no extractor for the mime type, read
+by another extractor contribution than the previous version, not managed, in a reshaped list) gets
+the audit entry only, with a `skipReason` and no `diffCorrelationId`. Statuses: README, "Statuses";
+`DiffStatus` holds each value and its audit comment.
 
 Formats are supported by contributing `BlobContentExtractor` implementations to the `extractors`
-extension point. The diff engine (`TextDiffer`) is format-agnostic.
+extension point; image inventories go to `imageExtractors`. The diff engine is format-agnostic.
 
 ## Layout
 
 Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-SNAPSHOT`.
 
 - `nuxeo-advanced-document-blob-audit-core/` — all Java, all contributions, and the Web UI.
-  - `src/main/java/org/nuxeo/audit/advanced/blob/` — service (`BlobDiffComponent`: configuration,
-    eligibility, diff), `BlobDiffStore` (the `/change-diff` container and the `BlobDiff` documents,
-    static, privileged session), `BlobModificationListener`, `VersionBlobPairs` (which blobs of two
-    versions to compare), `BlobDiffTrigger`, `DiffRequest` + `FrozenBlob` (what a diff compares,
-    carried by the work, written on the `BlobDiff` and read back by the retry), `TextDiffer`;
-    subpackages `bulk/`, `extractor/`, `image/`, `io/`, `operations/`, `work/`.
-  - `src/main/resources/OSGI-INF/` — 11 components + `deployment-fragment.xml` + `l10n/`.
-  - `src/main/resources/OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` —
-    **server-side** i18n, appended by `deployment-fragment.xml` to
-    `nuxeo.war/WEB-INF/classes/messages*.properties`. This is the bundle
-    `SuggestDirectoryEntries` reads to localize vocabulary labels, so the `eventTypes` label of
-    `blobContentModified` must live here. Nothing reads a `nuxeo.war/server-side-i18n/` folder.
-  - `src/main/resources/web/nuxeo.war/` — Polymer elements under
-    `ui/nuxeo-advanced-document-blob-audit/elements/`, the two halves of the `blobdiffs` named
-    search under `ui/search/blobdiffs/`, layouts under `ui/document/blobdiff/`,
-    **client** i18n in `ui/i18n/messages*.json`, read by Web UI only.
-    The two i18n sets have different roles and different consumers: they are **not** copies of one
-    another. A key may exist in both (`label.blobaudit.event.blobContentModified` does), but adding
-    a key to one does not imply adding it to the other.
-- `nuxeo-advanced-document-blob-audit-package/` — the Nuxeo marketplace package.
+  - `src/main/java/org/nuxeo/audit/advanced/blob/`:
+    - `BlobDiffComponent`, the `BlobDiffService` implementation: configuration and extractor
+      registries, pair eligibility, `diff`. Its `start` installs `BlobDiffRepositoryInit` and adds the
+      `blobContentModified` row to the `eventTypes` vocabulary.
+    - `BlobModificationListener` (version pairing, disabling switches), `VersionBlobPairs` (which
+      blobs of two versions to compare), `BlobDiffTrigger` (eligibility, digests, skip or schedule).
+    - `DiffRequest` + `FrozenBlob` (what a diff compares: built at check-in, carried by the work,
+      written on the `BlobDiff`, read back by the retry), `VersionContext` (the version pair).
+    - `BlobDiffStore` (the `/change-diff` container and the `BlobDiff` documents; static, privileged
+      session), `BlobDiffRepositoryInit`, `BlobDiffLocationListener`, `BlobDiffAccess` (auditor check,
+      auditors group).
+    - `DiffStatus`, `DiffEligibility`, `DiffResult`, `BlobAuditConstants`, `BlobDiffConfigDescriptor`,
+      `ExtractorDescriptor`.
+    - `BlobContentExtractor` (the extension interface), `ContentLine`, `DiffableContent`, `TextDiffer`.
+    - `extractor/`: `SpreadsheetExtractor`, `PresentationExtractor` + `SlideHandler`,
+      `PlainTextExtractor`, `ConverterTextExtractor`.
+    - `image/`: `AbstractImageInventory` and its four subclasses `WordImageInventory`,
+      `SpreadsheetImageInventory`, `PresentationImageInventory`, `PdfImageInventory`.
+    - `io/`: `MaterializedBlob`, `OoxmlPackages`, `BlobCharsets`, `BlobDiffSourceEnricher`.
+    - `operations/` (the six `BlobDiff.*` operations), `bulk/BlobDiffPurgeAction`, `work/BlobDiffWork`.
+  - `src/main/resources/OSGI-INF/` — 11 components, all listed in `META-INF/MANIFEST.MF`, plus
+    `deployment-fragment.xml` and `l10n/`.
+  - `src/main/resources/schemas/` — `blobdiff.xsd` (`bdiff:`) and `blobdiffsearch.xsd` (`bdsearch:`,
+    the search document of `BLOB_DIFFS_ADMIN`, never persisted).
+  - `src/main/resources/web/nuxeo.war/ui/` — Polymer elements under
+    `nuxeo-advanced-document-blob-audit/elements/`, the two halves of the `blobdiffs` named search
+    under `search/blobdiffs/`, layouts under `document/blobdiff/`, client i18n under `i18n/`.
+- `nuxeo-advanced-document-blob-audit-package/` — the marketplace package (the bundle only).
+- `docs/DESIGN.md` — design notes. `README-Summary/` — two HTML overviews, maintained by hand: mirror
+  any user-visible change there.
+
+**Two i18n sets, two consumers, not copies of one another.**
+`OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` are **server-side**:
+`deployment-fragment.xml` appends them to `nuxeo.war/WEB-INF/classes/messages*.properties`, the
+bundle `SuggestDirectoryEntries` localises vocabulary labels with — so the `eventTypes` label of
+`blobContentModified` must live there. `web/nuxeo.war/ui/i18n/messages*.json` is **client-side**,
+read by Web UI only. A key may exist in both (`label.blobaudit.event.blobContentModified` does);
+adding a key to one does not imply adding it to the other.
 
 ## Invariants to keep in mind
 
-**Version pairing is captured, not inferred.** `ABOUT_TO_CHECKIN` fires inline on the live document
-just before the new version exists; the listener records `getLastDocumentVersionRef` in the event
-properties. `AbstractSession` passes that very same option map to `notifyCheckedInVersion`, which
-copies it into the `DOCUMENT_CHECKEDIN` properties, where the listener reads it back alongside the
-platform's `checkedInVersionRef`. There is no assumption about version numbering left, and no
-bail-out.
+Each rule names where it lives and what guards it. Do not weaken a guarding test to make a change
+pass: a failing one means a guarded behaviour broke.
 
-Two core call sites (`saveDocument`'s snapshot branch and the publishing path) call
-`notifyCheckedInVersion` with `null` options, so the captured ref can be missing.
-`previousVersionRefFallback` covers them, ordering by `ecm:versionCreated` — a fact, not a
-convention. Do not "simplify" it away, and do not reintroduce `ORDER BY uid:major_version`.
-Coverage: `TestBlobDiffVersionPairing`.
+### Detection
 
-**The listener can be muted.** `BlobModificationListener` honours three switches (see README,
-"Disabling the Listener"):
+**Version pairing is captured, not inferred.** `BlobModificationListener#capturePreviousVersion`
+records `getLastDocumentVersionRef` on `aboutToCheckIn`; `AbstractSession` forwards that option map
+to `documentCheckedIn`, read with the platform's `checkedInVersionRef`. Two core call sites pass
+`null` options: `previousVersionRefFallback` covers them, ordering by `ecm:versionCreated`. Do not
+"simplify" it away, never reintroduce `ORDER BY uid:major_version`. The three reads are privileged.
+Coverage: `TestBlobDiffVersionPairing`. Why: `docs/DESIGN.md` §2.
 
-- `DISABLE_BLOB_DIFF_LISTENER` context data / event property — works for the version
-  `session.saveDocument` creates itself from a `VERSIONING_OPTION` (its options reach both
-  check-in events), and for **nothing else**: an automatic policy applied during the same save
-  (`collaborative-save`, shipped and active; `note-as-wiki`) goes through `DocumentModel#checkIn`,
-  `session.checkIn` builds a fresh, empty option map, and `restoreToVersion` and `publishDocument`
-  pass `null` (item 41);
-- `BlobModificationListener.runDisabled(Runnable|Supplier)`, thread-scoped — the answer for explicit
-  check-ins, restores, publishing, migrations and importers;
-- `EventServiceAdmin.setListenerEnabledFlag("blobModificationListener", false)`, instance-wide.
+**The listener can be muted, and the checks come first.** Three switches: the
+`DISABLE_BLOB_DIFF_LISTENER` context data / event property, which only reaches the listener for the
+version `saveDocument` creates itself from a `VERSIONING_OPTION` (not automatic policies such as
+`collaborative-save`, not `checkIn`, `restoreToVersion` nor `publishDocument`);
+`BlobModificationListener.runDisabled(Runnable|Supplier)`, thread-scoped, restored in a `finally`;
+`EventServiceAdmin.setListenerEnabledFlag("blobModificationListener", false)`. Any change to
+`handleEvent` keeps these checks first, before any I/O. Coverage: `TestBlobDiffListenerDisabling`.
+Why: `docs/DESIGN.md` §2; the exact reach is in the README.
 
-Any change to `handleEvent` must keep these checks first, before any I/O.
-Coverage: `TestBlobDiffListenerDisabling`.
+**Blobs inside a list are paired by content, never by index alone.**
+`VersionBlobPairs#pairListEntries` expands a list template on each version: a digest on both sides
+is unchanged wherever it sits; a new blob is compared with the one at its xpath only when the list
+kept its shape and that one is gone; a new blob in a list that also lost an entry is
+`skippedListChanged`. Configured indexed xpaths (`files:files/0/file`) stay compared by index. With
+`<xpath>*</xpath>` the templates come from `DocumentModel#getSchemas()` of the new version (instance
+facets included), cached per schema and cleared by `BlobDiffComponent#stop`. Coverage:
+`TestBlobDiffVersionPairing`. Why: `docs/DESIGN.md` §3.
 
-**Contributions merge, they do not replace** (item 40). `BlobDiffConfigDescriptor` and
-`ExtractorDescriptor` implement `Descriptor#merge`, whose default returns the later contribution
-alone. Their scalar fields are boxed so that "not set" (`null`) can be told from a value, the
-getters apply the defaults, and `merge` returns a new instance: a set value wins, an omitted one
-keeps the earlier value, a list replaces the earlier one only when it is not empty
-(`Descriptor.getIfEmpty`), extractor properties are overlaid. XMap cannot tell `<xpaths/>` from an
-absent element, so an empty list can no longer carry a meaning of its own: "every blob xpath" is
-`<xpath>*</xpath>` (`isEveryXPath`), "every type" is an empty `docTypes` or `*`, and an empty
-`xpaths` means `file:content`, what the shipped contribution lists. A new field on either
-descriptor must be boxed and added to `merge`, or a partial override resets it.
-Coverage: `TestBlobDiffConfigDescriptor`, `TestExtractorSelection`,
+**The order of the checks in `BlobDiffTrigger#scheduleIfNeeded` is significant.** Eligibility, then
+`NOT_APPLICABLE` returns silently, then `sameContent`, then a skip is reported, then the
+`ManagedBlob` check, then the work is scheduled with `afterCommit=true`. Moving `sameContent` after
+the skip would audit every new version of an over-sized document, and identical bytes re-uploaded
+under another mime type. Coverage: `TestBlobDiffSkipReporting`. Why: `docs/DESIGN.md` §4.
+
+**One extractor contribution is one comparability class.** `BlobDiffService#getEligibility(docType,
+xpath, oldBlob, newBlob)` combines the two per-blob verdicts, then returns `FORMAT_CHANGED` when both
+sides resolve to different extractor instances, compared by identity on one snapshot of the list.
+Precedence: `NOT_APPLICABLE` > `TOO_LARGE` > `UNSUPPORTED_TYPE` > `FORMAT_CHANGED` > `ELIGIBLE`. It is
+the **only** eligibility call of `BlobDiffTrigger` and of `BlobDiffWork#work`: do not inline
+`DiffEligibility.combine` into either. The work-time call is what makes `skippedTooLarge`,
+`skippedUnsupportedType` and `skippedFormatChanged` reachable as a `bdiff:status` (a retry, or a work
+outliving a configuration change); the purge dialog offers them. The contributions are the rules:
+`ConverterTextExtractor` is contributed three times (`converter`, `pdf`, `legacyPresentation`) — do
+not fold `pdf` or `legacyPresentation` back into `converter`; every text format stays in
+`plainText`. Coverage:
+`TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`, the format cases of
+`TestBlobDiffSkipReporting`, `TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`.
+Why: `docs/DESIGN.md` §4.
+
+**A text file replaced by another one is filed without its body, and only then.**
+`BlobDiffComponent#isReplaced` flags a result `replaced()` when the normalised mime types differ,
+both sides hold at least `minSimilarityLines` units and the similarity is under `minSimilarity` —
+properties of the contribution reading the pair, parsed once into `ResolvedExtractor`, read by the
+service, ignored by the extractor; an invalid value disables the rule, never the extractor. Keep the
+mime-change condition (a rewrite in the same format is always diffed), keep the body in
+`BlobDiffService#diff` (integrators recompute with it; `BlobDiffWork` drops it), keep the score in
+characters over the smaller side, and keep the decision at work time. Coverage:
+`TestTextDifferSimilarity`, the `replaced` / `minSimilarity` cases of `TestBlobDiffService` and
+`TestBlobDiffSkipReporting`, `TestExtractorSelection#testAnInvalidSimilarityRuleIsDisabledRatherThanFatal`,
+`TestBlobDiffManagement#testRetryRefusesAReplacedContent`. Why: `docs/DESIGN.md` §4.
+
+**Contributions merge, they do not replace.** `BlobDiffConfigDescriptor` and `ExtractorDescriptor`
+override `Descriptor#merge`, whose default returns the later contribution alone. Scalar fields are
+boxed so that "not set" can be told from a value, getters apply the defaults, a list replaces the
+earlier one only when not empty, extractor properties are overlaid. XMap cannot tell an empty list
+from an absent one: "every blob xpath" is `<xpath>*</xpath>`, "every type" an empty `docTypes` or
+`*`, an empty `xpaths` means `file:content`. A new field must be boxed and added to `merge`, or a
+partial override resets it. Coverage: `TestBlobDiffConfigDescriptor`, `TestExtractorSelection`,
 `TestBlobDiffService#testAPartialContributionOnlyChangesWhatItSets`.
 
-**Skip reporting: the order of the checks in `BlobDiffTrigger#scheduleIfNeeded` is significant.**
-Eligibility (`DiffEligibility`) is evaluated, then `sameContent`, then the skip is reported. Moving
-`sameContent` back after the eligibility branch would audit every new version of an over-sized
-document as a binary change even when the binary never moved. `NOT_APPLICABLE` short-circuits
-before `sameContent` and stays fully silent; `TOO_LARGE`, `UNSUPPORTED_TYPE` and `FORMAT_CHANGED`
-only produce an entry once the digests are known to differ, so the same bytes re-uploaded under
-another mime type stay silent. Coverage: `TestBlobDiffSkipReporting`.
+### The work and the retry
 
-**One extractor contribution is one comparability class** (item 61). The pair-level
-`BlobDiffService#getEligibility(docType, xpath, oldBlob, newBlob)` combines the two per-blob
-verdicts, then returns `FORMAT_CHANGED` (`skippedFormatChanged`) when both are eligible but resolve
-to different extractor instances — one per contribution, compared by identity on one snapshot of
-the list. It is the **only** eligibility call of `BlobDiffTrigger` and of the work-time
-eligibility check in `BlobDiffWork#work`: do not inline `DiffEligibility.combine` back into either, they
-would drift apart. Precedence is `NOT_APPLICABLE` > `TOO_LARGE` > `UNSUPPORTED_TYPE` >
-`FORMAT_CHANGED` > `ELIGIBLE`. The check compares contributions, not mime types, so the shipped
-contributions *are* the comparability rules: `ConverterTextExtractor` is contributed three times
-(`converter` for docx/doc/odt/rtf, `pdf`, `legacyPresentation` for `.ppt`) precisely so that a Word
-document replaced by its PDF rendition or by a deck is not diffed, while `.doc` → `.docx` still is.
-Do not fold `pdf` or `legacyPresentation` back into `converter`. Every text format is in
-`plainText` on purpose: `PlainTextExtractor` reads raw lines whatever the mime type, so
-`.txt` → `.json` is a genuine diff. Whether `.json` → `.xml` should be split out was an open
-product decision, settled by item 62: it stays in one class, and a text file *replaced* by an
-unrelated one is caught by similarity instead (next invariant). Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
-the four format cases of `TestBlobDiffSkipReporting`,
-`TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`.
-
-**A text file replaced by another one is filed without its body, and only then** (item 62).
-`BlobDiffComponent#isReplaced` flags a result `replaced()` when the mime types differ (normalised
-by `ExtractorDescriptor#normalizeMimeType`: no case, no parameters), both sides hold at least
-`minSimilarityLines` units, and `DiffResult#similarity()` is under `minSimilarity` — two properties
-of the contribution reading the pair, parsed once in `resolve` into `ResolvedExtractor`, read by the
-service and ignored by the extractor. Only `plainText` sets them (`0.1`, `5`); `0` disables the
-rule. `BlobDiffWork` turns the flag into `skippedContentReplaced`, and `BlobDiffStore#createDiffDocument` stores
-the counters and `bdiff:similarity` but no body, as for every status other than `ok`. Four points:
-
-- **The mime-change condition is the product decision, not an optimisation.** A rewrite in the same
-  format is an author's edit and is always diffed. Do not drop the check to "catch more noise".
-- **The service keeps the body.** `diff()` returns the whole `unified` and only *flags* the
-  result: the README tells integrators to recompute a replaced pair through
-  `BlobDiffService#diff` on the two version blobs. Emptying the body in the service would break
-  that. `BlobDiff.Retry` refuses the status on purpose (product decision): it is no incident.
-- **The score is in characters over the smaller side.** `TextDiffer` counts the characters of the
-  lines it keeps — positional: every old line minus the raw removals, computed *before* the
-  `tailStart` drop of item 46, since every old line is either kept or removed; keyed: entries with
-  equal key and value. Lines would let `{` / `},` make unrelated JSON files look half equal; the
-  larger side would make a big append look like a replacement. `null` when a side has no characters.
-- **Decided at work time.** The check-in audit entry is the nominal one, with its
-  `diffCorrelationId` and no `skipReason`, exactly like `skippedUnsupportedType` at work time.
-  Moving the decision to the listener would mean extracting in the user transaction.
-
-An invalid property value is logged and disables the rule, never the extractor: a `resolve` failure
-would make every text format unsupported. Coverage: `TestTextDifferSimilarity`,
-`TestBlobDiffService` (the six `replaced` / `minSimilarity` cases),
-`TestBlobDiffSkipReporting` (the four "replaced text content" cases),
-`TestExtractorSelection#testAnInvalidSimilarityRuleIsDisabledRatherThanFatal`,
-`TestBlobDiffManagement#testRetryRefusesAReplacedContent`.
-
-**Blobs inside a list are paired by content, never by index alone** (item 45).
-`VersionBlobPairs#pairListEntries` expands a list template on each version separately: a
-digest present on both sides is unchanged wherever it sits, a new blob is compared with the one at
-the same xpath only when the list kept its shape and that one is gone, and a new blob in a list that
-also lost an entry is audited as `skippedListChanged`, without a diff. A blob with no digest never
-matches the other side, which degrades to index pairing when the shape is kept. Configured indexed
-xpaths (`files:files/0/file`) are an explicit choice and stay compared by index.
-Coverage: `TestBlobDiffVersionPairing`, the four `COR-01` cases.
-
-Three skip statuses are reachable as a `bdiff:status`. `skippedUnsupportedType` is set by
-`BlobDiffWork` when `service.diff()` returns `null` at work time; `skippedTooLarge` **became**
-reachable with SEC-01, because the work now re-evaluates the eligibility of the rehydrated pair
-(the work-time eligibility check in `BlobDiffWork#work`) — a retry, or a work outliving a `maxBlobSize` change, can fail
-it; `skippedFormatChanged` is reachable the same way (item 61), by a retry or a work outliving a
-mime type moved to another contribution. The purge dialog offers all three, plus
-`skippedContentReplaced` (item 62), which is only ever a `bdiff:status`. This reverses an
-earlier note claiming `skippedTooLarge` could never be persisted; that was true only of the
-check-in path.
-
-**`BlobDiffWork` extracts with no transaction open** (item 36). `work()` reads in the work
-transaction, calls `commitOrRollbackTransaction()`, runs `service.diff`, then `startTransaction()`
-to write. Nothing in between may touch the repository, and no `DocumentModel` read before the
-commit is used after it: the values it needs are copied into locals first. `alreadyRecorded()` runs
-again once the new transaction is open, because another run of the same work may have recorded
-the diff during the extraction. Do not drop that second check, it is item 5 again.
-Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction`,
-`#testADiffRecordedDuringTheExtractionIsNotDuplicated`.
-
-**What a diff compares is frozen at check-in, and the work id only names it** (item 71).
-`BlobDiffTrigger` builds a `DiffRequest` — source, xpath, a `FrozenBlob` per side (provider id, key,
-filename, mime type, digest, length), the version pair, user, time and correlation id — and the work
-re-reads both binaries through `FrozenBlob#resolve`, never from the live document: a later save would
-otherwise make a queued v1 → v2 work compare v1 → v3. The version pair is mandatory. `DiffRequest#writeTo`
-and `#readFrom` are the only mapping between a request and the `BlobDiff` properties; keep them
-symmetric. An `error` diff therefore keeps the filenames and digests even when no blob could be read.
-A side may be `null` (`DiffRequest` allows it): the work treats it as unreadable and files an `error`
-diff, never dereferences it. Logs name a side by its filename, **never** by its key or digest — the
-default key strategy makes the key the digest, which identifies a binary to whoever reads the logs
-(item 89).
-`DiffRequest#workId` is a readable name, **not** a deduplication key: `IF_NOT_RUNNING_OR_SCHEDULED` is
-a no-op in LTS 2025 (`WorkManagerImpl#schedule` hard-codes it disabled, `StreamWorkManager#schedule`
-ignores it), so the work is scheduled plainly and `BlobDiffWork#alreadyRecorded`, on the correlation
-id, is the duplicate guard. Coverage: `TestBlobDiffService#testARequestSurvivesTheRoundTripThroughABlobDiff`,
+**What a diff compares is frozen at check-in.** `BlobDiffTrigger` builds a `DiffRequest` with one
+`FrozenBlob` per side and a mandatory `VersionContext`; the work re-reads both binaries through
+`FrozenBlob#resolve`, never from the live document. `DiffRequest#writeTo` and `#readFrom` are the
+only mapping between a request and the `BlobDiff` properties: keep them symmetric. An `error` diff
+keeps the filenames and digests; a `null` side is filed `error`, never dereferenced. Logs name a side
+by its filename, never by its key or digest. Coverage:
+`TestBlobDiffService#testARequestSurvivesTheRoundTripThroughABlobDiff`,
 `TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests`,
-`#testAWorkWithAMissingSideIsFiledInError`, `#testAnUnreadablePairIsLoggedWithoutItsStorageKeys`,
-`TestBlobDiffHardening#testRunningTheSameWorkTwiceCreatesASingleDiff`.
+`#testAWorkWithAMissingSideIsFiledInError`, `#testAnUnreadablePairIsLoggedWithoutItsStorageKeys`.
+Why: `docs/DESIGN.md` §1.
 
-**`BlobDiff.Retry` uses nothing of its input but the id.** The operation replays the provider
-id and the storage key persisted on the document, and `BlobDiffWork` re-reads them in a *system
-session* through `FrozenBlob#resolve` (`provider.readBlob(info)`) — a keyed store lookup, subject to
-**no document ACL**.
-The input model is not the stored document: over REST, a JSON document entity is loaded by uid with
-the caller's session, then `DocumentModelJsonReader#readEntity` applies the request's properties to
-it in memory, under `doPrivileged` — Read on any diff is enough, and the path stays genuine while
-status and keys are the caller's (item 88). `BlobDiffRetryOp#reloadStored` therefore reads the id
-alone, refuses a model never stored (400, `SimpleDocumentModel` included), and reloads it with
-`session.getDocument`; every check and `DiffRequest.readFrom` run on **that** model, never on the
-parameter. Do not reuse the input "to save a read".
-On the stored model, the doctype and `bdiff:status` are still attacker-controlled properties, and
-`AbstractSession.createDocument` does not enforce allowed subtypes (that is `TypeManager`, i.e. UI).
-`BlobDiffRetryOp#checkProvenance` therefore rejects anything outside `/change-diff/` before any
-other property is read, and it must stay the first check after `reloadStored`.
-`DiffRequest.readFrom`, which trusts every property it reads, only runs after it.
-The eligibility recheck in the work is *not* a substitute: the length it compares comes from
-`BlobInfo`, which `FrozenBlob#resolve` fills from the `bdiff:oldLength` / `bdiff:newLength` that
-`DiffRequest.readFrom` read — forgeable.
-Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
+**The work id only names the work; `alreadyRecorded()` is the duplicate guard.**
+`IF_NOT_RUNNING_OR_SCHEDULED` is ignored by LTS 2025 (`WorkManagerImpl#schedule` hard-codes it
+disabled, `StreamWorkManager#schedule` ignores it), so `BlobDiffTrigger` schedules plainly and
+`DiffRequest#workId` is a readable name. `BlobDiffWork#alreadyRecorded` looks the correlation id up
+under `/change-diff`, proxies and versions excluded, the replaced diff excepted. Never move this guard
+to the search engine: indexing is asynchronous. Coverage:
+`TestBlobDiffHardening#testRunningTheSameWorkTwiceCreatesASingleDiff`. Why: `docs/DESIGN.md` §1, §9.
+
+**`BlobDiffWork` extracts with no transaction open, and checks for a duplicate twice.** `work()`
+reads, calls `commitOrRollbackTransaction()`, resolves the eligibility and runs `service.diff`, then
+`startTransaction()` to write. Nothing in between touches the repository, and no `DocumentModel` read
+before the commit is used after it. `alreadyRecorded()` runs again once the new transaction is open:
+do not drop that second check. Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction`,
+`#testADiffRecordedDuringTheExtractionIsNotDuplicated`. Why: `docs/DESIGN.md` §1.
+
+**`BlobDiff.Retry` trusts nothing but the stored path.** `BlobDiffRetryOp#run` keeps this order:
+`checkAuditor`, `reloadStored` (the id of the input only, reloaded with the caller's session; a model
+never stored is refused), `checkProvenance` (under `/change-diff/`, before any other property is
+read), type, status `error`, then `DiffRequest.readFrom` — which trusts every property it reads, so
+only after `checkProvenance` — then both sides present, the pending check, the schedule. The work
+re-reads the keys in a system session through `provider.readBlob`, which applies no ACL; its
+eligibility re-check is no substitute (the lengths come from the diff). Coverage:
+`TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer`,
 `#testRetryReadsTheStoredDiffNotTheModelItIsHanded`, `#testRetryRefusesADocumentThatIsNotStored`,
-`#testRetryDoesNotExtractABlobThatIsNoLongerEligible`.
+`#testRetryDoesNotExtractABlobThatIsNoLongerEligible`. Why: `docs/DESIGN.md` §7.
 
-**A replay has a work id of its own, and one replay at a time** (items 42, 69). `withReplaceDiffId`
-appends `:retry:<diffId>` to the nominal id: under the nominal one, `WorkComputation` skips an
-idempotent work whose id is among the last 50 its thread processed, and the retry vanished. The
-diff stays `error` while its replay runs, and the operation refuses a second retry (409) while
-`WorkManager#getWorkState` reports the replay `SCHEDULED` or `RUNNING`. A `null` state lets it
-through on purpose: it is what a replay lost with a restarted node looks like, and on the stream
-WorkManager without `nuxeo.stream.work.storestate.enabled` it is all there is. Two replays are
-harmless there, since they share the partition of the source document and run one after the other.
-A replay that fails for good leaves the `error` diff in place, still retryable; a successful one
-removes it. Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn`,
+**A replay has a work id of its own, and one replay at a time.** `BlobDiffWork#withReplaceDiffId`
+appends `:retry:<diffId>`: under the nominal id, the stream `WorkComputation` skips an idempotent
+work among the last 50 ids of its thread. The diff stays `error` while its replay runs; a second
+retry is refused with 409 while `WorkManager#getWorkState` reports the replay `SCHEDULED` or
+`RUNNING`, and a `null` state is let through on purpose (a lost replay, or a stream WorkManager not
+storing states). A replay that fails for good leaves the `error` diff in place. Coverage:
+`TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn`,
 `#testASecondRetryIsRefusedWhileTheFirstIsRunning`, `#testRetryReplaysAnErrorDiffAndReplacesIt`.
+Why: `docs/DESIGN.md` §1.
 
-**A `BlobDiff` lives under `/change-diff`, and nothing leaves it** (item 31). Two layers, keep
-both. `BlobDiffLocationListener` (synchronous, `aboutToCreate` / `aboutToMove` / `aboutToCopy`)
-refuses, for every principal including system, a `BlobDiff` destined anywhere else and any move or
-copy of something under the container to outside it. The page providers additionally filter on
-`ecm:path STARTSWITH '/change-diff' AND ecm:isProxy = 0`, because the listener cannot reach a
-document forged before it existed. Every new reader of `BlobDiff` documents needs the same path
-filter; the purge query of `BlobDiff.Purge` has it too, since the purge runs under the caller, who
-may hold Remove where a forged diff sits (item 89). Tests that need a forged fixture go through
-`BlobAuditTestHelper.createUnguarded`.
-Coverage: `TestBlobDiffLocationAndSecurity`, three `location guard` cases,
-`TestBlobDiffPurgeAction#testPurgeLeavesABlobDiffOutsideTheContainerAlone`.
+**A failing extraction raises; a failing image inventory does not.** `BlobDiffComponent#extract`
+returns `null` only when no extractor is registered (filed `skippedUnsupportedType`); a failing
+extractor raises, filed `error`, retryable. The image inventory logs a `WARN` and keeps the text
+result. Do not harmonise the two. `BlobDiffComponent#stop` keeps the extractor lists for the works
+still draining. Coverage: `TestBlobDiffManagement#testAnExtractionFailureIsRetryable`,
+`TestBlobDiffService#testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported`,
+`#testAStoppingComponentKeepsItsExtractors`, `TestBlobDiffImageExtraction`. Why: `docs/DESIGN.md` §4.
 
-**The `blobDiffPurge` bulk action must stay off the HTTP surface.** `httpEnabled` is left to its
-default `false`, which is what keeps it out of `Bulk.RunAction` and of the
-`/search/bulk/{action}` REST endpoint for anyone but an administrator. The only supported entry
-point is `BlobDiff.Purge`, which enforces `BlobDiffAccess.checkAuditor` and builds the NXQL itself.
+### Container, security, purge
 
-The two alternatives were both considered and rejected: `httpEnabled="true"` publishes a
-delete-by-NXQL API to every authenticated user, and routing the UI through `Bulk.RunAction` with
-`httpEnabled="false"` reserves the purge to administrators, taking the feature away from the
-auditors it exists for. The computation also refuses to remove anything that is not a `BlobDiff`,
-so even an administrator submitting the action by hand with an arbitrary query cannot turn it into
-a generic delete. Coverage: `TestBlobDiffPurgeAction`.
+**A `BlobDiff` lives under `/change-diff`, and nothing leaves it.** Two layers, keep both:
+`BlobDiffLocationListener` refuses, for every principal including system, a `BlobDiff` created
+elsewhere and any move or copy out of the container; every reader of `BlobDiff` documents filters on
+`ecm:path STARTSWITH '/change-diff'` and `ecm:isProxy = 0` — both page providers,
+`BlobDiffWork#existingDiffId`, the query of `BlobDiff.Purge`. A new reader needs the same filter.
+Forged fixtures go through `BlobAuditTestHelper.createUnguarded`. Coverage:
+`TestBlobDiffLocationAndSecurity`, `TestBlobDiffPurgeAction#testPurgeLeavesABlobDiffOutsideTheContainerAlone`,
+`TestBlobDiffManagement#testAForgedDiffOutsideTheContainerDoesNotSuppressTheRetry`. Why:
+`docs/DESIGN.md` §7.
 
-**`BlobDiff.PurgeStatus` and `BlobDiff.PurgeAbort` only see `blobDiffPurge` commands** (item 33).
-`BulkService#getStatus` and `#abort` check neither the action nor the owner of a command id, so
-both go through `BlobDiffPurgeAction.purgeStatus`, which answers any other id as `UNKNOWN`, and the
-abort is never forwarded for it. Any auditor may still stop any purge, by design.
+**The container stays restricted in a cluster.** `BlobDiffStore`: the root is created at every
+repository initialisation, even when the feature is off, with bounded retries
+(`ROOT_CREATION_ATTEMPTS`); `repairSecurity` resets its ACL at each start; dated folders are created
+in the caller's session under `CONTAINER_LOCK`; paths and the purge boundary use UTC and
+`Locale.ROOT`; a diff is named `<sourceId>-<eventTime>-<correlationId>`. Coverage:
+`TestBlobDiffLocationAndSecurity`, `TestBlobDiffService` (the container cases). Why:
+`docs/DESIGN.md` §7.
 
-**An abort is honoured by the purge computation itself** (item 56). `AbstractBulkComputation` only
-skips a bucket of a command it no longer knows, and it caches commands, so buckets already scrolled
-are processed whatever the state. `BlobDiffPurgeComputation#compute` must keep checking
-`isAbortedCommand` first. Coverage: `TestBlobDiffPurgeAction#testAPurgeCanBeAborted`.
+**The purge stays off the HTTP surface and removes nothing but diffs.** The `blobDiffPurge` action
+keeps `httpEnabled` at its default `false`; `BlobDiff.Purge` is the only entry point (auditor check,
+query built server side, `submit()` and not `submitTransactional()`); the computation removes only
+`BlobDiff` documents and checks `isAbortedCommand` before each batch; `BlobDiff.PurgeStatus` and
+`BlobDiff.PurgeAbort` go through `BlobDiffPurgeAction#purgeStatus`, which answers any other command
+as `UNKNOWN`. Coverage: `TestBlobDiffPurgeAction`. Why: `docs/DESIGN.md` §7.
 
-**`BlobDiff.Purge` uses `submit()`, not `submitTransactional()`.** The latter defers the real
-submission — and with it the exclusivity check and the parameter validation — to
-`beforeCompletion`, so a second concurrent purge surfaces as a commit failure instead of a readable
-error, and the returned id is not queryable until commit. The operation writes nothing to the
-repository, so there is nothing to undo if it does not commit. Do not "fix" this back.
+**Never put a `<dataFile>` on a vocabulary the plugin does not own.** It would replace the
+platform's rows. `blobContentModified` is added at runtime by
+`BlobDiffComponent#registerAuditEventType`: `hasEntry`, in a transaction, privileged, any
+`RuntimeException` logged, never propagated; a runtime without `eventTypes` is skipped at `DEBUG`.
+Its label is resolved server side: it lives in `OSGI-INF/l10n/messages_*.properties`. Coverage:
+`TestAuditEventTypeRegistration`. Why: `docs/DESIGN.md` §8, §9.
 
-**Never put a `<dataFile>` on a vocabulary the plugin does not own.** A
-`<directory name="eventTypes" extends="template-vocabulary"><dataFile>…</dataFile></directory>` does
-not add rows, it **replaces** the platform's: `dataFileName` is single-valued,
-`BaseDirectoryDescriptor#merge` overwrites it rather than concatenating, and `DirectoryRegistry`
-recomputes the effective descriptor from a `clone()` of the template for every contribution carrying
-`extends`, so the last one wins outright. `dataLoadingPolicy=skip_duplicate` does **not** save it: it
-only protects rows that are already in storage, which is true of an instance that predates the
-plugin and false of a greenfield one. Measured on empty storage: `eventTypes` held 1 row and the
-platform's 51 were gone.
+### Diff engine
 
-`blobContentModified` is therefore created at runtime, by
-`BlobDiffComponent#registerAuditEventType` — guarded by `hasEntry`, wrapped in
-`TransactionHelper.runInTransaction` + `Framework.doPrivileged`, and with any `RuntimeException`
-logged rather than propagated, because a vocabulary row must never break startup. The same rule
-applies to `eventCategories`, `nature`, `subject` and every other platform vocabulary.
-A runtime with **no** `eventTypes` directory returns before that block, at `DEBUG`: the component
-starts at the default order 1000 and `DirectoryServiceImpl` at 97, so `getDirectory` answering
-`null` means the directory is genuinely absent, not late. Keep that pre-check — `ds.open` throws a
-`DirectoryException`, and the `ERROR` must stay reserved for a real failure.
-Coverage: `TestAuditEventTypeRegistration`.
+**The diff body is bounded by construction, and the counters are not.** Both strategies of
+`TextDiffer` write their body through `TextDiffer.Body`, which checks `maxEntries` and `maxChars` on
+the **rendered** entry, never renders an entry past the budget, and cuts monotonically (the body is
+a contiguous prefix of the full diff). `added` / `removed` / `changed` are counted before the budget
+is consulted, so they stay exact. `TextDiffer#merge` caps text plus images at `maxChars`. Coverage:
+`TestTextDifferBounding`. Why: `docs/DESIGN.md` §5.
 
-**The audit search is a *named search*, and its two halves are wired by string, not by nesting.**
-There is no element in Web UI that renders "form left, results right" — the illusion is produced by
-the application shell. The form is a `nuxeo-search-form` contributed to `DRAWER_PAGES`; the results
-are the single, hardcoded `<nuxeo-search-page name="search">` of `nuxeo-app`. `nuxeo-app`
-`_updateSearch()` matches them with `this.$$("[search-name='" + this.searchName + "']")` against its
-own shadow root. Four things follow, each a silent failure if broken:
+**A unit missing from a cut side is unknown past the last shared unit.** Keyed:
+`TextDiffer#pastLastShared`; positional: `Alignment#tailStart`, the removals past it dropped when the
+new side is cut, the additions when the old side is. Both rely on extraction following document
+order. The similarity counts kept characters *before* that drop. Coverage: `TestTextDiffer` (the
+"before the cut" cases), `TestTextDifferSimilarity`. Why: `docs/DESIGN.md` §5.
 
-- **`search-name` must be a literal attribute.** `searchName` is not `reflectToAttribute` on
-  `nuxeo-search-form`, so `search-name="[[x]]"` sets the property and leaves no attribute; the
-  selector matches nothing and the results pane stays empty for ever, with no error.
-- **`name` goes on the inner element, never on the `nuxeo-filter`.** `nuxeo-filter._render()`
-  stamps into `dom(this).parentNode` — as a *sibling* of itself — so it is the stamped
-  `nuxeo-search-form` that becomes a child of `iron-pages#drawer-pages` and carries the key its
-  `attr-for-selected="name"` reads. `name` on the filter would select an element that renders
-  nothing. Same shape as every platform contribution to `DOCUMENT_VIEWS_PAGES`.
-- **The layout file names are a hardcoded convention, not a registration.**
-  `nuxeo-search-form-layout#_formHref` builds `<hrefBase><searchName>/nuxeo-<searchName>-search-form.html`
-  lowercased, and `nuxeo-layout._stamp` derives the tag name from the file name. `hrefBase` is
-  `undefined` on a server (it is only set by the dev `index.html`), so it falls back to
-  `/ui/search/`. Folder, file names, `dom-module` ids and `search-name` must stay in lockstep.
-  The results layout must additionally **contain a `<nuxeo-results>`** — `_grabResults` walks the
-  tree for that literal tag and drives it through `fetch()`/`reset()`.
-- **Never set a height on the data table.** `nuxeo-results` sizes its views through
-  `--nuxeo-results-view-height`. The `calc(100vh - 190px)` of the old standalone page is exactly
-  what made it misalign with the rest of the application.
+**Hirschberg stays, and so do trimming and interning.** `TestTextDiffer` and `TestTextDifferScaling`
+assert alignment optimality and the memory bound: the contract any replacement must satisfy. The
+measured figures have one home, the class Javadoc of `TextDiffer`. Why: `docs/DESIGN.md` §5, §10.
 
-`route="search:blobdiffs"` on the drawer icon is a deliberate departure: the platform searches omit
-it, so clicking their icon only opens the drawer (`_toggleDrawer` performs no navigation) and the
-main area keeps showing the previous page until a filter changes. For an audit entry point that is
-one click too many. `nuxeo-menu-icon` resolves `route` into a plain `<a href>`, as the Home icon does.
+### Extractors
 
-**The named-parameter keys keep their `bdsearch:` prefix, and the search doctype is declared with
-`<searchDocumentType>`.** `WhereClauseDescriptor` declares only `@escaper`, `predicate` and
-`fixedPart` — a `whereClause@docType` attribute is dropped by XMap in silence, which is what this
-contribution used to do. Without the real element, `PageProviderHelper` falls back to
-`SimpleDocumentModel.empty()`, and since the predicates carry a `schema`,
-`NXQLQueryBuilder#getRawValue` reads `null` from it **without throwing** — so the named-parameters
-fallback never runs and every filter is dropped quietly. That fallback model nevertheless worked for
-the prefixed keys the UI sends, because it is built with `anySchema=true` and resolves a prefix
-through the schema registry; it would *not* have worked for bare field names. Both are now valid,
-but keep the prefix: a bare key is matched by iterating the schemas of the search document, where a
-generic name such as `user` can collide. Coverage: `TestBlobDiffAdminSearch` (item 57), which builds
-the search document from string named parameters the way the REST endpoint does.
+**Extracted values are bounded when they are created.** `BlobDiffComponent#resolve` hands
+`maxValueLength` to every extractor (`BlobContentExtractor.MAX_VALUE_LENGTH`) unless its contribution
+sets one, and the built-in extractors build every value through `ContentLine.of(key, value,
+maxValueLength)`. A new extractor must do the same, including for what it holds before a value is
+final (XLSX shared strings, the lines and the title of a slide). Coverage:
+`TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
+`TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`. Why: `docs/DESIGN.md` §5.
 
-**The `eventTypes` label is resolved server side, not by Web UI.** `nuxeo-audit-search` asks for
-`localize=true` without `dbl10n`, so `SuggestDirectoryEntries` translates the label against the
-server `messages` bundle and `I18NUtils` falls back to returning the key. That is why
-`OSGI-INF/l10n/messages_*.properties` is appended to `nuxeo.war/WEB-INF/classes/messages*.properties`
-by `deployment-fragment.xml`. Adding the key to `web/nuxeo.war/ui/i18n/messages*.json` alone makes
-the filter display `label.blobaudit.event.blobContentModified`.
+**`BlobContentExtractor#extract` declares `throws IOException`, never wider.** A `throws Exception`
+forces `catch (Exception)`, which swallows the interruption of a WorkManager thread at shutdown. A
+non-I/O failure is a `NuxeoException`. `BlobDiffComponent#resolve` catches
+`ReflectiveOperationException | RuntimeException`: a bad contribution costs one extractor. Why:
+`docs/DESIGN.md` §6.
 
-**Know where each query lands, it is not uniform.** The plugin has four query sites and they do
-not share a backend:
+**One local file per binary, owned by `MaterializedBlob`.** `BlobDiffComponent#diff` materialises
+both sides once; extractors needing random access go through `MaterializedBlob#of`, a pass-through
+for a blob already backed by a file — which is never deleted. Otherwise `MaterializedBlob` makes its
+own copy with `Framework#createTempFile` (not `Blob#getCloseableFile`, whose `Framework#trackFile`
+needs a runtime) and deletes it on `close`. A failed copy raises, so the diff is filed `error` and is
+retryable: no in-heap fallback. Coverage: `TestMaterializedBlob`. Why: `docs/DESIGN.md` §6.
 
-| Site | Mechanism | Destination |
-|---|---|---|
-| `BlobDiffWork#existingDiffId:124` | `session.query` | repository, always |
-| `BlobModificationListener#previousVersionRefFallback:283` | `session.query` | repository, always |
-| `BLOB_DIFFS_FOR_DOCUMENT` | `<coreQueryPageProvider>` | repository, always |
-| `BLOB_DIFFS_ADMIN` | `SearchServicePageProvider` → `SearchService` | **the configured search client** |
+**OOXML is streamed, never read through POI's usermodel.** `SpreadsheetExtractor` parses each sheet
+with SAX and stops at `maxLines`; its values stay identical to the usermodel path kept for `.xls`
+(`TestSpreadsheetStreaming`, `TestExcelDiff`). Shared formulas are rebuilt by `SharedFormulas`;
+shared strings are read by `SharedStringTable` within `maxLines × maxValueLength`, a cell past that
+budget ending the extraction as truncated, never a placeholder. `SlideHandler` mimics
+`XSLFSheet#buildShapes`, quirks included, so that `TestPresentationStreaming` can compare it with the
+usermodel: keep both. Each slide is parsed once; its title is held compacted (`TitleText`, same format
+as `ContentLine#compacted`). Every SAX parser comes from `XMLHelper.newXMLReader()` through
+`OoxmlPackages#parse`, a parse is stopped with `OoxmlPackages.Stop`, packages are opened read only
+from a local file by `OoxmlPackages#open` and released with `revert()`. Why: `docs/DESIGN.md` §6.
 
-In LTS 2025 the default client is `repository` (`common-base/nuxeo.defaults:150`,
-`nuxeo.search.client.default.name`), and the OpenSearch search-client package flips it to
-`opensearch` through its own `nuxeo.defaults`. So `BLOB_DIFFS_ADMIN` only reaches the engine on an
-instance that has one — which is the real-world case, but not the test stack and not a bare server.
+**The converter output is read line by line.** `ConverterTextExtractor` stops at `maxLines` and
+splits each line again on `OTHER_LINE_BREAKS`; dropping that split would shift every converted PDF.
+Decodes go through `BlobCharsets`. Coverage:
+`TestConverterTextExtractor#testTheConverterOutputIsSplitOnEveryLineBreak`,
+`#testTheConverterOutputIsReadOnlyUpToMaxLines`. Why: `docs/DESIGN.md` §6.
 
-Two consequences. First, `BLOB_DIFFS_FOR_DOCUMENT` is the **synchronous, read-your-writes** page
-provider: the tests depend on that and must not be moved to `SearchService`. Second,
-`RepositorySearchClient#hasCapability` returns `false` for everything including `AGGREGATE`
-(`:73-77`), and the mismatch is reported as a `SearchLimitation` rather than raised
-(`AbstractSearchResponseTransformer:54-66`) — which `SearchServicePageProvider` surfaces nowhere.
-On a bare instance the four facets of the audit page come back **silently empty**. Documented in
-the README as a prerequisite rather than worked around.
+**One image inventory class per format, one budget for all.** `WordImageInventory`,
+`SpreadsheetImageInventory`, `PresentationImageInventory` and `PdfImageInventory` extend
+`AbstractImageInventory`, which owns `maxImageBytes()` (32 MB, enforced by `digestStream`), one
+`ImageBudget` per file (`digestOnce` memoises, `meter` charges every byte against 256 MB) and the
+`Inventory` accumulator. Image bytes are read only through `digestOnce` and a metered stream; OOXML
+pictures are streamed from their part (`digestOoxmlPicture`), `.xls` pictures copied once inside the
+`digestOnce` supplier; the XLSX inventory never parses a sheet, it reaches the drawings through the
+relationships of the sheet part; Word keeps its zip-stream reading and ratio pre-check. A PDF image
+is never decoded (`digestPdfImage`: no `createInputStream()`, `getImage()` nor `getWidth()`); a PDF
+form is walked once per document (`PdfWalk`, cycle and `MAX_FORM_DEPTH` guards; never recurse
+outside `collectPdfForm`). Ordinals and `#n` suffixes advance before the drop check, so a dropped
+image never renumbers. Coverage: `TestImageInventoryExtractor`, `TestBlobDiffImageExtraction`. Why:
+`docs/DESIGN.md` §6.
 
-**The diff body is bounded by construction, and the counters are not.** `maxDiffChars` caps the
-whole rendered body, `maxValueLength` a single unit, and both are checked **after** the entry is
-built — testing the body length beforehand lets the result overshoot by one whole entry. The cut is
-monotone, and `added` / `removed` / `changed` keep counting past the budget so they stay exact.
-Both strategies, `diffKeyed` and `diffPositional`, write their body through `TextDiffer.Body`,
-which owns the budget and the cut; they only count and offer each entry. Any change to either, or
-to `Body`, must preserve all three properties.
-Coverage: `TestTextDifferBounding`.
+### Search and Web UI
 
-**A unit missing from a cut side is unknown past the last shared unit** (item 46). Each side is cut
-at `maxLines` on its own. Keyed: `TextDiffer#pastLastShared` drops, on each side, the keys after
-the last one both windows hold when the other side is cut. Positional: `Alignment#tailStart` marks
-the first edit after the last aligned pair, and `positionalEdits` drops the removals there when the
-new side is cut and the additions when the old side is. Both rely on extraction following document
-order on both versions, which every built-in extractor does. Coverage: `TestTextDiffer`, the four
-`COR-04` cases.
+**Know where each query lands.** `BlobDiffWork#existingDiffId`,
+`BlobModificationListener#previousVersionRefFallback` and `BLOB_DIFFS_FOR_DOCUMENT` always run on the
+repository — keep `BLOB_DIFFS_FOR_DOCUMENT` there, it is synchronous and the tests rely on it.
+`BLOB_DIFFS_ADMIN` runs on the configured search client; on the default `repository` client its
+facets come back silently empty. No `<require>` on `ElasticSearchComponent`. `bdiff:correlationId`
+and `bdiff:sourceId` keep `indexOrder`. Coverage: `TestBlobDiffAdminSearch`. Why: `docs/DESIGN.md` §8.
 
-**Extracted values are bounded when they are created** (item 39). `BlobDiffComponent#resolve`
-hands the configured `maxValueLength` to every extractor through `init()`, as the
-`maxValueLength` property, and the four text extractors build every value through
-`ContentLine.of(key, value, maxValueLength)`. Past the limit, `compact` keeps the beginning, the
-full length and the first 16 hex characters of the SHA-256 of the whole value, so equality still
-means equality, and the result stays within `maxValueLength`, which lets `TextDiffer#elide` leave
-it alone. A new extractor must do the same, or nothing bounds what it holds — and that includes
-what it holds *before* a value is final: the XLSX shared strings (item 90) and the lines of a slide
-waiting for its title (item 91) are compacted when they are read, not when they are added.
-Coverage: `TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
-`TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`.
+**`BLOB_DIFFS_ADMIN` declares `<searchDocumentType>`, and the UI keeps the `bdsearch:` prefix.**
+`whereClause@docType` is dropped by XMap and every filter is then silently ignored; a bare key can
+collide across schemas. A boolean filter sends `true` or nothing, never `false`. Coverage:
+`TestBlobDiffAdminSearch`. Why: `docs/DESIGN.md` §8.
 
-**`BlobContentExtractor.extract` declares `throws IOException`, and must not be widened back.** It
-declared `throws Exception` until item 28, which forced `catch (Exception)` on all three call sites
-— the shape the Nuxeo "Catching Exceptions" page rules out, because it also catches
-`InterruptedException`. The one that mattered is the blob re-read of `BlobDiffWork` (now
-`FrozenBlob#resolve`): it runs on a
-WorkManager thread that *is* interrupted at shutdown, and it swallowed the cancel to file a bogus
-`error` diff. An extractor that needs to report a non-I/O failure throws a `NuxeoException`.
-`AbstractImageInventory#newDigest` wraps the only other checked exception the image inventories
-could raise, `NoSuchAlgorithmException` on `"SHA-256"` — guaranteed by the JCA, so an environment
-fault, not something eleven signatures should carry.
+**The named search is wired by string.** `search-name="blobdiffs"` stays a literal attribute,
+`name` stays on the inner `nuxeo-search-form` (never on the `nuxeo-filter`), the folder, file names
+and `dom-module` ids under `ui/search/blobdiffs/` stay in lockstep with the search name, the results
+layout keeps a literal `<nuxeo-results>`, and the data table gets no height. Each is a silent failure
+when broken; there is no test. Why: `docs/DESIGN.md` §8.
 
-**The image budget is uniform across the four formats, and dropping an image never renumbers.**
-One class per format (`WordImageInventory`, `SpreadsheetImageInventory`,
-`PresentationImageInventory`, `PdfImageInventory`) extends `AbstractImageInventory`, which owns the
-budgets, the digests and the `Inventory` accumulator.
-`maxImageBytes()` (32 MB) is enforced by `digestStream` on all of DOCX, XLSX, PPTX and PDF. The
-XLSX and PPTX paths resolve the picture part from its relationship and stream it through
-`digestOoxmlPicture(PackagePart, …)`, never through `PictureData#getData()`, which materialises the
-whole inflated image (POI caps it at 100 MB). Only binary `.xls` goes through `digestBytes`: it has
-no part to stream, and `HSSFPictureData#getData()` hands back a fresh **copy** of the picture on
-every call (it strips a Mac PNG header), so it is called inside the `digestOnce` supplier only,
-memoized on `HSSFPicture#getPictureIndex()` — never on the returned array (item 92). In all four
-collectors the key counter — the XLSX ordinal,
-the `#2` occurrence suffix of XLSX and PPTX keys, the PDF positional ordinal — is advanced
-**before** the drop check, so a dropped image on one side cannot shift every following key.
-**A PDF image is never decoded** (item 30): `digestPdfImage` hashes its encoding parameters and its
-raw stream. Do not reintroduce `createInputStream()`, `getImage()` or even `getWidth()` on that
-path: PDFBox 3 decodes a whole stream into heap before returning its first byte, and `getWidth()`
-decodes a JPX image.
-**A PDF form XObject is walked once per document** (item 32): `PdfWalk` records its placements and
-replays them on every later reference, skips a form already on the current path, and stops at
-`MAX_FORM_DEPTH`. `maxLines` counts every placement, dropped ones included, so replays stay bounded
-too. Never recurse into `form.getResources()` without going through `collectPdfForm`.
-**Each image is read once per file, and all of them within a budget** (item 37). Every format
-creates one `ImageBudget` per extraction: `digestOnce` memoizes digests by part name (OOXML), by
-picture index (`.xls`) or by stream identity (PDF), and `meter` charges every byte read against
-`maxTotalImageBytes()` — eight
-times `maxImageBytes()`, 256 MB — after which the inventory stops, flagged `truncated`. Never read
-image bytes except through `digestOnce` and a metered stream. `digestStream` reads at most
-`maxImageBytes() + 1` bytes, so a dropped image costs the budget no more than the cap.
-Coverage: `TestImageInventoryExtractor`, four `#testAnOverSized*` cases plus
-`#testDroppingAPictureDoesNotRenumberTheFollowingOnes`,
-`#testAPdfFlateBombIsDigestedWithoutBeingDecoded`, the three `#testAPdfForm*` /
-`#testABranchingPdfFormGraph*` cases, the four `#test*IsReadOnce` cases,
-`#testAPictureAnchoredManyTimesInAnXlsIsCopiedOnce` and
-`#testTheImagesOfOneFileAreReadWithinATotalBudget`.
-
-**XLSX text is streamed, never read through POI's usermodel** (item 34). `SpreadsheetExtractor`
-parses each sheet with SAX and stops at `maxLines`; the usermodel builds the XMLBeans tree of every
-sheet first. Its values must stay identical to what the usermodel path (`collect` / `formatCell`,
-kept for `.xls`) produces: `TestSpreadsheetStreaming` compares the two on a hand-written sheet. One
-deliberate exception: shared formulas are rebuilt with an in-place shift rather than POI's
-`SharedFormula`, which turns a reference to another sheet into a plain one. The parser comes from
-`XMLHelper.newXMLReader()` (no DTD, no external entity) — never build one by hand.
-The shared strings are read by `SharedStringTable`, never by POI's `ReadOnlySharedStringsTable`, which
-holds the whole part before the first cell (item 90): each string is kept decoded, trimmed and
-compacted, charged its length plus 32, within `maxLines × maxValueLength`. A cell whose string lies
-past that budget ends the extraction, flagged truncated, the way `maxLines` does — never a placeholder
-value, which would make two different strings compare equal.
-Coverage: `TestSpreadsheetStreaming`, `TestExcelDiff`.
-
-**PPTX, and the XLSX image inventory, are streamed too** (item 35). `XMLSlideShow` parses every
-slide when it opens a deck. `SlideHandler` walks the shape tree of a slide with SAX the way
-`XSLFSheet#buildShapes` builds it, quirks included, on purpose: of an `mc:AlternateContent` only
-the first element of the first `mc:Choice` is read, in place of the block, and never the
-`mc:Fallback`; only top-level shapes count for the title and for the notes body.
-`TestPresentationStreaming` keeps the former usermodel code as the reference and compares the two
-on a hand-written slide — it caught a wrong reading of the alternate content once already, keep it
-green. Each slide is parsed once: its lines are held, compacted, at most the room left under
-`maxLines`, until its title is known, because the `## Slide` marker carries it and comes first. The
-title is never held whole either (item 91): `TitleText` keeps its first `maxValueLength` characters,
-its length and a running SHA-256, with a copy of the digest taken before trailing characters up to
-U+0020, so that `marker()` is exactly what `ContentLine.compact` makes of the trimmed whole —
-`ContentLine#compacted` is the one format both use, keep it so. Once a slide
-overflows, `SlideText` reads the rest of it the way the title alone needs — other text and tables
-skipped unread, the shape in progress included — and stops at the title: keeping on building the
-discarded paragraphs is what `testStreamingStopsAtMaxLines` catches. The XLSX inventory never opens a sheet: it reaches the drawing through the
-relationships of the sheet part. A one-cell anchor is therefore keyed on its cell alone and an
-absolute anchor gets an ordinal, the second cell of the usermodel being derived from the sheet
-geometry. Packages are opened through `OoxmlPackages`, from the local file of a `MaterializedBlob`
-only, and released with `revert()`; `close()` on a read-only package logs a WARN before doing the
-same.
-Coverage: `TestPresentationStreaming` (its three item 91 cases: what a slide holds, and a streamed
-title against the usermodel one), `TestImageInventoryExtractor#testASheetIsNotParsedToListItsPictures`,
-`#testAOneCellAnchorIsKeyedOnItsCell`.
-
-**The converter output is read line by line** (item 38). `ConverterTextExtractor` reads it with a
-`BufferedReader` and stops at `maxLines`. `readLine` breaks only on CR and LF, so each line is split
-again on `OTHER_LINE_BREAKS` (VT, FF, NEL, U+2028, U+2029): the segmentation stays that of the
-former `split("\\R")`. Do not drop that second split, the diff of every converted PDF would shift.
-Coverage: `TestConverterTextExtractor#testTheConverterOutputIsSplitOnEveryLineBreak`,
-`#testTheConverterOutputIsReadOnlyUpToMaxLines`.
+**The Web UI overrides are deliberate.** `blobDiffSource` is added to the list property
+`org.nuxeo.web.ui.enrichers.document` (the `BlobDiff` view fetches the document once); the
+`editDocumentAction` slot content is re-contributed to hide Edit on `BlobDiff` — re-check both when
+upgrading Web UI. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose. Why: `docs/DESIGN.md` §8.
 
 ## Conventions
 
 Standard Nuxeo LTS 2025 plugin conventions apply (`jakarta.*`, Log4j2 `LogManager.getLogger()`,
 JUnit 4 + `FeaturesRunner`, `Framework.getService()`, 4-space indent, ~120 char lines, no wildcard
-imports).
+imports, `@since 2025.1` on new public API).
 
 Repository-specific:
 
@@ -506,1133 +352,102 @@ Repository-specific:
 - Every new `OSGI-INF/*.xml` component **must** be added to the `Nuxeo-Component` header of
   `src/main/resources/META-INF/MANIFEST.MF`, one entry per line, single leading space on
   continuation lines, trailing newline at EOF. A component missing from that header is silently
-  never loaded — this has already happened once in this repo.
+  never loaded.
 - `BlobDiff` documents are **never** trashed, only permanently deleted.
 - Anything written to a `BlobDiff` is business content extracted from the source. Treat
   confidentiality as a first-class concern in every change.
-- `AGENTS.md` is currently **not** in `.gitignore` for this repo, so it is pushed. Keep it free of
-  any sensitive information.
+- Comments keep the *why*, never the history ("used to", item numbers, review ids): the commit
+  message is the record.
+- Documentation homes: `README.md` for users and administrators (statuses, configuration, Web UI,
+  operations, limitations), `docs/DESIGN.md` for the reasons, this file for the rules. A rule here
+  points to its section of `docs/DESIGN.md`; a user-visible change updates the README and
+  `README-Summary/`.
+- `AGENTS.md` is **not** in `.gitignore` for this repository, so it is pushed. Keep it free of any
+  sensitive information: no login, password, key, e-mail address, personal name or local path.
 
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build, 315 tests (27 test classes)
+mvn -o install                                     # full build: 315 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
-mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#someMethod'
+mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
+mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
 ```
 
-`nuxeo.skip.enforcer` is `true` in the parent pom, so the Nuxeo enforcer rules do not run; do not
-rely on them to catch a bad dependency. Run `mvn -o dependency:analyze -pl
-nuxeo-advanced-document-blob-audit-core` instead: every artifact the code imports is declared, so
-"Used undeclared dependencies" must stay empty (item 59). The build resolves against
-`https://packages.nuxeo.com/repository/maven-public/` — `-o` only works once the local repo is warm.
+`-o` only works once the local Maven repository is warm (the build resolves against the Nuxeo
+public repository). `nuxeo.skip.enforcer` is `true` in the parent pom, so the Nuxeo enforcer rules do
+not run: rely on `dependency:analyze` instead, whose "Used undeclared dependencies" must stay empty.
+Do not run the build when a commit only touches `README.md`, `AGENTS.md`, `docs/`, `README-Summary/`
+or `.gitignore`.
 
-Tests needing no Nuxeo runtime (fast, pure JUnit):
+Tests needing no Nuxeo runtime (pure JUnit, about 20 seconds):
 
 ```bash
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core \
   -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
 ```
 
-All runtime tests go through `BlobAuditFeature` (in-memory audit backend + `CoreFeature`, deploys
-this bundle plus `blobaudit-test-config.xml`, `blobaudit-test-pageprovider-contrib.xml` and
-`blobaudit-test-vocabulary-template-contrib.xml`).
-`blobaudit-test-smallblob-config.xml` is deployed per-test to exercise `maxBlobSize`,
-`blobaudit-test-imageinventory-config.xml` to turn `imageInventory` on,
-`blobaudit-test-noimagepdf-config.xml` to disable a single image extractor,
-`blobaudit-test-failingimage-contrib.xml` to make the Word image inventory throw
-(`FailingImageExtractor`, a test class contributed to `imageExtractors` with a lower `order` than
-`imageWord`), `blobaudit-test-txprobe-contrib.xml` to record whether a transaction is open during
-the extraction (`TransactionProbeExtractor`, contributed for `text/plain` ahead of `plainText`),
-`blobaudit-test-passthrough-contrib.xml` to make the converter output exactly the input
-(`PassThroughConverter`, contributed to the `ConversionService` as `blobauditPassThrough`),
-`blobaudit-test-smallvalue-config.xml` to set `maxValueLength` to 200,
-`blobaudit-test-allxpaths-config.xml` (used by `TestBlobDiffVersionPairing`) to widen the watched
-xpaths with `<xpath>*</xpath>`, and `blobaudit-test-partial-config.xml` (used by
-`TestBlobDiffService`) to override nothing but `docTypes` and one property of the `converter`
-extractor, and `blobaudit-test-dynamicfacet-contrib.xml` (used by `TestBlobDiffVersionPairing`,
-with `schemas/blobaudit-test-extra.xsd`) to define a facet whose schema holds a blob, and
-`blobaudit-test-keepalldiffs-config.xml` (used by `TestBlobDiffService` and
-`TestBlobDiffSkipReporting`) to set nothing but `minSimilarity=0` on `plainText`.
-`blobaudit-test-vocabulary-template-contrib.xml` is deployed by the feature itself, for every
-runtime test: it supplies `template-vocabulary`, which the platform ships in
-`org.nuxeo.ecm.default.config` — a bundle nothing in this test stack deploys, and without which the
-`eventTypes` directory never registers. `DirectoryRegistry` reports that at `DEBUG` only, so the
-symptom was `registerAuditEventType` logging a `DirectoryException` at `ERROR` once per test class.
-`TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only).
-`TestBlobDiffPurgeAction` adds `CoreBulkFeature` (from the `nuxeo-core-bulk` test-jar) on top of
-`BlobAuditFeature`, and waits on `bulkService.await(commandId, timeout)`. Its abort test deploys
-`blobaudit-test-purgegate-contrib.xml`, whose `PurgeGateListener` holds the first `BlobDiff`
-removal until released, and waits for the purge stream to drain, since `await` returns as soon as
-the command is aborted.
+`TestMaterializedBlob` needs the runtime but not the repository (`RuntimeFeature` only). Every other
+runtime test goes through `BlobAuditFeature`: in-memory audit backend and `CoreFeature`, deploying
+this bundle plus `blobaudit-test-config.xml` (feature enabled), `blobaudit-test-pageprovider-contrib.xml`
+and `blobaudit-test-vocabulary-template-contrib.xml` (supplies `template-vocabulary`, which the
+platform ships in `org.nuxeo.ecm.default.config`, a bundle this test stack does not deploy; without
+it `eventTypes` never registers). `TestBlobDiffAdminSearch` adds `CoreSearchFeature`;
+`TestBlobDiffPurgeAction` adds `CoreBulkFeature` and waits on `BulkService#await`.
 
-Do not run the build when a commit only touches `README.md`, `AGENTS.md` or `.gitignore`.
+Test resources deployed per class or per test (`src/test/resources/`):
+
+| Resource | Purpose |
+|---|---|
+| `blobaudit-test-smallblob-config.xml` | a low `maxBlobSize` |
+| `blobaudit-test-smallvalue-config.xml` | `maxValueLength` set to 200 |
+| `blobaudit-test-imageinventory-config.xml` | `imageInventory` on |
+| `blobaudit-test-noimagepdf-config.xml` | one image extractor disabled |
+| `blobaudit-test-failingimage-contrib.xml` | `FailingImageExtractor`, ahead of `imageWord`, throws |
+| `blobaudit-test-txprobe-contrib.xml` | `TransactionProbeExtractor`, ahead of `plainText`, records whether a transaction is open |
+| `blobaudit-test-passthrough-contrib.xml` | `PassThroughConverter` (`blobauditPassThrough`): the converter output is the input |
+| `blobaudit-test-allxpaths-config.xml` | `<xpath>*</xpath>` (`TestBlobDiffVersionPairing`) |
+| `blobaudit-test-dynamicfacet-contrib.xml` + `schemas/blobaudit-test-extra.xsd` | a facet whose schema holds a blob (`TestBlobDiffVersionPairing`) |
+| `blobaudit-test-partial-config.xml` | overrides nothing but `docTypes` and one `converter` property (`TestBlobDiffService`) |
+| `blobaudit-test-keepalldiffs-config.xml` | `minSimilarity=0` on `plainText` |
+| `blobaudit-test-purgegate-contrib.xml` | `PurgeGateListener` holds the first `BlobDiff` removal until released (`TestBlobDiffPurgeAction` abort case) |
+
+Test helpers: `BlobAuditTestHelper` (`DiffRequest` and `BlobDiff` fixtures, `createUnguarded` for a
+diff forged outside the container, `onDisk` for file-backed blobs), `BlobAuditFeature`.
+
+What each test class guards is named by the invariants above. When a change adds or removes tests,
+update the count on the first line of this section.
 
 ## Deployment target
 
 This plugin is heading for a **real instance**, not a demo. Consequence: anything that only matters
-at small volume can no longer be waved away. This is what made backlog item 11 (purge on the Bulk
-Action Framework) mandatory rather than optional.
+at small volume can no longer be waved away — this is what made the purge on the Bulk Action
+Framework mandatory rather than optional.
 
----
-
-## Backlog
-
-A full architecture review was run on the plugin. The architecture was judged sound; fourteen
-improvements were identified. A later front-end audit added its own findings, numbered `WEB-nn`,
-a later correctness audit its own, numbered `COR-nn`, a security audit its own, numbered
-`SEC-nn` / `BLD-nn`, and a scalability audit its own, numbered `RES-nn`; those that turn into work
-get the next free number in this same list. Product requests and bugs found in testing are
-numbered the same way. A later code review (2026-10) numbered its findings per axis (`SEC`, `RES`,
-`COR`, `API`, `WEB`, `BLD`); those numbers collide with the earlier audits, so they are always
-cited here as "code review 2026-10".
-**Items 1 to 11, 13, 15 to 20, 21 to 23, 25, 28 and 30 to 62 are done** (regression coverage:
-`TestBlobDiffHardening`, `TestBlobDiffSkipReporting`, `TestTextDifferScaling`,
-`TestBlobDiffVersionPairing`, `TestBlobDiffImageExtraction`, `TestMaterializedBlob`,
-`TestBlobDiffPurgeAction`, `TestBlobDiffManagement`, `TestImageInventoryExtractor`,
-`TestTextDifferBounding`, `TestExtractorFileBacking`):
-
-1. `NotFulltextIndexable` facet on `BlobDiff` — extracted business content was leaking into the
-   full-text index and Elasticsearch. **Scope correction, see item 21**: the facet is a
-   *repository-side* switch (`FulltextConfigurationFactory`), so it stops `ecm:binarytext` being
-   computed on the `bdiff:diff` blob — which is the leak that mattered. It does **not** cover the
-   `copy_to: all_field` of the search-engine dynamic template, through which every *string*
-   property of the schema is reachable by `ecm:fulltext`. In this schema those are metadata
-   (`oldFilename`, `newFilename`, `summary`, version labels), not extracted content, so the
-   invariant holds — but for a narrower reason than originally written.
-2. Dedicated `blobDiff` WorkManager queue (`maxThreads=2`) + `getRetryCount()` = 2.
-3. Version lookup bounded to 2 rows, run with a privileged session.
-4. Deterministic work id derived from the version pair, not the random correlation id.
-5. Idempotent work: an existing `BlobDiff` with the same correlation id short-circuits the run.
-6. Common prefix/suffix trimming + interned line ids in `TextDiffer`. One modified paragraph at
-   20 000 lines: 1.45 s → 2.4 ms, and flat as the document grows.
-7. Cleanups: dead page provider removed, UTC dated containers, bounded root-container retry,
-   charset/BOM handling in `PlainTextExtractor`, wildcard import, duplicated `<vendor>`.
-8. Blob xpaths derived from the document type through `SchemaManager` and cached, instead of
-   walking every property of both versions and calling `getValue()` on each. Blobs inside lists are
-   cached as templates (`files:files/*/file`) and resolved against the document.
-9. Listener moved to `aboutToCheckIn` + `documentCheckedIn`. Removes the `ORDER BY
-   uid:major_version` heuristic, its bail-out, and the five `getSourceDocument` hops.
-10. Binaries materialised once per diff (`io/MaterializedBlob`), so every extraction pass reads a
-    local copy: four downloads for two files became two. `ImageInventoryExtractor` is now a plain
-    `BlobTextExtractor` contributed to the new `imageExtractors` point (one contribution per
-    format, so one can be disabled alone), bounded by `maxLines`, and reads the PDF from the file
-    instead of `readAllBytes()`.
-13. Non-diffable binary changes are audited instead of being silent (`DiffEligibility`,
-    `BlobDiffTrigger.Outcome`, `skipReason` extended info).
-15. Non-`ManagedBlob` pairs get the third skip reason, `skippedNotManaged`.
-11. Purge moved to the Bulk Action Framework (`bulk/BlobDiffPurgeAction`, action `blobDiffPurge`,
-    `exclusive`). `BlobDiff.Purge` submits and returns a command id; `BlobDiff.PurgeStatus`,
-    `BlobDiff.PurgeAbort` and `BlobDiff.CleanEmptyFolders` complete the sequence, and the purge
-    dialog polls its way through it. The unbounded `while (true) { …; nextTransaction(); }` inside
-    a transaction-bound Automation operation is gone.
-
-    The backlog also flagged `removeEmptyFolders` for loading all children without pagination.
-    **That part of the diagnosis was overstated**: the fan-out is bounded by the calendar — a
-    handful of years, twelve months, thirty-one days — so the longest list ever loaded is about
-    thirty entries whatever the number of diffs. It moved to `getChildrenIterator` anyway, and to
-    its own operation, because it can only run once the asynchronous purge has emptied the folders.
-
-16. *(front-end audit, finding `WEB-01`)* "Content changes audit" never issued a single query.
-    `nuxeo-blobdiff-search-page` bound its table with `nx-provider="provider"` — a **string id** —
-    while `#provider` sits in the element's own template and `nuxeo-data-table` sits inside the
-    `_isAuditor` `dom-if`. `PageProviderDisplayBehavior._nxProviderChanged` resolves a string
-    through `this.__dataHost.$[id]`, which for a stamped node is the *template instance*, whose `$`
-    only covers ids internal to that `dom-if`. The lookup yields `undefined`, the `querySelector`
-    fallback is guarded by `=== null` so it never runs, `nxProvider` stays the string `'provider'`,
-    `_hasPageProvider()` is false and `fetch()` returns `Promise.resolve()` — silently. The page
-    showed `label.blobaudit.empty` forever.
-
-    Fixed by passing the **node**, not the id: a `_nxProvider` property set to `this.$.provider` in
-    `ready()`, bound as `nx-provider="[[_nxProvider]]"`. The binding crosses the `dom-if` through
-    the templatizer. This is verbatim what Web UI does in `nuxeo-results-view`
-    (`_nxProvider: HTMLElement`, initialised in `ready()`, consumed inside a `dom-if`). Legacy
-    `Polymer({…})` is safe here: `ready` is a lifecycle key, so `GenerateClassFromInfo` calls
-    `super.ready()` *before* it and `this.$` is populated.
-
-    Three things not to "fix" by symmetry: the `this.$$('#table')` calls in `_refresh` and
-    `_deleteSelection` are correct and must stay — `this.$.table` does not exist; and
-    `nuxeo-blobdiff-document-history` keeps `nx-provider="provider"` because its table is *not*
-    inside a `dom-if`. Rule of thumb: **a `nuxeo-data-table` stamped by a `dom-if` must be handed
-    the provider element, never its id.**
-
-    No automated coverage — this repository has no JS test infrastructure (no runner, no
-    `*.test.js`). Verified by reading the Web UI and Polymer sources; behavioural check is manual
-    (open the page as an auditor, confirm a search request leaves in the network tab).
-
-    **Superseded by item 25**: `nuxeo-blobdiff-search-page.html` no longer exists, so the fixed
-    binding went with it. The rule of thumb above still holds and is the reason the new results
-    layout passes `nx-provider="[[nxProvider]]"` — the element injected by
-    `nuxeo-search-results-layout` — rather than any id.
-
-17. *(correctness audit, finding `COR-01`)* `BlobDiffService#extract` returned `null` for two
-    unrelated situations: "no extractor is registered for this mime type" and "the extractor was
-    found and blew up". `diffLocal` propagated the `null` and `BlobDiffWork` mapped it to the
-    single status `skippedUnsupportedType`, so a genuine failure was persisted as a format
-    limitation. `BlobDiff.Retry` only accepts `error`, so that diff could **never** be replayed:
-    a silent, permanent hole in the audit trail, under a reason that was not the real one.
-
-    Fixed by narrowing the contract rather than widening the return type: `extract` now wraps any
-    extractor failure in a `NuxeoException` and keeps `null` for the absence of an extractor alone.
-    Nothing else had to change — `BlobDiffWork` already had the `catch (RuntimeException)` that
-    records `error` right below the `result == null` branch. The two rejected alternatives were an
-    `ExtractionOutcome{OK, UNSUPPORTED, FAILED}` enum (a public API signature change for no gain
-    here) and keeping `null` while exposing the last error elsewhere (implicit, non-thread-safe
-    state).
-
-    **The image inventory stays swallowed, and that asymmetry is deliberate.** `diffLocal`'s own
-    `catch (Exception)` around `extractImages` degrades to the text result with a WARN: a failing
-    inventory costs one section of the report, a failing text extraction leaves nothing to record.
-    Do not "harmonize" the two.
-
-    `skippedUnsupportedType` remains reachable, and its meaning is now exact: `service.diff()`
-    returned `null` because one side had no extractor at work time — typically a version pair whose
-    two blobs do not share a mime type. `DiffEligibility.UNSUPPORTED_TYPE` (the pre-work skip
-    reason, decided at check-in) is untouched, and so is the purge dialog offering that status.
-
-    Coverage: `TestBlobDiffService#testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported`
-    (which replaces a test whose javadoc asserted the bug, "extraction failures must be swallowed" —
-    its premise was wrong, `extract` never runs on the synchronous listener path),
-    `TestBlobDiffManagement#testAnExtractionFailureIsRetryable` (end to end: a corrupted `.xlsx`
-    versioned twice yields a `BlobDiff` in `error` that `BlobDiff.Retry` accepts) and
-    `TestBlobDiffImageExtraction#testAFailingImageInventoryStillYieldsTheTextDiff` (which injects
-    the failure through `FailingImageExtractor` + `blobaudit-test-failingimage-contrib.xml`,
-    there being no dependable binary that the text converter reads and the inventory chokes on).
-
-18. *(security audit, finding `SEC-01`)* `BlobDiff.Retry` decrypted caller-supplied storage keys.
-    The operation validated the doctype and `bdiff:status` — two properties of the input — then
-    handed the persisted provider id and key to `BlobDiffWork`, which opens a **system session** and
-    calls `provider.readBlob(info)`. A blob provider is a store keyed by an opaque string: that call
-    applies **no document ACL**. The extracted content then landed in `bdiff:diff` under
-    `/change-diff`, readable by the caller. Reachable because
-    `AbstractSession.createDocument` calls `parent.addChild(name, type)` without consulting the
-    allowed subtypes — a `TypeManager` concern, hence a UI one — so an auditor who is explicitly
-    *not* an administrator could create a `BlobDiff` in their own space, set `bdiff:status=error`
-    plus the keys of their choice, and have the platform extract any binary of the repository for
-    them.
-
-    Two changes, and only the first is a security boundary:
-
-    - `BlobDiffRetryOp#checkProvenance` rejects anything whose path is not under `/change-diff/`,
-      **before a single property of the input is read**. It sits immediately after `checkAuditor`
-      and must stay there.
-    - `BlobDiffWork#ineligibleStatus` re-evaluates `getEligibility` on the rehydrated blobs, before
-      `service.diff`. The retry path bypassed `maxBlobSize` and the mime type whitelist entirely;
-      so does any queued work that outlives a configuration change. **This one is not a boundary**:
-      the length it compares comes from `BlobInfo`, which `resolveBlob` fills from
-      `bdiff:oldLength` / `bdiff:newLength` — document properties, hence forgeable. It covers
-      configuration drift and nothing more. Do not present it as the fix for the forged input.
-
-    Two design points were settled rather than inferred. `NOT_APPLICABLE` at work time (feature
-    switched off, xpath out of scope) is **not** turned into a skip status: it says nothing about
-    the binary, and `getSkipReason()` already returns `null` for it, so the work simply carries on.
-    And a retry that is no longer eligible **replaces** the `error` diff with a skipped one, like
-    the nominal path: the audit entry carries a `diffCorrelationId`, so a `BlobDiff` has to exist
-    for it either way. The cost is accepted — `BlobDiff.Retry` only accepts `error`, so that diff
-    is no longer replayable once it is filed as skipped.
-
-    Consequence to remember: `skippedTooLarge` **became** a reachable `bdiff:status`, and the purge
-    dialog now offers it. See the invariant above.
-
-    Coverage: `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer` and
-    `#testRetryDoesNotExtractABlobThatIsNoLongerEligible` (which deploys
-    `blobaudit-test-smallblob-config.xml` on the method). Both were checked to fail against the
-    unpatched code — the first accepted the forged document, the second recorded `ok`.
-
-19. *(security audit, finding `BLD-04`)* Five of the six operations had a refusal test for a
-    non-auditor; `BlobDiff.Retry` had none, only type and status precondition tests. It was the one
-    operation where the missing guard leads to a privileged read (see 18).
-    `TestBlobDiffManagement#testNonAuditorCannotDeleteOrPurge` became
-    `#testNonAuditorCannotDeletePurgeOrRetry`.
-
-20. *(security audit, findings `SEC-02` and `SEC-04`)* Zip bomb and heap blow-up in
-    `ImageInventoryExtractor`, both fixed by the same streaming digest.
-
-    `SEC-02`, the DOCX path: `zip.readAllBytes()` on a `word/media/` entry allocates an array of the
-    **inflated** size, unbounded. `java.util.zip.ZipInputStream` has none of POI's `ZipSecureFile`
-    protections, and the only upstream guard, `getEligibility`, compares the **deflated** size of
-    the container to `maxBlobSize`. Ten megabytes of deflate expand to gigabytes — times two
-    concurrent works on the `blobDiff` queue, times the two extra runs of `getRetryCount()`.
-    Reachable by anyone able to version a `.docx` as soon as `imageAnalysisLevel > 0`.
-
-    `SEC-04`, the PDF path: `image.createInputStream()` returns the stream PDFBox has already
-    **decoded**, and `transferTo` into a `ByteArrayOutputStream` plus `toByteArray()` held two full
-    copies of it. Treated here rather than in its own pass because it is the same file and reuses
-    the same helper.
-
-    `digestStream` computes SHA-256 in 8 KB chunks and gives up past `maxImageBytes()` (32 MB),
-    returning `null`; the entry is dropped and the inventory is flagged `truncated`. It does **not**
-    close its argument — the DOCX loop iterates over a shared `ZipInputStream`. Two cheap
-    pre-checks sit in front of it: `isInflationBomb` on the declared zip sizes (POI's ratio of 100,
-    with POI's grace size of 100 KB below which the ratio means nothing) and `exceedsPixelBudget` on
-    `width × height × bitsPerComponent`, which rejects a PDF image before a byte is decoded.
-
-    Both pre-checks are **opportunistic, by construction**. Read through a `ZipInputStream`, an
-    entry whose sizes live in a trailing data descriptor reports `-1` for both, and that is what POI
-    produces — measured: on the test fixture it is `digestStream` that fires, not the ratio.
-    `exceedsPixelBudget` ignores the component count, so it under-estimates a RGB image threefold;
-    that is the safe direction for a pre-check. `digestStream` is the guard that always applies.
-
-    **Correction (item 28): this covered two formats of the four, not all of them.** The sentence
-    above said "both fixed by the same streaming digest"; that was true of DOCX and PDF only. The
-    XLSX and PPTX paths went on calling `PictureData#getData()` until item 28. See there.
-
-    **Correction (item 30): the PDF half was not fixed either.** `createInputStream()` does not hand
-    back a stream PDFBox *has* decoded so much as one it decodes whole into heap before returning,
-    so `digestStream` ran after the allocation, and `exceedsPixelBudget` read a geometry that does
-    not bound a Flate payload. See item 30.
-
-    On the PDF path the ordinal advances even for a dropped image: keys there are positional, so
-    renumbering one side would make every following image look changed. `collectPdfResources` grew
-    a `boolean[] dropped` out-parameter because its return value already means "the `maxLines`
-    budget is exhausted, stop", and an over-sized image must be skipped **without** ending the walk.
-
-    Coverage: `TestImageInventoryExtractor#testAnOverSizedWordImageIsDroppedInsteadOfBuffered` and
-    `#testAnOverSizedPdfImageIsDroppedInsteadOfBuffered`. Both go through a `CappedExtractor`
-    subclass overriding `maxImageBytes()` — which is why that method exists rather than the
-    constant being read directly — so the test asserts the real behaviour without the JVM having to
-    inflate a real bomb.
-
-21. *(scalability audit, finding `RES-01`)* No index on `bdiff:correlationId` nor on
-    `bdiff:sourceId`. The only usable index being the one on `ecm:primaryType`, the repository read
-    and filtered **every `BlobDiff` of the instance** on each of two queries — `BlobDiffWork#
-    existingDiffId`, the idempotency guard, run once per work; and the `BLOB_DIFFS_FOR_DOCUMENT`
-    core query page provider, public API for integrators. The `LIMIT 2` does not help: the nominal
-    outcome is *zero* match, which is exactly the case that forces the full scan.
-
-    Fixed with two `<property indexOrder="ascending">` inside the **`schema`** extension point of
-    `blobdiff-doctype-contrib.xml` — not `configuration`, see `PropertyDescriptor.java:62`.
-
-    **Three facts settled during the review, worth not re-deriving.**
-
-    - *`indexOrder` is a MongoDB mechanism and nothing else.* Its only consumer in the whole
-      platform is `MongoDBIndexCreator` (`:87-89`), called from `MongoDBConnection:314-322` at
-      repository init, idempotently (`existingIndexes.containsKey`, `:105`), over existing data. It
-      has **zero** usage in `nuxeo-core-storage-sql`: on VCS the equivalent indexes must be created
-      by hand. And zero effect on the search engine — there is no per-field opt-in there at all.
-    - *Nothing has to be deployed on OpenSearch/Elasticsearch.* `DefaultIndexingJsonWriter#
-      writeSchemas` serialises every schema with no allow-list, and the default mapping's bare
-      `match_mapping_type: "string"` dynamic template maps every string to `keyword` + doc_values +
-      `copy_to: all_field`. Term equality and `terms` aggregations on `bdiff:*` work out of the box.
-      **Do not ship a mapping fragment**: `OpenSearchComponent:101-143` only pushes a mapping when
-      the index has none (`mappingExists` is "does `GET /_mapping` answer 200", true of any existing
-      index), so a fragment would need a drop plus a full reindex, where a dynamic template needs
-      nothing — and the target component name differs between os1 and os2.
-    - *Be exact about the benefit.* The `sourceId` index serves **no UI path**: both Web UI elements
-      go through `BLOB_DIFFS_ADMIN`. It protects `BLOB_DIFFS_FOR_DOCUMENT` and the tests.
-
-    No automated coverage is possible — index creation is MongoDB behaviour, not observable from
-    `BlobAuditFeature`. Verified by `db.getCollection("default").getIndexes()` on the sandbox.
-
-22. *(scalability audit, finding `RES-02`)* Four POI call sites threw away the guarantee that
-    `MaterializedBlob` exists to provide. POI cannot reposition an `InputStream`, so
-    `WorkbookFactory.create(InputStream)` and `new XMLSlideShow(InputStream)` buffer the **whole**
-    OOXML package in heap before building the XMLBeans model, while the `File` variants open the
-    zip in random access, read only, and read the parts on demand.
-
-    `SpreadsheetExtractor:64`, `PresentationExtractor:74`, `ImageInventoryExtractor:197` and `:345`
-    now branch on `blob.getFile()`. **Two explicit branches, never a ternary inside the
-    try-with-resources**: `file != null ? create(file…) : create(blob.getStream())` leaves the
-    stream outside the resource list and leaks it if the factory throws. The `OPCPackage` is closed
-    explicitly — `XMLSlideShow.close()` does not close a package it was handed.
-
-    The stream fallback stays and is not dead code: `blob.getFile()` is null for a blob that is not
-    file-backed, and every other extractor fixture is built in memory. `extractDocx` is untouched —
-    it reads a `ZipInputStream` whose memory is already bounded by the streaming digest of item 20.
-
-    Coverage: `TestExtractorFileBacking`, which asserts **equivalence** of the two branches on the
-    three extractors plus the `maxLines` cut, and starts by asserting that both branches are
-    actually reachable so the comparisons cannot pass vacuously. The memory saving itself is not
-    dependably unit-testable; it is a manual check.
-
-    **Correction (item 34): the `File` variants did not bound the spreadsheet.** They spare
-    buffering the compressed package, nothing more: `XSSFWorkbook` still parses every sheet into an
-    XMLBeans tree when it is opened. See item 34.
-
-23. *(scalability audit, finding `RES-03`)* `maxDiffEntries` bounded how **many** differences were
-    written, never how long they were, and nothing bounded a single extracted unit. An Excel cell
-    accepts 32 767 characters and a Word paragraph is unbounded. Measured against the unpatched
-    code: 5 000 modified worst-case cells render to **327 MB**, and 2 000 rewritten 5 000-character
-    paragraphs to **20 MB** — in one `StringBuilder`, copied by `toString()`, copied again into an
-    in-memory `StringBlob`, then encoded to bytes by the blob provider.
-
-    Two new options, `maxDiffChars` (4 MB) and `maxValueLength` (4 096), a three-argument
-    `TextDiffer` constructor, and `elide()` applied to **values and keys** — a keyed extractor is
-    free to use JSON pointers, so leaving the key unbounded would leave the per-entry size unbounded.
-
-    **The budget is checked against the rendered entry, not before building it.** The obvious form,
-    `if (sb.length() >= maxChars)`, lets the result overshoot by one whole entry — up to
-    `2 × maxValueLength` plus the key — so it cannot honour a `length() <= maxDiffChars` contract.
-    The cut is also **monotone** (`if (cut || emitted >= maxEntries)`): letting a later, shorter
-    entry through after a long one was rejected would produce a non-contiguous diff body.
-    Counters are incremented **before** the guard and stay exact past the budget; that was already
-    the behaviour and it must not change.
-
-    `merge()` moved from `BlobDiffComponent` to `TextDiffer`, which already owns `maxChars`. Each
-    side is bounded on its own, so the concatenation could otherwise reach twice the cap and the
-    image inventory would quietly undo the bound. The cut falls back to the last complete line.
-    The move had no cost: one caller, no test, and it makes the method testable in plain JUnit.
-
-    Not done, deliberately: streaming the diff to a temporary file. `DiffResult.unified` is a
-    `String` consumed by a dozen call sites and some thirty assertions; once the string is bounded
-    by construction, holding it in memory is safe and the change would buy nothing.
-
-    Known limitation, documented rather than worked around: when both sides of a modification are
-    longer than `maxValueLength` and differ only past it, the entry renders as two identical
-    prefixes (`~ key : X… -> X…`). The counters stay exact and `bdiff:changed` still reports it.
-    **Resolved for the built-in extractors by item 39**: their values carry a digest of the whole.
-
-    Coverage: `TestTextDifferBounding`. Four of its seven cases were checked to fail against the
-    unpatched code, with the measurements above.
-
-25. *(UI rework, product request)* The audit had a **bespoke drawer panel and a bespoke full-width
-    page**. The drawer panel rendered nothing but a description and a button, and forwarded to the
-    page as soon as it became visible; the page re-implemented a search screen by hand — a 280 px
-    filter column, a hand-rolled `nuxeo-page-provider`, and a `nuxeo-data-table` pinned at
-    `calc(100vh - 190px)`, which is what made it misalign with every other screen. An uncommitted
-    attempt to improve it had left a `<nuxeo-card>` interleaved with the `<div class="filters">`
-    it was meant to wrap.
-
-    Replaced by a **named search**, the platform shape: `nuxeo-search-form` in `DRAWER_PAGES`,
-    results in the single hardcoded `nuxeo-search-page`, and the two layout halves under
-    `web/nuxeo.war/ui/search/blobdiffs/`. See the invariant above for the four string-level
-    couplings this relies on; they are all silent failures.
-
-    What it bought, none of it written by us: platform sizing, the sort selector, the selection
-    toolbar, CSV export, saved searches, and per-user column preferences (show/hide, resize,
-    reorder) persisted in local storage. The `PAGES` slot contribution,
-    `nuxeo-blobdiff-search-page.html` and `nuxeo-blobdiff-drawer.html` are gone.
-
-    Three points settled during the work rather than inferred:
-
-    - **`only-queue` does not hide saved searches, and the half-state is worse than either
-      extreme.** It hides the dropdown in the drawer, but `nuxeo-app` hardcodes
-      `show-saved-search-actions` on `nuxeo-search-page`, and `_showSaveAs()` needs only
-      `_isSearchFormVisible && _dirty` — both true as soon as a filter is touched with the drawer
-      open. A "Save search as…" button would therefore appear while the dropdown that reloads it
-      was hidden. Saved searches are kept in full (product decision).
-    - **`Nuxeo.BlobAudit.openSearch(params)` crosses a shadow root on purpose.** The drawer form is
-      a sibling of the results in the shell, not an ancestor, so the two actions that seed a filter
-      (the per-row "filter on this source" and the document tab's "Open in the audit") have no
-      binding to write to. `nuxeo-app` keeps the form in a plain property it resolves with the same
-      attribute selector; there is no public API. One documented hop, in one place.
-    - **A non-auditor deep-linking to `#!/search/blobdiffs` now sees a blank pane**, not the old
-      explicit refusal: the drawer form is filtered out, so `searchName` never reaches the results
-      layout and nothing is stamped. Accepted — the ACL of `/change-diff` and the operation checks
-      are the real guard, and the old message was cosmetic too.
-
-    Carried a latent server-side fix with it: `<whereClause docType="BlobDiffSearch">` was inert
-    (see the invariant). It happened to work only because the UI sends prefixed keys; it is now
-    declared properly with `<searchDocumentType>`.
-
-    No automated coverage — no JS test infrastructure, and `BLOB_DIFFS_ADMIN` has no Java test
-    either. Manual checks, in order: drawer icon auditor-only → one click opens the drawer *and*
-    the results → a request leaves for `/search/pp/BLOB_DIFFS_ADMIN/execute` → **each filter
-    genuinely narrows the result set** (never verified before this item) → facet selection narrows
-    it (needs a search engine) → Reset → row actions, selection delete, purge → column settings
-    survive a reload → the document tab's "Open in the audit" lands pre-filtered → a cold load of
-    `#!/search/blobdiffs` (the `_searchOnLoad` path).
-
-28. *(compliance pass against the Nuxeo guidelines)* Audit of the whole plugin against the "Java
-    Conventions" of the LTS 2025 `AGENTS.md` plus the four `doc.nuxeo.com/corg` pages (java code
-    style, secure coding, catching exceptions, temporary files). Most of it came back clean — no
-    `javax.*`, no SLF4J, no wildcard imports, **import ordering correct in all 34 main files**, no
-    `final` params, constants `ALL_CAPS`, NXQL always through `NXQL.escapeString`, no XML parsing,
-    zip entry names never used to build a path. What was not:
-
-    - **The 32 MB image budget applied to two formats of four.** `ImageInventoryExtractor` dropped
-      an over-sized image on the DOCX and PDF paths and called `PictureData#getData()` on the XLSX
-      and PPTX ones. **Be exact about this, item 20 was not**: POI caps `getData()` at its own
-      `MAX_IMAGE_SIZE`, measured at **100 MB** in 5.5.1, so it was never the unbounded allocation
-      SEC-02 was — it was three times this extractor's budget, and it made the budget mean two
-      different things depending on the container. Both paths now go through `digestStream` via
-      `POIXMLDocumentPart#getPackagePart()`. The binary `.xls`/`.ppt` case has no package part and
-      its bytes are already in the workbook model, so it only gets a length check.
-
-      There is deliberately **no single entry point** over the two: `XSLFPictureData` implements
-      `sl.usermodel.PictureData` and the spreadsheet one `ss.usermodel.PictureData` — unrelated
-      interfaces — and widening the parameter to `Object` to hide that would buy nothing.
-      Dropping an image must **not renumber** the ones after it, on either path: the XLSX ordinal
-      and the PPTX `#2` occurrence counter are both advanced before the drop check, exactly as
-      `collectPdfResources` already did.
-
-      **Superseded (item 35)**: neither path goes through `POIXMLDocumentPart` any more — the
-      picture part is resolved from its relationship — so the two-interfaces argument is moot.
-
-    - **`BlobTextExtractor.extract` declared `throws Exception`.** That is the shape the Nuxeo
-      "Catching Exceptions" page names, and it forced `catch (Exception)` on all three call sites —
-      including `BlobDiffWork#resolveBlob`, which runs on a WorkManager thread that *is* interrupted
-      at shutdown and filed a bogus `error` diff instead of letting the cancel through. Narrowed to
-      `throws IOException`, which removed 17 propagating signatures and all three broad catches.
-      Safe because the plugin is unreleased. `PlainTextExtractor` already declared the narrow form.
-
-    - **`BlobDiffComponent#resolve` caught too *narrowly*.** `extractor.init(...)` is inside the
-      `try` and throws unchecked — `ConverterTextExtractor` does `Integer.parseInt` on a contributed
-      `minLineLength` — so a typo in an XML contribution escaped `catch (ReflectiveOperationException)`
-      and failed component startup, which is exactly what the surrounding log-and-skip exists to
-      prevent. Now `ReflectiveOperationException | RuntimeException`.
-
-    - **Temporary files in the tests.** Four sites used `File/Files.createTempFile` with no explicit
-      parent (so `java.io.tmpdir` as resolved at JVM start, which the guideline calls out as "a
-      common failure case" for tests) plus `deleteOnExit()`, which it rules out. Now
-      `Framework.createTempFile` — which falls back safely when `Environment.getDefault()` is null,
-      so it works in the pure-JUnit tests too — and deterministic `@After` cleanup.
-      **`Framework.trackFile` is not usable here**: it resolves `EventService` and NPEs without a
-      runtime.
-
-    - **`normalizeImageAnalysisLevel()` wrote back.** A query method assigning to a non-`volatile`
-      field of the descriptor instance the whole runtime shares, called from `start()` *and* from
-      `diffLocal()` on the `blobDiff` worker threads. The write was idempotent so the outcome was
-      benign, but it was a data race on a registry object and it made the "configured differs from
-      normalized" warning in `start()` a one-shot. Now pure.
-
-    - Smaller: `MaterializedBlob` dropped its `CloseableFile` without closing it when `FileBlob`
-      construction threw, leaking the temp file for good (`CloseableFile` has no GC fallback);
-      `ZipInputStream` wrapped `blob.getStream()` inside a try-with-resources header, where the two
-      other sites in the same file already used the two-resource form; `PDDocument` was built in an
-      argument position and closed by the callee's first statement; the PDF stream fallback still
-      did `readAllBytes()` while its Javadoc said otherwise (now `RandomAccessReadBuffer`);
-      `ConverterTextExtractor` used `Blob#getString()`, which turns a blank or unknown declared
-      encoding into an `UnsupportedEncodingException` and files the whole diff as `error` — the
-      `charsetOf` logic that exists for precisely that was not applied to it, and is now shared
-      through `io/BlobCharsets`; two `DateTimeFormatter`s set the zone and left the **locale**
-      implicit while feeding a repository **path** and an **NXQL `DATE` literal**; `BlobDiff.Purge`
-      returned HTTP 500 for a concurrent purge instead of 409.
-
-    - Cosmetic, done because it was mechanical: every `@since` is now `2025.1` (the plugin is
-      unreleased, so the `1.0`/`1.1`/`1.2`/`2025.2`/`2025.3`/`2025.4` spread recorded nothing real),
-      and all 61 Java files carry the full Apache 2.0 header — six did not.
-
-    Coverage: `TestImageInventoryExtractor#testAnOverSizedSpreadsheetImageIsDroppedInsteadOfBuffered`,
-    `#testAnOverSizedPresentationImageIsDroppedInsteadOfBuffered`,
-    `#testDroppingAPictureDoesNotRenumberTheFollowingOnes` and
-    `TestBlobDiffConfigDescriptor#testNormalizingDoesNotMutateTheSharedDescriptor`. All four were
-    checked to fail against the unpatched code. 212 tests → 216.
-
-30. *(code review 2026-10, finding `RES-01`, S0)* The PDF image inventory decoded every image whole
-    into heap before any budget applied. In PDFBox 3.0.7, `PDImageXObject#createInputStream` →
-    `COSStream#createInputStream` → `Filter#decode` runs each filter to completion into a heap
-    `RandomAccessReadWriteBuffer`, and `FlateFilter#decode` has no cap: the 32 MB cut of
-    `digestStream` came after the allocation. `exceedsPixelBudget` read the declared geometry, which
-    does not bound a Flate payload, and its own `getWidth()` fully decodes a JPX image. A PDF under
-    `maxBlobSize` with a 1x1 image over a 1000:1 Flate stream was an `OutOfMemoryError`, reachable
-    by any user with Write once `imageAnalysisLevel=1`.
-
-    Fixed by not decoding at all. `digestPdfImage` hashes `Filter`, `DecodeParms` (rendered by
-    `canonical`: sorted keys, indirect references followed to a bounded depth), `Width`, `Height`
-    and `BitsPerComponent`, then the raw stream from `createRawInputStream()`, through
-    `digestStream`. That is the identity the OOXML paths already use — the image as stored — and
-    what the README already stated ("re-encoding an identical-looking image is reported as a
-    change"). The visible difference: a producer that re-compresses an unchanged PDF image now
-    reports it. `exceedsPixelBudget` is gone; with nothing decoded it protected nothing, and it
-    dropped large photos for no reason.
-
-    Coverage: `TestImageInventoryExtractor#testAPdfFlateBombIsDigestedWithoutBeingDecoded` (64 MB
-    of Flate zeros behind a 1x1 image: the image must be kept, and the extraction must allocate
-    under 16 MB, measured with `ThreadMXBean#getCurrentThreadAllocatedBytes`; checked to fail
-    against the unpatched code) and `#testTheSamePdfImageInTwoFilesIsNotReportedAsChanged` (the
-    parameter rendering must not depend on the file). `png(int)` now draws seeded noise, so
-    `#testAnOverSizedPdfImageIsDroppedInsteadOfBuffered` crosses its lowered cap on encoded bytes.
-    216 tests → 218.
-
-31. *(code review 2026-10, finding `SEC-01`, S1)* Any user could forge a `BlobDiff` outside
-    `/change-diff`, and the audit UI listed it as genuine. The core does not enforce allowed
-    subtypes (item 18), and both page providers selected every `BlobDiff` by type alone:
-    administrators bypass ACLs, and a non-admin auditors group is reached by granting it Read on
-    one's own workspace. Moves had the mirror gap: the auditors group holds `Remove` on the
-    container, which is all `CoreSession#move` checks on the source side, so an auditor could move a
-    day folder of diffs into a workspace where the container ACL no longer applies.
-
-    `BlobDiffLocationListener` refuses those creations, moves and copies with a
-    `DocumentSecurityException` after `markBubbleException()`; both page providers now also filter
-    on the path and exclude proxies, which covers documents forged before the guard existed. Not
-    covered by the listener: a proxy published elsewhere, since `createProxy` fires no "about to"
-    event. The `ecm:isProxy = 0` filters keep it out of the audit lists, and publishing needs Read on
-    the diff, which only auditors hold. The guard also removes the root cause of review findings
-    `SEC-02` (idempotency query trusting a forged diff) and `SEC-04` (enricher trash oracle) for
-    new documents; both still need their own path filter for the legacy case (`SEC-02`: item 33).
-
-    Coverage: `TestBlobDiffLocationAndSecurity#testNobodyCanCreateABlobDiffOutsideTheContainer`,
-    `#testDiffsCannotLeaveTheContainer` and `#testAuditListIgnoresABlobDiffOutsideTheContainer`,
-    all three checked to fail with the two XML contributions reverted.
-    `TestBlobDiffManagement#testRetryRefusesADiffCreatedOutsideTheContainer` now builds its fixture
-    through `BlobAuditTestHelper.createUnguarded`. `BLOB_DIFFS_ADMIN` still has no test (review
-    finding `BLD-04`). 218 tests → 221.
-
-32. *(code review 2026-10, finding `RES-02`, S1)* The PDF image inventory recursed into form
-    XObjects with no visited set and no depth bound. A form naming itself in its own resources ran
-    until `StackOverflowError` — an `Error`, caught neither by `diffLocal` nor by `BlobDiffWork` nor
-    by `AbstractWork.run`, so no `error` diff and no retry: the audit entry pointed at a correlation
-    id that never materialised. A form graph referencing the same form several times per level,
-    with no image to trip `maxLines`, multiplied the paths at each level and held a worker
-    indefinitely on a few kilobytes of PDF.
-
-    `collectPdfForm` now walks each form once per document through a `PdfWalk` (identity map of
-    recorded placements, identity set of the forms on the current path) and replays the record on
-    every later reference, with the same per-page ordinals, so keys are unchanged for well-formed
-    documents and a letterhead shared by every page is walked once. A form already on the path or
-    nested past `MAX_FORM_DEPTH` (16) is skipped and flags the inventory `truncated`. The
-    `boolean[] dropped` out-parameter of item 20 moved into `PdfWalk`, which also counts dropped
-    placements against `maxLines` so that replaying them stays bounded. No interruption check was
-    added: the walk is now linear in the size of the document, so there is no spin left to break.
-
-    Coverage: `TestImageInventoryExtractor#testAPdfFormThatContainsItselfIsWalkedOnce` (failed with
-    `StackOverflowError` against the unpatched code), `#testABranchingPdfFormGraphIsWalkedOncePerForm`
-    (8 references per level over 10 levels; timed out at 10 s unpatched, 8 ms patched) and
-    `#testAPdfFormSharedByTwoPagesIsInventoriedOnEach` (replay keeps the per-page keys). 221 tests →
-    224.
-
-33. *(code review 2026-10, findings `SEC-02` and `SEC-03`, S2)* Two privileged reads trusted an
-    identifier from outside the plugin.
-
-    `BlobDiffWork#existingDiffId` matched a `BlobDiff` anywhere in the repository on
-    `bdiff:correlationId` — a value published in the `diffCorrelationId` extended info of the audit
-    entry, readable by the author of the change. A copy forged outside the container suppressed the
-    real diff: on the nominal path if it won the race against the queue, and on the retry path with
-    no race at all, the retry deleting the genuine `error` diff and recording nothing. Item 31 stops
-    new forgeries; the query now also requires `ecm:path STARTSWITH '/change-diff'`, not a proxy,
-    not a version, for the ones that predate it.
-
-    `BlobDiff.PurgeStatus` and `BlobDiff.PurgeAbort` handed any command id to `BulkService`, which
-    checks neither its action nor its owner — unlike the platform's own `/bulk/{id}` endpoint
-    (`BulkActionFrameworkObject#checkStatus`). Any auditor could read the counters of, and abort,
-    any bulk command of the instance. A command that is not a `blobDiffPurge` now looks exactly like
-    an unknown one, so the answer is no oracle either.
-
-    Coverage: `TestBlobDiffManagement#testAForgedDiffOutsideTheContainerDoesNotSuppressTheRetry` and
-    `TestBlobDiffPurgeAction#testOnlyPurgeCommandsCanBeReadOrAborted`, both checked to fail against
-    the unpatched code. 224 tests → 226.
-
-34. *(code review 2026-10, finding `RES-03`, S2, and `COR-05`, S3)* XLSX extraction loaded the whole
-    workbook through POI's usermodel, which parses every sheet into an XMLBeans tree when it opens
-    it: `maxLines` bounded what was kept, never what was built. Measured on 300 000 numeric cells:
-    410 MB allocated to extract the first 100.
-
-    `SpreadsheetExtractor` now streams OOXML workbooks: `XSSFReader`, `ReadOnlySharedStringsTable`
-    (phonetic runs excluded, like the usermodel), the styles table, and a SAX `SheetHandler` per
-    sheet that stops at `maxLines`. POI's own `XSSFSheetXMLHandler` was not usable: it does not
-    support shared formulas, which Excel writes for every fill-down. They are rebuilt like
-    `XSSFCell#getCellFormula` does, parsing the master formula against a workbook holding only the
-    sheet and defined names (built on first use), then shifting the references in place. That shift
-    also fixes a POI defect the plugin inherited: `SharedFormula` turns `Other!A1` into `A1`. Array
-    formulas, data tables, inline strings, booleans, errors and styled numbers (1904 dates
-    included) follow the usermodel. A formula that cannot be rebuilt (external link, table
-    reference) falls back to its cached value. Binary `.xls` keeps the usermodel.
-
-    `useFormulas=false` (`COR-05`) had no effect: `DataFormatter` renders a formula cell as its
-    formula text when it has no evaluator. The streaming path compares cached values, and the `.xls`
-    path now sets `setUseCachedValuesForFormulaCells`.
-
-    **Closed by item 35**, which streams the XLSX image inventory and the PPTX extractors too.
-
-    Coverage: `TestSpreadsheetStreaming` — equivalence with the usermodel on a hand-written sheet,
-    the 3D shared formula, `useFormulas=false` on both formats, and the 300 000-cell allocation
-    bound (under 32 MB); the last three were checked to fail against the unpatched code. 226 tests
-    → 230.
-
-35. *(code review 2026-10, rest of finding `RES-03`, S2, and `COR-08`, S3)* Item 34 left three POI
-    usermodel call sites: the PPTX text, the PPTX image inventory and the XLSX image inventory. All
-    three built the model of the whole document to read a bounded part of it. Measured: 319 MB
-    allocated to extract 100 lines of a 200 000-paragraph slide, 314 MB to list its one picture,
-    400 MB to list the one picture of a 300 000-cell sheet. All three now stay under 3 MB.
-
-    `SlideHandler` (new, `extractor/`) walks the shape tree of a slide or notes part with SAX and
-    reports paragraphs, table rows and picture relationships; `SlideTitle`, `SlideText` and
-    `SlidePictures` keep what they need and skip the rest unread. `OoxmlPackages` (new, `io/`)
-    opens a package — from the file, or buffered as before for the stream fallback — and parses a
-    part through `XMLHelper.newXMLReader()`. `SpreadsheetExtractor` lost its two `open` helpers to it.
-    The XLSX inventory reads the drawing part through the sheet's relationships and never parses the
-    sheet; `.xls` keeps the usermodel.
-
-    One deliberate key change: a picture on a one-cell anchor was keyed on two cells, the second
-    computed by POI from the picture size and the sheet geometry. It is now keyed on its cell alone,
-    and an absolute anchor gets an ordinal. Keys are only ever compared between two extractions by
-    the same code, so nothing stored is affected. That change would have made `COR-08` (two
-    pictures on the same cells collapse into one key, hiding a replacement of the first) more
-    likely, so it is fixed here: XLSX keys take the `#2`, `#3`… suffix PPTX keys already had,
-    counted before the drop check.
-
-    Settled by the reference test rather than by reading POI: of an alternate content block, POI
-    reads the first element of the first choice as a shape. The first attempt read it as a
-    container of shapes and dropped a single shape — `TestPresentationStreaming` failed on it.
-
-    Coverage: `TestPresentationStreaming` — text, notes and images against the former usermodel
-    code on a deck mixing POI-built slides and a hand-written one, plus the two allocation bounds —
-    and `TestImageInventoryExtractor#testTwoPicturesOnTheSameCellsAreBothListed`,
-    `#testAOneCellAnchorIsKeyedOnItsCell`, `#testASheetIsNotParsedToListItsPictures`. The three
-    allocation tests and the two key tests were checked to fail against the unpatched code; the
-    three equivalence tests pass on both, as they must. 230 tests → 238.
-
-36. *(code review 2026-10, finding `RES-04`, S2)* `BlobDiffWork` downloaded, parsed and compared
-    both binaries inside the transaction `AbstractWork#runWorkWithTransaction` opens, after having
-    queried the repository with it. An extraction outliving the transaction timeout (300 s by
-    default) failed the commit: no `BlobDiff` at all, not even in `error`, since that write belonged
-    to the dead transaction. `AbstractWork#run` then ran the whole extraction twice more
-    (`getRetryCount()` = 2) before giving up.
-
-    `work()` now follows the platform pattern (`PictureViewsHelper#newTransaction`,
-    `ThumbnailRecomputeWork`): it commits once the source and the blobs are resolved, extracts with
-    no transaction open, then starts a new one to write. The idempotency check (item 5) runs again
-    in that new transaction, since a run on another node can have finished in between. No dedicated
-    timeout for the write transaction: it only creates one document.
-
-    Coverage: `TestBlobDiffHardening#testTheExtractionRunsOutsideAnyTransaction` (a probe extractor
-    records the transaction state on both sides) and
-    `#testADiffRecordedDuringTheExtractionIsNotDuplicated` (the probe records a competing diff in
-    its own transaction during the extraction). Both were checked to fail against the unpatched code
-    — `[true, true]`, and two diffs instead of one. 238 tests → 240.
-
-37. *(code review 2026-10, finding `RES-05`, S2)* The image inventory was bounded per image
-    (`maxImageBytes()`) and per count (`maxLines`), never per file, and read every placement of an
-    image again. A scanned background shared by the 300 pages of a PDF was read 300 times per side;
-    a picture anchored 10 000 times in a few kilobytes of sheet was inflated and hashed 10 000
-    times, up to 320 GB per side in the worst case.
-
-    `ImageBudget`, created once per extraction, holds the digests already computed — by
-    `PackagePartName` for OOXML, by `COSStream` identity for PDF — and the bytes left to read.
-    `digestOnce` reads an image the first time it is met; `meter` wraps every image stream and
-    raises `BudgetExhausted` once `maxTotalImageBytes()` is spent, after which each format stops its
-    inventory and flags it `truncated`, like `maxLines` does. The total is not a new setting: it is
-    eight times the per-image cap, 256 MB by default, overridable with it.
-
-    One side effect, found by the existing tests: `digestStream` used to read in 8 KB chunks and
-    only then compare with the cap, so a dropped image cost up to 8 KB past it. It now never reads
-    more than `maxImageBytes() + 1` bytes. The warning for an image over the cap is logged once per
-    image, no longer once per placement.
-
-    Coverage: `TestImageInventoryExtractor#testAnImageOnEveryPdfPageIsReadOnce`,
-    `#testAPictureOnEverySlideIsReadOnce`, `#testAPictureAnchoredManyTimesIsReadOnce` (a counting
-    subclass overrides `digestStream(MessageDigest, InputStream)`, a signature older than the fix)
-    and `#testTheImagesOfOneFileAreReadWithinATotalBudget` (DOCX, PDF and PPTX). All four were
-    checked to fail against the unpatched code — 20 reads instead of 1, and no stop. 240 tests → 244.
-
-38. *(code review 2026-10, finding `RES-06`, S2)* `ConverterTextExtractor` read the whole
-    converter output into a `String` with `IOUtils.toString`, then `split("\\R")` built an array
-    of every line, before `maxLines` kept the first of them. Measured on 9 MB of text: 64 MB
-    allocated to keep 100 lines. `pdf2text` writes its output to a file, which this pulled whole
-    into heap, per side; and the text size is not bounded by `maxBlobSize`, which caps the
-    compressed input.
-
-    The output is now read with a `BufferedReader`, as `PlainTextExtractor` does, and the read
-    stops at `maxLines`: 0.5 MB on the same input. The five breaks `\R` matches and `readLine` does
-    not are split within each line, so the lines are the same as before. The charset is still
-    resolved by `BlobCharsets`.
-
-    Not changed: the conversion itself still processes the whole document, and a converter that
-    builds its output in memory (`any2text` through Tika) still holds it whole. Only this
-    extractor's copies are gone.
-
-    Coverage: `TestConverterTextExtractor#testTheConverterOutputIsReadOnlyUpToMaxLines`, checked to
-    fail against the unpatched code, and `#testTheConverterOutputIsSplitOnEveryLineBreak`, which
-    passes on both, as it must. Both run through `PassThroughConverter`. 244 tests → 246.
-
-39. *(code review 2026-10, finding `RES-07`, S2)* `maxLines` bounded how many values an extraction
-    held, never how long they were: `maxValueLength` only applied when `TextDiffer` rendered the
-    body. 10 000 cells of 32 767 characters were held whole, 327 M characters per side, and a
-    converted or slide paragraph had no limit at all.
-
-    Values are now bounded when they are created. `BlobTextExtractor.MAX_VALUE_LENGTH` is the
-    property `BlobDiffComponent#resolve` passes to every extractor from the configuration, unless
-    its contribution sets one; the spreadsheet, presentation, plain text and converter extractors
-    build their values through `ContentLine.of(key, value, maxValueLength)`. A longer value is
-    compacted to its beginning, its length and a 64-bit prefix of its SHA-256, within
-    `maxValueLength`: two values still compare equal exactly when they are, and the rendered entry
-    of a change past the kept beginning now shows two different digests instead of two identical
-    prefixes - the limitation item 23 had documented.
-
-    Not changed: a single unit is still read whole before it is compacted (a cell, a paragraph, a
-    converted line); only the accumulation is bounded, to `maxLines × maxValueLength` per side.
-    The image inventory holds digests, short by construction, and is untouched.
-
-    Coverage: `TestExtractedValueBounding` (200 cells of 32 000 characters, the other formats, a
-    change past the kept beginning, equal long values),
-    `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength` and
-    `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`. Five of the six
-    were checked to fail against the unpatched code, the equal-values one passes on both, as it
-    must. 246 tests → 252.
-
-40. *(code review 2026-10, finding `API-01`, S2)* Neither descriptor implemented
-    `Descriptor#merge`, whose default returns the later contribution alone. A deployment override
-    setting nothing but `<docTypes>` therefore replaced the whole configuration: `enabled` fell back
-    to `false`, switching the feature off in silence, and `xpaths` to an empty list, which meant
-    "every blob xpath" and widened the scope it was meant to narrow. An extractor override
-    re-declaring one property lost its class, failed to instantiate, was skipped, and its formats
-    became unsupported.
-
-    Both descriptors now merge: boxed scalars, defaults in the getters, `getIfEmpty` for lists,
-    properties overlaid, a new instance every time. The meaning of an empty `xpaths` had to change
-    with it, since an override can no longer reset a list by leaving it empty: "every blob xpath"
-    is now `<xpath>*</xpath>`, and an empty list means `file:content`, the shipped value. `*` is
-    also accepted in `docTypes`, for symmetry. Nothing shipped used the empty-xpaths meaning; the
-    one test configuration that did, `blobaudit-test-allxpaths-config.xml`, now lists `*`.
-
-    Coverage: `TestBlobDiffConfigDescriptor` (a partial override, an explicit value still wins, the
-    `file:content` default, `*`), `TestExtractorSelection` (one property overridden, an extractor
-    disabled by name) and `TestBlobDiffService#testAPartialContributionOnlyChangesWhatItSets`, which
-    goes through the real registry. Six of the seven were checked to fail against the unpatched
-    code; `testAnExplicitValueStillWins` passes on both, as it must. 252 tests → 259.
-
-41. *(code review 2026-10, finding `COR-03`, S2)* The documented scope of
-    `DISABLE_BLOB_DIFF_LISTENER` was wrong. The Javadoc and the README said the flag worked through
-    `saveDocument` and only warned about an explicit `session.checkIn`; the Javadoc also claimed the
-    listener read the `documentCreated` event of the new version, when it reads `aboutToCheckIn`
-    and `documentCheckedIn` on the live document. The flag only reaches those two events through
-    the option map `saveDocument` builds from the context data, that is for the version it creates
-    itself from a `VERSIONING_OPTION`. Verified in `AbstractSession` and
-    `StandardVersioningService`: an automatic policy applied during the same save goes through
-    `doAutomaticVersioning` → `DocumentModel#checkIn` → `AbstractSession#checkIn`, whose option map
-    is fresh and empty; `restoreToVersion` and `publishDocument` call `notifyCheckedInVersion` with
-    `null`. The platform ships `collaborative-save` (minor version *before* the update whenever the
-    saving user is not the last contributor) and `note-as-wiki`, both active. An importer re-saving
-    documents last edited by someone else, with the flag and no `VERSIONING_OPTION`, still got one
-    audit entry and one `BlobDiff` per snapshot.
-
-    **Documentation only, by product decision**: the Javadoc of `DISABLE_BLOB_DIFF_LISTENER` and of
-    the thread-local switch, the README "Disabling the Listener" section and the invariant above now
-    state the real scope and point to `runDisabled` for every other path. No code change, and no
-    test: the review suggested pinning the limitation with a `TestBlobDiffListenerDisabling` case
-    relying on `collaborative-save`, not written. Making the flag survive those paths would mean
-    carrying it outside the option map (the live document's context data is not re-read by
-    `AbstractSession#checkIn`), which is what `runDisabled` already does.
-
-42. *(code review 2026-10, finding `COR-02`, S2)* `BlobDiff.Retry` scheduled its replay under the
-    id of the run that recorded the error, the version pair. On the stream WorkManager, the default
-    as soon as Kafka is enabled, the replay lands on the same partition (the source document) and
-    `WorkComputation` skips an idempotent work whose id is among the last 50 its thread processed:
-    the operation answered "Retry scheduled" and nothing ran. On the in-memory WorkManager, a second
-    click while the first replay ran enqueued another one, and with `maxThreads=2` both could record
-    a diff for one correlation id - the duplicate item 5 exists to prevent.
-
-    The replay now has an id of its own, and the diff goes through a new status, `retrying`: the
-    operation sets it, refuses a second retry while the WorkManager still holds the first, and
-    accepts it again once it no longer does. `BlobDiffWork#workFailed` restores `error` when the
-    replay fails for good. The review proposed refusing any `retrying` diff; that would have left a
-    diff stuck for good whenever its replay was lost, which a restart does to the in-memory queue.
-    Web UI labels the status and keeps the Retry action on it, the server deciding.
-
-    Coverage: `TestBlobDiffManagement#testARetryRunsUnderAWorkIdOfItsOwn` (the stream skip cannot
-    be reproduced on the in-memory WorkManager of the tests, so the id is checked),
-    `#testASecondRetryIsRefusedWhileTheFirstIsRunning` (the probe hook of item 36 issues the second
-    retry during the extraction of the first), `#testARetryThatFailsForGoodPutsTheDiffBackInError`
-    and `#testARetryLostWithItsQueueCanBeRequestedAgain`. All four were checked to fail against the
-    unpatched code. 259 tests → 263.
-
-43. *(code review 2026-10, finding `WEB-01`, S2)* The purge dialog misreported the outcome of a
-    permanent purge. A single failed `BlobDiff.PurgeStatus` call (expired session, proxy timeout)
-    stopped the polling and announced "Purge failed." while the bulk command kept deleting; a
-    completed command was announced as a clean "N purged" whatever its `errorCount`, `skipCount` and
-    `queryLimitReached`; and "Purge stopped" was shown whatever the abort returned, although
-    `BulkService#abort` hands back a completed command unchanged, in which case the empty folders
-    were never cleaned either.
-
-    `nuxeo-blobdiff-purge-dialog` now retries a failed status call with a doubling delay and, after
-    five in a row or an `UNKNOWN` state, closes with a message saying the purge keeps running
-    server side. The completion message adds the failed and skipped counts and the query limit, and
-    asks for another run when it is needed (a skipped document is not a `BlobDiff`, so another run
-    would not help). The abort branches on the returned state: `COMPLETED` goes through the normal
-    completion, folder cleanup included. A failed abort request no longer says "Purge failed.".
-
-    No automated coverage, no JS test infrastructure. Manual checks: a purge that completes, one
-    stopped mid-run, one stopped just after it completed, and the network cut during a run (the
-    dialog must keep polling, then report the purge as still running).
-
-44. *(code review 2026-10, finding `WEB-02`, S2)* Unticking "Truncated diffs only" hid every
-    truncated diff. The two-way binding wrote `false`, `nuxeo-page-provider` only drops `null` and
-    `undefined` named parameters, and `NXQLQueryBuilder` turned `false` into `bdiff:truncated = 0`:
-    a box labelled "only truncated" meant "exclude truncated" once touched, with no visible filter.
-    The checkbox is now bound one way and its handler sets `true` or `null`; an observer replaces a
-    `false` read back from a saved search by `null`. **Rule for any future boolean filter of this
-    form: send `true` or nothing, never `false`.**
-
-    No automated coverage. Manual check: tick, untick, the result count must come back to the
-    unfiltered one; then load a saved search created before the fix with the box unticked.
-
-45. *(code review 2026-10, finding `COR-01`, S2)* Blobs inside a list were paired by index. With
-    `<xpath>*</xpath>`, removing the first of three attachments compared A with B and B with C:
-    two `blobContentModified` entries and two `BlobDiff` between unrelated files, the second one's
-    body being the text of C presented as a change of B. A reorder did the same, and each shifted
-    index cost an eligibility check, an event and a work in the user transaction.
-
-    The listener now pairs list entries by digest (see the invariant above). `blobXPaths` and
-    `expandTemplates` gave way to `blobPairs` and `pairListEntries`, which expand each list on both
-    versions instead of the new one only. New skip reason `skippedListChanged`, a skip reason only
-    like `skippedNotManaged`. Not done: a per-check-in cap on the number of works, the review's
-    other suggestion - with removals and moves no longer scheduling anything, a check-in only
-    schedules one work per blob that really changed.
-
-    Coverage: `TestBlobDiffVersionPairing#testRemovingTheFirstAttachmentIsNotAuditedAsChanges`,
-    `#testReorderingAttachmentsIsNotAuditedAsChanges`,
-    `#testAChangeInAListThatAlsoLostAnEntryIsAuditedWithoutADiff` (all three checked to fail against
-    the unpatched code) and `#testReplacingAnAttachmentInPlaceIsStillDiffed`, which passes on both,
-    as it must. 263 tests → 267.
-
-46. *(code review 2026-10, finding `COR-04`, S3)* A truncated extraction window yielded phantom
-    deletions and additions. Each side is cut at `maxLines` independently and both windows were
-    compared as if complete, so a cell filled before the cut pushed the last cell of the old window
-    out of the new one, reported and counted as removed: "1 addition, 1 deletion (truncated)" for
-    one filled cell. The `truncated` flag said the diff was partial, not that some of its facts
-    were false.
-
-    Past the last unit both windows share, a unit missing from a cut side is now unknown: neither
-    reported nor counted (see the invariant above). Before it, both windows cover the same part of
-    the document, so removals and additions there are still reported. `lcsEdits` was folded into
-    `positionalEdits`, which now needs the `Alignment` to read `tailStart`.
-
-    Coverage: `TestTextDiffer#testALineInsertedBeforeTheCutDoesNotReportAPhantomRemoval`,
-    `#testALineRemovedBeforeTheCutDoesNotReportAPhantomAddition`,
-    `#testACellFilledBeforeTheCutDoesNotReportAPhantomRemoval` and
-    `#testChangesBeforeTheCutAreStillReported`, all four checked to fail against the unpatched code,
-    and `#testATrailingRemovalIsReportedWhenNothingIsCut`, which passes on both. 267 tests → 272.
-
-47. *(code review 2026-10, finding `COR-06`, S3)* A diff filed in error without readable blobs
-    (frozen pair unreadable, source deleted) was stored without the filenames and digests the work
-    held, since `createDiffDocument` read them off `null` blobs. A retry, rebuilt from the diff,
-    could not recover them, so even a successful retry produced a diff without filenames. The
-    retry also passed the diff title, `<source title> - <xpath>`, as the source title, and the
-    source-missing branch appended the xpath again on every retry.
-
-    `FrozenBlobs` now carries both filenames and digests (an 8-argument constructor is kept for the
-    storage identity alone), `createDiffDocument` falls back to them when a blob is `null`, and
-    `BlobDiffRetryOp#sourceTitle` strips the ` - <xpath>` suffix. The review suggested passing
-    `null` instead; stripping keeps the title readable when the source is gone.
-
-    Coverage: `TestBlobDiffManagement#testAnErrorDiffKeepsTheFilenamesAndDigests` and
-    `#testARetryKeepsTheTitleAndTheFilenames`, both checked to fail against the unpatched code.
-    272 tests → 274.
-
-48. *(code review 2026-10, finding `COR-07`, S3)* `TextDiffer#merge` could return
-    `maxDiffChars + 1` characters: `lastIndexOf('\n', maxChars)` searches from index `maxChars`
-    included, so a newline sitting exactly there kept one character too many, breaking the exact
-    bound `diffKeyed` and `diffPositional` honour. The search now starts at `maxChars - 1`.
-    Coverage: `TestTextDifferBounding#testMergeHonoursTheCapWhenANewlineSitsExactlyOnIt`, checked to
-    fail against the unpatched code. 274 tests → 275.
-
-49. *(code review 2026-10, finding `API-02`, S3)* `BlobDiffComponent#stop` set both extractor lists
-    to `null`. Both WorkManagers drain works for 10 s before the components stop, and a work still
-    running after that (`any2text` on a large PDF) found no extractor: `extract` returned `null`
-    and the work filed `skippedUnsupportedType`, which `BlobDiff.Retry` refuses - a permanent,
-    mislabelled hole. The lists hold no resource, so `stop()` is gone; `start()` replaces them.
-    Coverage: `TestBlobDiffService#testAStoppingComponentKeepsItsExtractors`, checked to fail against
-    the unpatched code. 275 tests → 276.
-
-50. *(code review 2026-10, finding `API-03`, S3)* With `<xpath>*</xpath>`, the blob xpaths came
-    from `DocumentType#getSchemas()`, which only knows the static facets of the type: a blob in a
-    schema brought by a facet added to the document (`addFacet`) was never watched. The templates
-    were also cached per type in a static map nothing cleared, so a hot reload redefining a type
-    kept the old field list.
-
-    `blobPairs` now walks `DocumentModel#getSchemas()` of the new version, and
-    `computeBlobXPathTemplates` works on one schema; the cache is keyed by schema name, which a
-    document type plus its instance facets reduce to. `BlobDiffComponent#stop` came back, to clear
-    that cache and nothing else - the extractor lists stay (item 49).
-
-    Coverage: `TestBlobDiffVersionPairing#testABlobInASchemaOfAnInstanceFacetIsDiffed`, through
-    `blobaudit-test-dynamicfacet-contrib.xml`, checked to fail against the unpatched code;
-    `#testTemplatesAreComputedPerSchema` and `#testUnknownSchemaYieldsNoXPath` replace the two
-    per-type cases. 276 tests → 277.
-
-51. *(code review 2026-10, finding `WEB-03`, S3)* Esc or a click outside closed the purge dialog
-    mid-run without going through "Let it run in the background". Reopening it then reset
-    `_running` and `_commandId`: the pending poll returned early for good, the completion was never
-    observed (no toast, no folder cleanup) and the Stop button was gone while the purge kept
-    deleting. The dialog now binds `no-cancel-on-esc-key` and `no-cancel-on-outside-click` to
-    `_running`, and `open()` keeps the progress view of a purge still running instead of resetting.
-
-    No automated coverage. Manual checks: Esc and a click outside during a purge do nothing; after
-    "Let it run in the background", reopening shows a fresh form.
-
-52. *(code review 2026-10, finding `WEB-04`, S3)* "Open in the content changes audit", on the
-    document tab, only set `bdsearch:sourceId` on the drawer form, which is stamped once and keeps
-    its filters for the session: dates, user, truncated and the facets of an earlier search still
-    applied, and the audit listed a subset of the diffs the tab showed, with nothing saying why.
-    `Nuxeo.BlobAudit.openSearch(params, replace)` now replaces the whole `params` object when
-    `replace` is set, which the tab does. The per-row "filter on this source" of the results keeps
-    adding to the current filters, on purpose: it narrows the search the auditor is looking at.
-
-    No automated coverage. Manual check: filter the audit on a user, open a document whose diffs
-    come from several users, click "Open in the content changes audit": the result count must
-    match the tab.
-
-53. *(code review 2026-10, finding `WEB-05`, S3)* `nuxeo-blobdiff-viewer` never aborted nor
-    discarded the previous request when its `url` changed: a large diff still downloading when the
-    viewer was handed the next one could render its lines under the metadata of the other, and
-    clear `loading` while the second one was still loading. Masked today by item 26, which keeps
-    the layout from receiving the new document; reachable as soon as item 26 is fixed. `_load` now
-    aborts the request in flight through an `AbortController` and ignores any response that is not
-    the current one, as `nuxeo-resource` does.
-
-    No automated coverage. Manual check, once item 26 is fixed: open a large diff, move to the next
-    one within a second; only the second diff's lines must show.
-
-54. *(code review 2026-10, finding `BLD-01`, S3)* Three container-path tests built 10:00 in the JVM
-    default zone while the path is rendered in UTC: east of UTC+10 the instant fell on the previous
-    UTC day and `mvn install` failed - `TestBlobDiffService#testContainerIsPartitionedByDate`,
-    `#testDifferentDaysGetDifferentFolders` and
-    `TestBlobDiffLocationAndSecurity#testConcurrentContainerCreationStaysUnderASingleRoot`. Both
-    `date(...)` helpers now build the instant in UTC. Checked by running both classes with
-    `TZ=Pacific/Auckland`, where the three failed before, and `TZ=America/Los_Angeles`.
-
-55. *(code review 2026-10, finding `BLD-02`, S3)* `TestTextDifferScaling#testRealWorldSized
-    DocumentStaysWithinMemoryBudget` guarded nothing: it changed a single paragraph, which the
-    prefix/suffix trimming of item 6 reduces to a 1x1 alignment, and it read the heap delta, which
-    a GC during the diff shrinks. Replacing Hirschberg by a full LCS table left it green. It now
-    compares two fully rewritten 4 900-line documents and counts the bytes the thread allocates
-    (`ThreadMXBean#getCurrentThreadAllocatedBytes`), under 24 MB. Checked by adding a full
-    `int[n+1][m+1]` table to `positionalEdits` for one run: 101 MB allocated, the test failed.
-
-56. *(code review 2026-10, finding `BLD-03`, S3, and a bug it uncovered)* `testAPurgeCanBeAborted`
-    raced the purge of a single diff, which could complete before the abort ran, and only checked
-    the state flag. It now holds the first removal (`PurgeGateListener`) until the abort is sent,
-    waits for the purge stream to drain, and checks that most of 300 diffs survive.
-
-    **Written that way, it failed every time: an abort deleted nothing less.**
-    `AbstractBulkComputation#processRecord` only checks the abort for a command it no longer knows,
-    and it caches the command, so every bucket already scrolled was processed whatever the state:
-    "Purge stopped" was shown while the purge deleted everything it had selected.
-    `BlobDiffPurgeComputation#compute` now returns at once for an aborted command, so the abort
-    takes effect at the next batch of 50. Checked three times in a row on each side: 0 diffs left
-    before, at least 200 after. Test count unchanged, 277.
-
-57. *(code review 2026-10, finding `BLD-04`, S3)* `BLOB_DIFFS_ADMIN`, the query behind every Web UI
-    screen of the audit, had no test, although its filters had already been dropped in silence once
-    (item 25). It needs a search service, not a search engine: `TestBlobDiffAdminSearch` runs on
-    `CoreSearchFeature`, whose default client is the repository one, as on a bare instance. It
-    builds the search document with `PageProviderHelper#getSearchDocumentModel` from string named
-    parameters, as the REST search endpoint does for Web UI, and checks that each filter (source,
-    user, date range, truncated) narrows the result and that filters combine. Aggregates are left
-    out: that client has no `AGGREGATE` capability.
-
-    Checked by breaking the page provider for one run: a wrong `user` field and a wrong
-    `truncated` parameter made three of the six tests fail. Removing `<searchDocumentType>` did
-    not, and cannot: the fallback search document resolves `bdsearch:` keys too (item 25), which is
-    why the prefix is kept. 277 tests → 283, 26 test classes → 27.
-
-58. *(code review 2026-10, finding `BLD-05`, S3)* The `blobDiffSource` enricher computes existence
-    and trash state with a privileged session and filters title, path and type through the
-    caller's Read - the only place where privileged data is narrowed before reaching a caller -
-    and every test rendered it as Administrator, so the filter never ran.
-    `TestBlobDiffManagement#testEnricherHidesASourceTheAuditorCannotRead` renders it for a plain
-    user granted the diff but not the source. The default auditors group, `administrators`,
-    bypasses ACLs, hence the direct grant on the diff. Checked by making the enricher read the source
-    privileged for one run: that test failed, and only it. 283 tests → 284.
-
-59. *(code review 2026-10, finding `BLD-06`, S3)* The core POM declared `nuxeo-core-bulk` and
-    `nuxeo-runtime-stream` explicitly so that a reshaped transitive path could not break the build
-    unnoticed, and applied that rule nowhere else. `mvn dependency:analyze` listed thirteen used
-    but undeclared artifacts. The Nuxeo, Jackson and Jakarta ones are now declared - `provided`
-    for what the code imports (`nuxeo-runtime`, `nuxeo-runtime-jtajca`, `nuxeo-common`,
-    `nuxeo-core-schema`, `nuxeo-stream`, `nuxeo-platform-directory-api`, `jackson-core`), `test`
-    for what only the tests import (`nuxeo-core-convert`, `jackson-databind`,
-    `jakarta.inject-api`). The POI family (`poi-ooxml-lite`, `xmlbeans`, `pdfbox-io`) went with
-    item 60, which reworks that block. The "unused declared" ones are runtime deployments of the
-    tests (`nuxeo-automation-test`, `nuxeo-platform-convert`) and stay.
-
-60. *(code review 2026-10, finding `BLD-07`, S3)* The core POM declared POI and PDFBox in compile
-    scope, "on purpose: POI is not part of a standard Nuxeo distribution, so the bundle must ship
-    it". False: the LTS 2025 server ships POI 5.5.1, PDFBox 3.0.7 and their dependencies in
-    `lib/`. The package only contained the bundle because `nx:zipdiff` drops a jar whose name
-    matches the distribution's; a maintainer pinning another POI version on the strength of that
-    comment would have shipped a second one onto the shared classpath. POI, `poi-ooxml-lite`,
-    `xmlbeans`, PDFBox and `pdfbox-io` are now `provided`, with a comment saying why and that no
-    version may be pinned here. `dependency:analyze` reports nothing used but undeclared, and the
-    package still holds the bundle alone. README, "Deployment", says so.
-
-61. *(product request)* A new version holding a file of another format — an `.xlsx` replaced by a
-    `.docx`, a Word document by its PDF rendition — was diffed like any other. The two extractions
-    cut the content differently (cells, paragraphs, rendered lines), so the diff reported everything
-    as removed and added: noise for the auditor, misleading counters, and up to `maxDiffChars` of
-    both documents copied into `/change-diff` for nothing. docx → pdf was not even caught by a
-    "different extractor" test, since a single `converter` contribution read both.
-
-    Such a change is now audited as `skippedFormatChanged`, without a diff (see the "comparability
-    class" invariant). New pair-level `BlobDiffService#getEligibility`, used by the trigger and the
-    work alike; `DiffEligibility.FORMAT_CHANGED`; `pdf` and `legacyPresentation` split out of
-    `converter`, same class and properties; `oldMimeType` / `newMimeType` extended infos on every
-    `blobContentModified` entry; audit comment `binary changed (format changed)`; status label
-    (EN/FR) and purge dialog entry. Rejected: diffing anyway with a "format changed" header line in
-    the body — the counters would still be wrong, the noise would still be stored, and a header in
-    a blob cannot be searched where a status can. Text formats were left in one class on purpose
-    (see the invariant).
-
-    Coverage: `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
-    `TestBlobDiffSkipReporting#testASpreadsheetReplacedByAWordDocumentIsAuditedWithoutADiff`,
-    `#testAWordDocumentReplacedByItsPdfRenditionIsAuditedWithoutADiff`,
-    `#testTheSameBytesUnderAnotherFormatAreNotAudited`, `#testAConversionWithinOneExtractorIsStillDiffed`
-    and `TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`. With the format
-    check neutralised, the pair test, the two skip tests and the retry test failed, and the
-    same-bytes and `.xls` → `.xlsx` tests passed, as they must; with `application/pdf` folded back
-    into `converter`, the PDF test failed. 284 tests → 290.
-
-62. *(product request, follow-up of 61)* Item 61 left every text format in `plainText`, so a
-    `.json` replaced by an unrelated `.xml` was diffed: every line removed, every line added, both
-    files copied into `/change-diff`. Splitting `plainText` by mime type was rejected: text mime
-    types are unreliable (aliases, a `.txt` holding JSON renamed `.json`), and a genuine edit would
-    have lost its diff. Instead, a pair that changed mime type and keeps less than `minSimilarity`
-    of its smaller side, in characters, is filed as `skippedContentReplaced`: counters and
-    `bdiff:similarity`, no body (see the "replaced" invariant). Settings on `plainText` only,
-    `minSimilarity=0.1` and `minSimilarityLines=5`, on by default; `0` keeps every diff (product
-    decision: it must stay a setting).
-
-    Product decisions taken with it: the check only applies when the mime type changed (a rewrite
-    in one format is always diffed); no code to recompute a replaced pair — the README explains
-    that the versions and both blob keys persist and that `BlobDiffService#diff` on the version
-    blobs returns the full body, and `BlobDiff.Retry` refuses the status. Rejected: storing
-    the score only below the threshold (it is stored on every measured diff, to tune the
-    threshold on real data); skipping the image inventory for a replaced pair (no `plainText`
-    format has one).
-
-    New: `DiffResult#similarity()` / `#replaced()` (5-argument constructor kept),
-    `TextDiffer.Comparison`, `ExtractorDescriptor.MIN_SIMILARITY` / `MIN_SIMILARITY_LINES` /
-    `normalizeMimeType`, `bdiff:similarity` (`xs:double`), `STATUS_SKIPPED_CONTENT_REPLACED`.
-    Web UI: status label and purge entry (EN/FR), similarity row and an explanatory note on the
-    diff view, and a "Format: json → xml" badge in `nuxeo-blobdiff-status` whenever the two mime
-    types differ, whatever the status — extensions when they differ, mime subtypes otherwise.
-    The plugin had never been deployed: no migration.
-
-    Coverage: `TestTextDifferSimilarity` (10), `TestBlobDiffService` (6),
-    `TestExtractorSelection` (2), `TestBlobDiffSkipReporting` (4),
-    `TestBlobDiffManagement#testRetryRefusesAReplacedContent`. With the score check neutralised,
-    `TestBlobDiffService#testATextFileReplacedByAnotherFormatIsFlagged` and
-    `TestBlobDiffSkipReporting#testATextFileReplacedByAnotherFormatIsKeptWithoutItsBody` failed;
-    with the mime check neutralised, `#testARewriteInTheSameFormatIsNeverFlagged` and
-    `#testATextFileRewrittenInTheSameFormatIsStillDiffed` failed. Web UI changes have no automated
-    coverage; manual check: version a `.json` then an unrelated `.xml`, the diff shows "Content
-    replaced", the badge, a similarity of 0 % and the note, and no Download action. 290 tests → 313.
-
-> **Numbers are stable identifiers, not priorities.** They are referenced in commit messages; never
-> reused or renumbered. Follow the recommended order below, not the numbering.
-
-| Session | Items | Effort | Notes |
-|---|---|---|---|
-| next | 26 | M | **Open bug**, diagnosed to one link in the chain, not yet fixed |
-| next | 27 | S | Cosmetic, `BlobDiff` has no edit layout |
-| — | 29 | M | Deferred half of the item 28 compliance pass, cosmetic only |
-| — | 24 | S | Optional. The index of item 21 already solves the scalability problem |
-| — | 14 | — | **Closed**, see below |
-| — | 12 | — | **Dropped**, see below |
-
+## Open items
 
 ### 26. A `BlobDiff` page does not refresh when navigating to another `BlobDiff` — OPEN
 
 Navigate from one `BlobDiff` to another — from the drawer queue of `nuxeo-search-form`, or from any
 link — and the **URL, the browser title and the Web UI header all update, but the whole
-`nuxeo-blobdiff-view-layout` card stays on the previous diff**. A reload fixes it. Found while
-testing item 25; it is **not** caused by item 25, the queue merely makes it easy to hit.
+`nuxeo-blobdiff-view-layout` card stays on the previous diff**. A reload fixes it. The drawer queue
+merely makes it easy to hit. The view layout no longer fetches the document itself (it reads the
+`blobDiffSource` enricher Web UI now requests): check first that the bug still reproduces.
 
 What is established, so it does not get re-derived:
 
 - **Not the platform.** The identical flow on the platform's *default* and *assets* searches —
   queue view, click one document then another — refreshes correctly. So the
   `navigateTo` → `page()` → `app.load` → `currentDocument` chain is sound.
-- **Not a stale deployment.** That was a separate problem, since fixed: `deployment-fragment.xml`
-  `<unzip>` only ever *merges* into `nuxeo.war`, so the files deleted by item 25 lingered in a
-  bind-mounted `ui/` folder. Clearing it fixed a much broader navigation breakage.
+- **Not a stale deployment.** `deployment-fragment.xml` `<unzip>` only ever *merges* into
+  `nuxeo.war`, so files removed from the bundle linger in a bind-mounted `ui/` folder until it is
+  cleared; that caused a broader navigation breakage once, and was fixed separately.
 - **Not `route="search:blobdiffs"`.** Suspected first because no platform `DRAWER_ITEMS` icon
   carries a `route`, and page.js runs with `click: false`; ruled out by testing.
-- **Our element is never touched.** Temporary instrumentation (`attached`, `detached`,
-  `_documentChanged` on the layout; `attached`, `detached`, `_load` on `nuxeo-blobdiff-viewer`)
+- **Our element is never touched.** Temporary instrumentation (`attached`, `detached` and the
+  `document` observer of the layout; `attached`, `detached`, `_load` on `nuxeo-blobdiff-viewer`)
   logged a full, correct sequence on the *first* open and then **absolutely nothing** on the
-  second — no `DETACHED`, no `ATTACHED`, no `_DOCUMENTCHANGED`, no `_LOAD`.
+  second.
 
 That last point is the whole finding: `document` never reaches our layout, so the break is
 **upstream of this plugin**, somewhere in
@@ -1679,128 +494,29 @@ still reports the *old* uid — that is the broken link.
 })();
 ```
 
-Worth removing regardless of the cause: `nuxeo-blobdiff-view-layout` is the only view layout here
-or in the platform that does I/O in a `document` observer (`this.$.doc.get()` feeding `_full`,
-because Web UI does not request `blobDiffSource` on the current document). Contributing
-`blobDiffSource` to `org.nuxeo.web.ui.enrichers.document` would delete that second request and the
-inner `<nuxeo-document>` entirely.
+### 24. Replace the idempotency query with a path lookup — OPTIONAL, NOT RECOMMENDED
 
+`BlobDiffWork#existingDiffId` could check the deterministic path
+(`/change-diff/YYYY/MM/DD/<sourceId>-<eventTime>-<correlationId>`) instead of querying. Not done: the
+index on `bdiff:correlationId` already solves the cost, and `AbstractSession#createDocument` lets a
+listener rename a document, so the name is not contractual — the query would have to stay as a
+fallback anyway. Never use the search engine for this guard: indexing is asynchronous.
 
-### 27. Hide the Edit action on `BlobDiff` — OPEN
-Opening a `BlobDiff` logs a 404 for `document/blobdiff/nuxeo-blobdiff-edit-layout.html`: Web UI
-offers the Edit action and there is no edit layout, by design — a diff is a record, never edited.
-Filter the action out for the type rather than adding an empty layout, which is what
-`nuxeo-blobdiff-metadata-layout.html` had to do for a different reason.
-
-
-### 29. Javadoc phrasing and `var` — the deferred half of item 28 — OPEN, COSMETIC
-
-Item 28 fixed everything with a behavioural consequence and deliberately left two purely cosmetic
-families alone, because together they touch all 34 main files and would have buried the substantive
-diff. Neither changes a single line of logic.
-
-- **Javadoc first sentences.** The Nuxeo style wants a 3rd-person verb phrase ending in a period
-  ("Returns the id of…"). The plugin mostly uses bare predicates and noun phrases
-  (`{@code true} if …`, `Id of … , or {@code null}`). Counted: **38 methods, 22 fields**. There are
-  also 27 *type*-level noun phrases — **leave those**: a noun phrase on a type is the dominant style
-  in the platform itself, so the rule is scoped to methods and fields here.
-  One real tag defect to fix with them: `ImageInventoryExtractor`'s `@param dropped` is three
-  sentences and ends with a period, where `@param` must be an uncapitalised fragment with no period.
-  Fifteen members have tag-only Javadoc with no description sentence, and five public members have
-  none at all — `TextDiffer#diff(DiffableContent, DiffableContent)`, the most-called method of the
-  class, is one of them.
-
-- **`var`.** The LTS 2025 `AGENTS.md` lists local variable type inference under "Modern Java
-  Features (USE THEM)". The plugin uses it **once** in 5 000 lines
-  (`BlobDiffPurgeAbortOp:58`). About 40 sites would take it naturally — those whose right-hand side
-  is a `new ConcreteType(...)`, a cast, or `Framework.getService(T.class)`. Diamond declarations
-  (`List<X> x = new ArrayList<>()`) are *not* in that count: `var` buys nothing there.
-  One switch-expression candidate exists, `BlobModificationListener#commentSuffix` (:424-435), a
-  three-armed `if`-ladder over `String` constants — `case null, default ->` is final in Java 21.
-  `.collect(Collectors.toList())`: **zero occurrences, nothing to do.** Text blocks: no site worth
-  converting, and specifically **not** the five `@Operation(description = "…" + "…")` values, which
-  are single sentences split for line width — a text block would inject literal newlines into the
-  operation registry.
-
-Do these in one mechanical pass, on their own commit, or not at all. There is no test that can
-observe either.
-
-
-### 24. Replace the idempotency query with a path lookup — OPTIONAL
-
-`BlobDiffWork#existingDiffId` runs an NXQL query whose answer is derivable without one: the
-`BlobDiff` path is fully deterministic, `getOrCreateContainer` giving `/change-diff/YYYY/MM/DD`
-(`BlobDiffComponent:303`) and `diffDocumentName` giving `sourceId-date.getTime()-correlationId`
-(`:513-515`). `BlobDiffWork` carries all three inputs, serialised. A `session.exists(PathRef)` would
-be O(1) and consistent within the transaction, and `bdiff:correlationId` — which has **exactly one
-reader in the whole plugin**, that query — would lose its only consumer.
-
-**Deliberately not done in the item 21-23 batch**, and the reasons should be weighed again before
-reopening:
-
-- the index already solves the scalability problem; this is an elegance gain, not a capacity one;
-- it needs new public API (`BlobDiffService#diffDocumentPath`, side-effect free —
-  `getOrCreateContainer` *creates*, so it cannot serve an existence check);
-- it touches the guard that implements item 5, whose failure mode is duplicated audit records;
-- **the naming invariant it relies on is not contractual.** `AbstractSession.createDocument:722`
-  re-reads `DESTINATION_NAME` from the options **after** firing `ABOUT_TO_CREATE`, so any listener
-  can rename the document. A correct implementation must therefore validate the doctype and
-  `bdiff:correlationId` of whatever sits at the computed path, and keep the query as a cold
-  fallback — at which point the index is still wanted.
-
-**Do not use the search engine for this.** Indexing is asynchronous by construction
-(`IndexingDomainEventProducer` → stream `source/indexing` → `ongoingIndexing`, `batchThreshold`
-250 ms, `maxRetries=4 delay=3s`; the platform's own comment says "almost real time"). The window
-between the commit of run 1 and its visibility in the index is exactly the window in which a retry
-runs, so a search-backed guard would be read-your-writes unsafe and would reintroduce item 5's bug.
-
-
-### 12. Myers diff instead of Hirschberg — DROPPED
-
-Was conditional on the measurements after item 6. Those measurements settled it: the dominant real
-case is now flat (2.4 ms whatever the document size) and the pathological case — a document
-rewritten from end to end — costs 339 ms at 20 000 lines, well inside the asynchronous budget.
-Myers' O(ND) would buy nothing worth the risk of re-deriving an optimal alignment.
-
-Reopen only if a real corpus shows documents where prefix/suffix trimming finds nothing *and* the
-line count goes far past 20 000. `TestTextDiffer` and `TestTextDifferScaling` assert alignment
-**optimality** — that is the contract any replacement must satisfy.
-
-### 14. `DiffResult#summary()` stays English — CLOSED
-
-`bdiff:summary` holds a hardcoded English sentence ("2 modifications, 1 addition", or "No textual
-change detected"), built by `DiffResult#summary()` and persisted as is.
-
-**Decision (2026-09, product owner): leave it in English.** Do not "fix" this by composing the
-sentence in the UI: it would split the display between already-stored English strings and newly
-composed translated ones, and realigning them would mean rewriting every existing `BlobDiff`.
-
-`bdiff:added`, `bdiff:removed`, `bdiff:changed` and `bdiff:truncated` are stored as separate
-fields, so a UI that wants a translated summary can build one from those without touching
-`bdiff:summary`. `nuxeo-blobdiff-status` already does exactly that for its counters.
-
----
-
-## Other observations (not scheduled)
-
-- **Do not add `<require>ElasticSearchComponent</require>` to `blobdiff-pageproviders-contrib.xml`.**
-  The item 7 review claimed it was missing; it is not needed and would be harmful.
-  `SearchServicePageProvider` lives in `nuxeo-platform-query-api`, not in the Elasticsearch bundle,
-  so the component always registers. A `<require>` would keep the whole component —
-  `BLOB_DIFFS_FOR_DOCUMENT` included — pending on any instance without a search engine, and in the
-  tests. What does need a search engine is the *execution*: `SearchService` is resolved at query
-  time and the provider throws if none is configured. The XML says so.
-- **`LogEntry.getExtendedInfos()` throws `UnsupportedOperationException` in LTS 2025.** Use
-  `getExtendedValue(key)`. Relevant to any test asserting on audit extended info.
+### Other observations (not scheduled)
 
 - **Repository growth.** One `BlobDiff` per version per xpath in `/change-diff/yyyy/MM/dd`; a single
   day folder can reach hundreds of thousands of children. Consider an hourly level or hash bucketing.
 - **`coalesce` reports misleading counts.** 3 removals followed by 3 additions yields "2 deletions,
-  1 modification, 2 additions" instead of "3 modifications" — coalescing is pair by pair, should be
+  1 modification, 2 additions" instead of "3 modifications": coalescing is pair by pair, it could be
   by blocks.
-- **Front-end.** `nuxeo-blobdiff-viewer` uses a raw `fetch(url, {credentials:'include'})` rather than
-  the Nuxeo client: works with cookie sessions, breaks with JWT/OAuth, ignores CORS config. It also
-  downloads the whole diff before paginating the rendering.
+- **Front-end.** `nuxeo-blobdiff-viewer` uses a raw `fetch(url, {credentials: 'include'})` rather than
+  the Nuxeo client: it works with cookie sessions, breaks with JWT/OAuth and ignores the CORS
+  configuration. It also downloads the whole diff before paginating the rendering.
 - **Audit/diff reconciliation.** The audit entry is written synchronously while the work runs after
   commit. If the work is lost, the entry points to a `BlobDiff` that never existed. A reconciliation
   job, or a "pending" state in the UI, would close the gap.
+
+## Numbering
+
+Work is numbered and cited in commit messages (`Item NN: ...`); history:
+`git log --grep '^Item '`. Next free number: 93.
