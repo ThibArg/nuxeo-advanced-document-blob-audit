@@ -1,0 +1,11 @@
+stages:
+  - build
+  - test
+  - security-scan
+  - deploy
+build:
+  image: maven:3.9
+  script: mvn -B package
+deploy:
+  environment: production
+  when: manual

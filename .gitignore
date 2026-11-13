@@ -34,3 +34,12 @@ nashorn_code_cache
 dev_null
 .vscode
 .opencode
+
+# End-to-end test campaign: what a run writes, the two S16 files over 10 MB that
+# make-large-files.sh writes on demand (and its leftovers if killed), the generator's virtualenv.
+test-campaign/results/
+test-campaign/S16-too-large/too-large-00.txt
+test-campaign/S16-too-large/too-large-01.txt
+test-campaign/S16-too-large/*.tmp.*
+test-campaign/_generator/.venv/
+__pycache__/

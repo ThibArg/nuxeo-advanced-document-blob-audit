@@ -1,0 +1,4 @@
+Shared procedure
+Step 1: open the ticket
+Step 2: assign an owner
+Step 3: close the ticket

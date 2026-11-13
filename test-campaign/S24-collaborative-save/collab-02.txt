@@ -1,0 +1,4 @@
+Shared procedure
+Step 1: open the ticket
+Step 2: assign an owner within one day
+Step 3: close the ticket and notify

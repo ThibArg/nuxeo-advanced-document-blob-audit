@@ -1,0 +1,8 @@
+id,name,city,amount
+1,Alpha Corp,Paris,1200
+2,Beta Ltd,London,800
+3,Gamma Inc,Berlin,1500
+4,Delta SA,Madrid,600
+5,Epsilon AG,Zurich,2100
+6,Zeta BV,Amsterdam,900
+7,Eta SpA,Rome,1100

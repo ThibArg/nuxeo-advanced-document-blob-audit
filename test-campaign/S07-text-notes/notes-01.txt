@@ -1,0 +1,9 @@
+Project kickoff - meeting notes
+Date: 2026-11-02
+Attendees: product, engineering, support, sales
+Decision: the beta starts on December 1
+Decision: the pricing page is updated before the beta
+Action: engineering prepares the staging and demo environments
+Action: support writes the FAQ
+Action: sales lists the pilot customers
+Next meeting: 2026-11-09

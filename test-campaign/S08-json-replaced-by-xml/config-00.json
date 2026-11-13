@@ -1,0 +1,15 @@
+{
+  "service": "invoice-api",
+  "version": "2.4.1",
+  "port": 8080,
+  "database": {
+    "host": "db.internal",
+    "pool": 10,
+    "timeoutSeconds": 30
+  },
+  "features": {
+    "pdfExport": true,
+    "emailNotifications": false
+  },
+  "logLevel": "INFO"
+}

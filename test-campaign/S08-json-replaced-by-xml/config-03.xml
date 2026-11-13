@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <service>invoice-api</service>
+  <version>2.4.1</version>
+  <port>9090</port>
+  <database>
+    <host>db.internal</host>
+    <pool>20</pool>
+    <timeoutSeconds>30</timeoutSeconds>
+  </database>
+  <features>
+    <pdfExport>true</pdfExport>
+    <emailNotifications>false</emailNotifications>
+  </features>
+  <logLevel>DEBUG</logLevel>
+</config>

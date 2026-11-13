@@ -1,0 +1,5 @@
+Attachment alpha
+Supplier: Acme
+Contract: 2026-118
+Amount: 12000 EUR
+Payment: 30 days

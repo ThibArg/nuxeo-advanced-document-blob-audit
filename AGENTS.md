@@ -2,7 +2,8 @@
 
 Working notes for AI agents picking this repository up. Read this before touching the code.
 Documentation homes: `README.md` for users and administrators, `docs/DESIGN.md` for the *why*,
-this file for the rules to keep — each pointing to the section of `docs/DESIGN.md` that explains it.
+this file for the rules to keep — each pointing to the section of `docs/DESIGN.md` that explains it —
+and `test-campaign/` for the end-to-end expectations.
 
 ## What this plugin does
 
@@ -67,6 +68,12 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
 - `nuxeo-advanced-document-blob-audit-package/` — the marketplace package (the bundle only).
 - `docs/DESIGN.md` — design notes. `README-Summary/` — two HTML overviews, maintained by hand: mirror
   any user-visible change there.
+- `test-campaign/` — the end-to-end campaign against a running Nuxeo, outside the Maven build:
+  `runbook.md` (by hand, Web UI), `runbook-by-agents.md` (an agent, over the REST API) and its
+  `agent/blobaudit-helpers.sh`, the configuration to deploy (`nuxeo-config/`), one folder of test files
+  per scenario (`S01-…` to `S28-…`), `MANIFEST.tsv` (size, SHA-256 and upload mime type of each file),
+  and `_generator/` (the Python scripts that produced them). Git ignores `results/` (what an agent run
+  writes) and the two S16 files over 10 MB, which `_generator/make-large-files.sh` writes on demand.
 
 **Two i18n sets, two consumers, not copies of one another.**
 `OSGI-INF/l10n/messages_en_US.properties` and `messages_fr_FR.properties` are **server-side**:
@@ -404,6 +411,9 @@ Repository-specific:
   operations, limitations), `docs/DESIGN.md` for the reasons, this file for the rules. A rule here
   points to its section of `docs/DESIGN.md`; a user-visible change updates the README and
   `README-Summary/`.
+- A change of what the REST API or Web UI shows (an outcome, a status, a counter, a comment, a
+  refusal) updates the expectations of `test-campaign/runbook.md` **and** `runbook-by-agents.md` in
+  the same commit: they state the same expected results.
 - `AGENTS.md` is **not** in `.gitignore` for this repository, so it is pushed. Keep it free of any
   sensitive information: no login, password, key, e-mail address, personal name or local path.
 
@@ -419,8 +429,8 @@ mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
 `-o` only works once the local Maven repository is warm (the build resolves against the Nuxeo
 public repository). `nuxeo.skip.enforcer` is `true` in the parent pom, so the Nuxeo enforcer rules do
 not run: rely on `dependency:analyze` instead, whose "Used undeclared dependencies" must stay empty.
-Do not run the build when a commit only touches `README.md`, `AGENTS.md`, `docs/`, `README-Summary/`
-or `.gitignore`.
+Do not run the build when a commit only touches `README.md`, `AGENTS.md`, `docs/`, `README-Summary/`,
+`test-campaign/` or `.gitignore`.
 
 Tests needing no Nuxeo runtime (pure JUnit, about 20 seconds):
 
@@ -462,6 +472,13 @@ unmeasured), `BlobAuditFeature`.
 
 What each test class guards is named by the invariants above. When a change adds or removes tests,
 update the count on the first line of this section.
+
+**End-to-end campaign** (`test-campaign/`): needs a deployed package, so it is run on request only,
+never as part of a change. An agent follows `runbook-by-agents.md` from the root of the repository;
+credentials come from environment variables, never from a file of the repository. Keep the test files
+byte-stable: `MANIFEST.tsv` records their SHA-256, and regenerating them with `_generator/` rewrites the
+LibreOffice ones with new bytes. `make-large-files.sh` and `s16()` of `gen_text.py` write the same two
+files: change them together.
 
 ## Deployment target
 
@@ -564,4 +581,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 109.
+`git log --grep '^Item '`. Next free number: 110.

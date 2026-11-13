@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  Blob audit - configuration for the manual / agent runbooks. NOT for production.
+
+  Copy into the Nuxeo container as /opt/nuxeo/server/nxserver/config/blobaudit-runbook-config.xml
+  (the name must end with -config.xml), then restart Nuxeo. For example, in docker-compose.yml:
+
+    nuxeo:
+      volumes:
+        - ./blobaudit-runbook-config.xml:/opt/nuxeo/server/nxserver/config/blobaudit-runbook-config.xml:ro
+
+  What it sets, on top of the shipped defaults (maxBlobSize 10 MB, maxLines 10000,
+  maxDiffEntries 5000, maxDiffChars 4194304, maxValueLength 4096 are kept on purpose: the edge case
+  files are sized against them):
+    - the feature on;
+    - File documents only (a Picture is out of scope, see scenario S25);
+    - every blob xpath, so that attachments (files:files) are watched too (scenario S23);
+    - the image inventory on (scenarios S02, S04, S05, S06);
+    - the auditors group: "auditors".
+-->
+<component name="org.nuxeo.audit.advanced.blob.runbook.config">
+
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <docTypes>
+        <docType>File</docType>
+      </docTypes>
+      <xpaths>
+        <xpath>*</xpath>
+      </xpaths>
+      <imageInventory>true</imageInventory>
+    </config>
+  </extension>
+
+  <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+    <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">auditors</property>
+  </extension>
+
+</component>
