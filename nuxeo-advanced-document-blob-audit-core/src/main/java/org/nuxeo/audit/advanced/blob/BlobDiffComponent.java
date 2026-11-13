@@ -318,6 +318,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      * file a real incident as {@code skippedUnsupportedType} - a status {@code BlobDiff.Retry}
      * refuses, which would make the failure permanent and invisible. Raising is what lets the work
      * record {@code error}, through its {@code catch (RuntimeException)}.
+     * <p>
+     * Whatever the extractor raises reaches the caller as a {@code NuxeoException}, the one
+     * {@link BlobDiffService#diff} declares: the libraries the extractors use (POI, PDFBox) answer a
+     * malformed file with unchecked exceptions of their own, and a contributed extractor may too.
      *
      * @return the extracted content, or {@code null} if and only if no extractor handles the mime type
      * @throws NuxeoException if an extractor was found but could not read the binary
@@ -329,7 +333,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         }
         try {
             return extractor.extract(blob, getConfig().getMaxLines());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof NuxeoException nuxeo) {
+                throw nuxeo;
+            }
             throw new NuxeoException("Blob content extraction failed for mime type " + blob.getMimeType(), e);
         }
     }

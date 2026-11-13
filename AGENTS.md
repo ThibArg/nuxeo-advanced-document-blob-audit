@@ -293,7 +293,8 @@ Coverage: `TestExtractedValueBounding`, `TestSpreadsheetStreaming#testAnInflated
 
 **`BlobContentExtractor#extract` declares `throws IOException`, never wider.** A `throws Exception`
 forces `catch (Exception)`, which swallows the interruption of a WorkManager thread at shutdown. A
-non-I/O failure is a `NuxeoException`. `BlobDiffComponent#resolve` catches
+non-I/O failure is a `NuxeoException`; `BlobDiffComponent#extract` wraps whatever else an extractor
+raises into one, the exception `BlobDiffService#diff` declares. `BlobDiffComponent#resolve` catches
 `ReflectiveOperationException | RuntimeException`: a bad contribution costs one extractor. Why:
 `docs/DESIGN.md` §6.
 
@@ -395,7 +396,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 329 tests, 27 test classes
+mvn -o install                                     # full build: 331 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -548,4 +549,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 103.
+`git log --grep '^Item '`. Next free number: 104.

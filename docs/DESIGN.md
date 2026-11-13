@@ -404,7 +404,11 @@ characters and why the smaller side.
 `throws IOException` and nothing wider. A `throws Exception` would force `catch (Exception)` on the
 call sites, which also catches `InterruptedException`: the blob re-read runs on a WorkManager thread
 that *is* interrupted at shutdown, and would file a bogus `error` diff instead of letting the cancel
-through. An extractor reporting a non-I/O failure throws a `NuxeoException`.
+through. An extractor reporting a non-I/O failure throws a `NuxeoException`; a malformed file is an
+I/O failure (the built-in OOXML readers turn a malformed index into the same `IOException` as a
+malformed part). `BlobDiffComponent#extract` hands the caller a `NuxeoException` whatever the
+extractor raised, the one `BlobDiffService#diff` declares: POI and PDFBox answer some malformed files
+with unchecked exceptions of their own (`TestBlobDiffService#testAnUncheckedExtractionFailureReachesTheCallerAsANuxeoException`).
 `BlobDiffComponent#resolve` catches `ReflectiveOperationException | RuntimeException` around the
 instantiation and `init`: a typo in a contributed property costs that extractor, not the start of the
 component. The lowest `order` whose mime types accept the blob wins; `*` and `type/*` are accepted,

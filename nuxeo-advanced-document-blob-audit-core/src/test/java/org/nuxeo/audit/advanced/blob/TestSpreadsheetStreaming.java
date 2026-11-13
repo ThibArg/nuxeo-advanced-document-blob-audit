@@ -17,6 +17,7 @@ package org.nuxeo.audit.advanced.blob;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.XLSX_MIME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
@@ -378,5 +379,29 @@ public class TestSpreadsheetStreaming {
         assertEquals("the cached result", ContentLine.compact(cached, max), cells.get("Data!C1"));
         assertTrue("reading 3 cells of " + length + " characters allocated " + allocated + " bytes",
                 allocated < 16L * 1024 * 1024);
+    }
+
+    /**
+     * Item 103: a malformed index raised a raw {@code NumberFormatException} or
+     * {@code IllegalStateException}, out of the {@code IOException} the extractor declares. Each one
+     * now makes the workbook unreadable, like any malformed part.
+     */
+    @Test
+    public void testAMalformedIndexMakesTheWorkbookUnreadable() throws Exception {
+        String rows = "<worksheet xmlns=\"" + SHEET_NAMESPACE + "\"><sheetData>%s</sheetData></worksheet>";
+        Map<String, String> sheets = Map.of( //
+                "a shared string index that is not a number",
+                "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>first</v></c></row>", //
+                "a shared string the table does not hold", "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>7</v></c></row>", //
+                "a style index that is not a number", "<row r=\"1\"><c r=\"A1\" s=\"bold\"><v>1</v></c></row>", //
+                "a row number that is not a number", "<row r=\"one\"><c r=\"A1\"><v>1</v></c></row>");
+
+        for (Map.Entry<String, String> sheet : sheets.entrySet()) {
+            Blob blob = onDisk(workbook(rows.formatted(sheet.getValue()), "malformed.xlsx"));
+
+            IOException e = assertThrows(sheet.getKey(), IOException.class,
+                    () -> new SpreadsheetExtractor().extract(blob, MAX_LINES));
+            assertTrue(sheet.getKey() + ": " + e, e.getMessage().startsWith("Not a readable"));
+        }
     }
 }

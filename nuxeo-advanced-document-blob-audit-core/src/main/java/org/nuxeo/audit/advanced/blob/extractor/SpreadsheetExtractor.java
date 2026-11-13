@@ -420,13 +420,14 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
          * Returns the shared string at the index.
          *
          * @return the string, or {@code null} when the budget left it unread
+         * @throws SAXException if the table holds no such string: the workbook is corrupt
          */
-        protected String get(int index) {
+        protected String get(int index) throws SAXException {
             if (index >= 0 && index < strings.size()) {
                 return strings.get(index);
             }
             if (index < 0 || !cut) {
-                throw new IllegalStateException("No shared string " + index + " among " + strings.size());
+                throw new SAXException("No shared string " + index + " among " + strings.size());
             }
             return null;
         }
@@ -567,11 +568,12 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
         }
 
         @Override
-        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+        public void startElement(String uri, String localName, String qName, Attributes attributes)
+                throws SAXException {
             switch (localName) {
                 case "row" -> {
                     String r = attributes.getValue("r");
-                    row = r == null ? row + 1 : Integer.parseInt(r) - 1;
+                    row = r == null ? row + 1 : index(r, "row number") - 1;
                     nextColumn = 0;
                 }
                 case "c" -> startCell(attributes);
@@ -731,14 +733,29 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
          * left unread, the way {@code maxLines} does.
          */
         protected String sharedString(String raw) throws SAXException {
-            String text = strings.get(Integer.parseInt(raw.trim()));
+            String text = strings.get(index(raw, "shared string index"));
             if (text == null) {
                 throw new OoxmlPackages.Stop();
             }
             return text;
         }
 
-        protected String number(String raw) {
+        /**
+         * Parses an index the sheet writes as an attribute or a value.
+         *
+         * @throws SAXException if it is not a number, which makes the workbook unreadable, reported
+         *             like any malformed part rather than as an unchecked exception; the message names
+         *             no sheet, since the work logs it and a sheet name is content of the workbook
+         */
+        protected int index(String raw, String what) throws SAXException {
+            try {
+                return Integer.parseInt(raw.trim());
+            } catch (NumberFormatException e) {
+                throw new SAXException("Invalid " + what, e);
+            }
+        }
+
+        protected String number(String raw) throws SAXException {
             double number;
             try {
                 number = Double.parseDouble(raw);
@@ -748,7 +765,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             XSSFCellStyle cellStyle = null;
             if (styles != null) {
                 if (style != null) {
-                    cellStyle = styles.getStyleAt(Integer.parseInt(style));
+                    // An index past the table gives null: the General format.
+                    cellStyle = styles.getStyleAt(index(style, "style index"));
                 } else if (styles.getNumCellStyles() > 0) {
                     cellStyle = styles.getStyleAt(0);
                 }

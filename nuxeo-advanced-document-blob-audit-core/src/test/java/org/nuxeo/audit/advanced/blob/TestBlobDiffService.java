@@ -210,6 +210,33 @@ public class TestBlobDiffService {
                 () -> blobDiffService.diff(corrupted, corrupted));
     }
 
+    /**
+     * Item 103: an unchecked exception of an extractor - a library failing on a malformed file -
+     * escaped {@code BlobDiffService#diff}, which declares {@code NuxeoException}. It is now wrapped,
+     * and a {@code NuxeoException} of the extractor reaches the caller as it is.
+     */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-txprobe-contrib.xml")
+    public void testAnUncheckedExtractionFailureReachesTheCallerAsANuxeoException() throws Exception {
+        Blob text = textBlob("a\nb", "text/plain", "f.txt");
+        var libraryFailure = new IllegalStateException("library failure");
+        var extractorFailure = new NuxeoException("extractor failure");
+        try {
+            TransactionProbeExtractor.reset(() -> {
+                throw libraryFailure;
+            });
+            NuxeoException wrapped = assertThrows(NuxeoException.class, () -> blobDiffService.diff(text, text));
+            assertEquals(libraryFailure, wrapped.getCause());
+
+            TransactionProbeExtractor.reset(() -> {
+                throw extractorFailure;
+            });
+            assertEquals(extractorFailure, assertThrows(NuxeoException.class, () -> blobDiffService.diff(text, text)));
+        } finally {
+            TransactionProbeExtractor.reset(null);
+        }
+    }
+
     /* ------------------------------------------------------------- guardrails */
 
     @Test
