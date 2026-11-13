@@ -106,11 +106,13 @@ public class BlobDiffPurgeOp {
                 session.getRepositoryName()).build();
         String commandId;
         try {
-            // submit(), not submitTransactional(): the latter defers the real submission - and with
-            // it the exclusivity check and the parameter validation - to beforeCompletion, so a
-            // second concurrent purge would surface as a commit failure instead of the readable
-            // error below, and the returned id would not be queryable until commit. This operation
-            // writes nothing to the repository, so there is no work to undo if it does not commit.
+            /*
+             * submit(), not submitTransactional(): the latter defers the real submission - and with it
+             * the exclusivity check and the parameter validation - to beforeCompletion, so a second
+             * concurrent purge would surface as a commit failure instead of the readable error below,
+             * and the returned id would not be queryable until commit. This operation writes nothing to
+             * the repository, so there is no work to undo if it does not commit.
+             */
             commandId = Framework.getService(BulkService.class).submit(command);
         } catch (ConcurrentUpdateException e) {
             // 409, not the default 500: a purge already running is a legitimate, transient refusal

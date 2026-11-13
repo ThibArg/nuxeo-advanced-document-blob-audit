@@ -49,6 +49,7 @@ import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.bulk.BulkService;
 import org.nuxeo.ecm.core.bulk.CoreBulkFeature;
+import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.test.CoreFeature;
 import org.nuxeo.lib.stream.log.LogManager;
 import org.nuxeo.lib.stream.log.Name;
@@ -134,7 +135,7 @@ public class TestBlobDiffPurgeAction {
     }
 
     protected List<DocumentModel> diffsOf(String sourceId) {
-        return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + sourceId + "'");
+        return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(sourceId));
     }
 
     /** Submits a purge and waits for the bulk command to complete. Returns the final status. */

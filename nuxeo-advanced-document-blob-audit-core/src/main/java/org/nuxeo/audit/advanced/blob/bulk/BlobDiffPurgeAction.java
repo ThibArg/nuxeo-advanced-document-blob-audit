@@ -79,6 +79,12 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
                        .build();
     }
 
+    /**
+     * Computation of the {@code blobDiffPurge} action: removes the {@code BlobDiff} documents of each
+     * batch and publishes the exact deletion count.
+     *
+     * @since 2025.1
+     */
     public static class BlobDiffPurgeComputation extends AbstractBulkComputation {
 
         private static final Logger log = LogManager.getLogger(BlobDiffPurgeComputation.class);

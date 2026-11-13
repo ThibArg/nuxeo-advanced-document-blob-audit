@@ -32,7 +32,7 @@ import org.nuxeo.runtime.services.config.ConfigurationService;
  *
  * @since 2025.1
  */
-public final class BlobDiffAccess {
+public class BlobDiffAccess {
 
     private BlobDiffAccess() {
         // utility class

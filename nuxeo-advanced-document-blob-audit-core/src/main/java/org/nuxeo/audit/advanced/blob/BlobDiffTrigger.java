@@ -28,8 +28,12 @@ import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
 
-/** Cheap synchronous decision point for a diff between two persisted Nuxeo versions. */
-public final class BlobDiffTrigger {
+/**
+ * Cheap synchronous decision point for a diff between two persisted Nuxeo versions.
+ *
+ * @since 2025.1
+ */
+public class BlobDiffTrigger {
 
     private static final Logger log = LogManager.getLogger(BlobDiffTrigger.class);
 

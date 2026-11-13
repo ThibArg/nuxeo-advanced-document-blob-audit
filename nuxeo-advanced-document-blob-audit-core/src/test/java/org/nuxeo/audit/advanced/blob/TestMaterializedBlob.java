@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -26,7 +27,6 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -62,7 +62,7 @@ import org.nuxeo.runtime.test.runner.RuntimeFeature;
 @Features(RuntimeFeature.class)
 public class TestMaterializedBlob {
 
-    protected static final byte[] CONTENT = "hello".getBytes(StandardCharsets.UTF_8);
+    protected static final byte[] CONTENT = "hello".getBytes(UTF_8);
 
     /**
      * Temporary files built by the tests, deleted after each one.
@@ -81,7 +81,7 @@ public class TestMaterializedBlob {
     }
 
     protected Blob remoteLike(String filename) {
-        Blob blob = new ByteArrayBlob(CONTENT, "text/plain", StandardCharsets.UTF_8.name());
+        Blob blob = new ByteArrayBlob(CONTENT, "text/plain", UTF_8.name());
         blob.setFilename(filename);
         blob.setDigest("cafebabe");
         return blob;
@@ -95,7 +95,7 @@ public class TestMaterializedBlob {
             assertNotNull("a non file-backed blob must be materialised", file);
             assertEquals(file, materialized.blob().getFile());
             assertTrue(file.exists());
-            assertEquals("hello", new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+            assertEquals("hello", new String(Files.readAllBytes(file.toPath()), UTF_8));
         }
     }
 
@@ -106,7 +106,7 @@ public class TestMaterializedBlob {
             Blob local = materialized.blob();
 
             assertEquals("text/plain", local.getMimeType());
-            assertEquals(StandardCharsets.UTF_8.name(), local.getEncoding());
+            assertEquals(UTF_8.name(), local.getEncoding());
             assertEquals("f.txt", local.getFilename());
             assertEquals("cafebabe", local.getDigest());
         }

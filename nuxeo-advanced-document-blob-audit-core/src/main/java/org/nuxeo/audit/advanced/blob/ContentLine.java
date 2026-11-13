@@ -15,7 +15,8 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
-import java.nio.charset.StandardCharsets;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -66,7 +67,7 @@ public record ContentLine(String key, String value) {
         if (value == null || value.length() <= maxValueLength) {
             return value;
         }
-        byte[] sha256 = sha256().digest(value.getBytes(StandardCharsets.UTF_8));
+        byte[] sha256 = sha256().digest(value.getBytes(UTF_8));
         return compacted(value, value.length(), sha256, maxValueLength);
     }
 

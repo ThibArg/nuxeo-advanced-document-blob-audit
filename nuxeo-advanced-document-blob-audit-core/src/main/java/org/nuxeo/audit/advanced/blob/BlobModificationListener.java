@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.lang.Boolean.TRUE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.AUDIT_CATEGORY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EVENT_BLOB_MODIFIED;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.EXT_CORRELATION_ID;
@@ -60,6 +61,8 @@ import org.nuxeo.runtime.api.Framework;
  * fact rather than a convention.
  * <p>
  * <b>Disabling.</b> See {@link #DISABLE_BLOB_DIFF_LISTENER} and {@link #runDisabled(Runnable)}.
+ *
+ * @since 2025.1
  */
 public class BlobModificationListener implements EventListener {
 
@@ -149,7 +152,7 @@ public class BlobModificationListener implements EventListener {
      */
     public static <T> T runDisabled(Supplier<T> supplier) {
         Boolean previous = DISABLED.get();
-        DISABLED.set(Boolean.TRUE);
+        DISABLED.set(TRUE);
         try {
             return supplier.get();
         } finally {
@@ -167,7 +170,7 @@ public class BlobModificationListener implements EventListener {
      * @since 2025.1
      */
     public static boolean isDisabledForThread() {
-        return Boolean.TRUE.equals(DISABLED.get());
+        return TRUE.equals(DISABLED.get());
     }
 
     @Override
@@ -179,7 +182,7 @@ public class BlobModificationListener implements EventListener {
         if (!aboutToCheckIn && !DocumentEventTypes.DOCUMENT_CHECKEDIN.equals(event.getName())) {
             return;
         }
-        if (isDisabledForThread() || Boolean.TRUE.equals(context.getProperty(DISABLE_BLOB_DIFF_LISTENER))) {
+        if (isDisabledForThread() || TRUE.equals(context.getProperty(DISABLE_BLOB_DIFF_LISTENER))) {
             // Explicitly muted by the caller: no audit entry, no work, no BlobDiff.
             return;
         }

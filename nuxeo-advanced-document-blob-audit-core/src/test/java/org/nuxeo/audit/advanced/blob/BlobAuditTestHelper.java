@@ -15,16 +15,17 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Collections.synchronizedList;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,7 +81,7 @@ public class BlobAuditTestHelper {
      *
      * @since 2025.1
      */
-    protected static final List<File> TEMP_FILES = Collections.synchronizedList(new ArrayList<>());
+    protected static final List<File> TEMP_FILES = synchronizedList(new ArrayList<>());
 
     public static Blob blob(byte[] bytes, String mimeType, String filename) throws IOException {
         Blob blob = new ByteArrayBlob(bytes);
@@ -90,8 +91,8 @@ public class BlobAuditTestHelper {
     }
 
     public static Blob textBlob(String content, String mimeType, String filename) throws IOException {
-        Blob blob = new ByteArrayBlob(content.getBytes(StandardCharsets.UTF_8), mimeType,
-                StandardCharsets.UTF_8.name());
+        Blob blob = new ByteArrayBlob(content.getBytes(UTF_8), mimeType,
+                UTF_8.name());
         blob.setFilename(filename);
         return blob;
     }
@@ -175,8 +176,8 @@ public class BlobAuditTestHelper {
             while ((entry = in.getNextEntry()) != null) {
                 rewritten.putNextEntry(new ZipEntry(entry.getName()));
                 if (partName.equals(entry.getName())) {
-                    String xml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                    rewritten.write(edit.apply(xml).getBytes(StandardCharsets.UTF_8));
+                    String xml = new String(in.readAllBytes(), UTF_8);
+                    rewritten.write(edit.apply(xml).getBytes(UTF_8));
                 } else {
                     in.transferTo(rewritten);
                 }

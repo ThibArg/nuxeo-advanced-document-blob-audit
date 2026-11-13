@@ -216,7 +216,9 @@
         }
         this.$.cleanOp.params = {};
         this.$.cleanOp.execute()
-          .catch(function () { /* the folders are harmless, and the next purge will clean them */ })
+          .catch(function () {
+            // the folders are harmless, and the next purge will clean them
+          })
           .then(function () {
             this.fire('notify', { message: message, dismissible: !!(errors || skipped || limited) });
             this._close(true);

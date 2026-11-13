@@ -15,8 +15,9 @@
  */
 package org.nuxeo.audit.advanced.blob.io;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -34,7 +35,7 @@ import org.nuxeo.ecm.core.api.Blob;
  *
  * @since 2025.1
  */
-public final class BlobCharsets {
+public class BlobCharsets {
 
     private static final Logger log = LogManager.getLogger(BlobCharsets.class);
 
@@ -50,7 +51,7 @@ public final class BlobCharsets {
     public static Charset of(Blob blob) {
         String encoding = blob == null ? null : blob.getEncoding();
         if (encoding == null || encoding.isBlank()) {
-            return StandardCharsets.UTF_8;
+            return UTF_8;
         }
         try {
             return Charset.forName(encoding.trim());
@@ -58,7 +59,7 @@ public final class BlobCharsets {
             // covers both IllegalCharsetNameException and UnsupportedCharsetException
             log.warn("Blob {} declares an unusable encoding '{}', falling back to UTF-8", blob.getFilename(),
                     encoding);
-            return StandardCharsets.UTF_8;
+            return UTF_8;
         }
     }
 }

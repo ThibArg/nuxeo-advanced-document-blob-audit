@@ -37,9 +37,10 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
+import org.nuxeo.ecm.core.query.sql.NXQL;
+import org.nuxeo.ecm.core.schema.DocumentType;
 import org.nuxeo.ecm.core.schema.FacetNames;
 import org.nuxeo.ecm.core.schema.SchemaManager;
-import org.nuxeo.ecm.core.schema.DocumentType;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
@@ -140,7 +141,7 @@ public class TestBlobDiffHardening {
         newVersionWithBlob(doc, "line 1 modified");
 
         List<DocumentModel> diffs = session.query(
-                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId() + "'");
+                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(doc.getId()));
         assertEquals(1, diffs.size());
         String correlationId = (String) diffs.get(0).getPropertyValue(BlobAuditConstants.XP_CORRELATION_ID);
 
@@ -157,7 +158,7 @@ public class TestBlobDiffHardening {
         txFeature.nextTransaction();
 
         assertEquals("The replayed work must not duplicate the BlobDiff", 1, session
-                .query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId() + "'").size());
+                .query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(doc.getId())).size());
     }
 
     /* ------------------------------------------------------ work transactions */
@@ -181,7 +182,7 @@ public class TestBlobDiffHardening {
         assertEquals("both sides must be extracted with no transaction open", List.of(false, false),
                 TransactionProbeExtractor.transactionActive());
         List<DocumentModel> diffs = session.query(
-                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId() + "'");
+                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(doc.getId()));
         assertEquals(1, diffs.size());
         assertEquals(BlobAuditConstants.STATUS_OK, diffs.get(0).getPropertyValue(BlobAuditConstants.XP_STATUS));
     }
@@ -225,7 +226,8 @@ public class TestBlobDiffHardening {
         assertEquals("the hook must have run during the extraction", 2,
                 TransactionProbeExtractor.transactionActive().size());
         assertEquals("the diff recorded during the extraction must not be duplicated", 1,
-                session.query("SELECT * FROM BlobDiff WHERE bdiff:correlationId = '" + correlationId + "'").size());
+                session.query("SELECT * FROM BlobDiff WHERE bdiff:correlationId = "
+                        + NXQL.escapeString(correlationId)).size());
     }
 
     /** Checks in a new version holding the given blob, and returns it as stored. */
@@ -254,8 +256,9 @@ public class TestBlobDiffHardening {
             newVersionWithBlob(doc, "v" + i);
         }
 
-        List<DocumentModel> diffs = session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + doc.getId()
-                + "' ORDER BY bdiff:date");
+        List<DocumentModel> diffs = session.query(
+                "SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(doc.getId())
+                        + " ORDER BY bdiff:date");
         // 6 versions, so 5 consecutive pairs: the first version has no predecessor to compare with,
         // and no cross pair is ever produced.
         assertEquals(5, diffs.size());

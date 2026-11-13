@@ -47,14 +47,14 @@ import org.xml.sax.XMLReader;
  *
  * @since 2025.1
  */
-public final class OoxmlPackages {
+public class OoxmlPackages {
 
     /**
      * Ends a parse once the handler has what it needs.
      *
      * @since 2025.1
      */
-    public static final class Stop extends SAXException {
+    public static class Stop extends SAXException {
 
         private static final long serialVersionUID = 1L;
 
@@ -170,7 +170,7 @@ public final class OoxmlPackages {
         return e.getException() instanceof IOException io ? io : new IOException("Not a readable " + what, e);
     }
 
-    private static PackagePart related(PackagePart source, PackageRelationship relationship) {
+    protected static PackagePart related(PackagePart source, PackageRelationship relationship) {
         if (relationship.getTargetMode() == TargetMode.EXTERNAL) {
             return null;
         }

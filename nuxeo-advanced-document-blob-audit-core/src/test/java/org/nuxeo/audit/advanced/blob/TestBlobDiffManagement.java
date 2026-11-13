@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -25,10 +26,10 @@ import static org.junit.Assert.fail;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 
 import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -63,6 +64,7 @@ import org.nuxeo.ecm.core.api.trash.TrashService;
 import org.nuxeo.ecm.core.blob.ManagedBlob;
 import org.nuxeo.ecm.core.io.registry.MarshallerHelper;
 import org.nuxeo.ecm.core.io.registry.context.RenderingContext;
+import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.test.CoreFeature;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.runtime.api.Framework;
@@ -133,13 +135,13 @@ public class TestBlobDiffManagement {
         return calendar.getTime();
     }
 
-    protected Object run(CoreSession s, String operation, Object input, java.util.Map<String, ?> params)
+    protected Object run(CoreSession s, String operation, Object input, Map<String, ?> params)
             throws Exception {
         try (OperationContext ctx = new OperationContext(s)) {
             if (input != null) {
                 ctx.setInput(input);
             }
-            return automationService.run(ctx, operation, params == null ? java.util.Map.of() : params);
+            return automationService.run(ctx, operation, params == null ? Map.of() : params);
         }
     }
 
@@ -163,7 +165,7 @@ public class TestBlobDiffManagement {
     }
 
     protected List<DocumentModel> diffsOf(String sourceId) {
-        return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = '" + sourceId + "'");
+        return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(sourceId));
     }
 
     /* ------------------------------------------------------------ binary keys */
@@ -231,7 +233,7 @@ public class TestBlobDiffManagement {
         DocumentModel d = diff(source, daysAgo(10), BlobAuditConstants.STATUS_OK, null, null);
         txFeature.nextTransaction();
 
-        assertRefusedForJdoe(BlobDiffPurgeOp.ID, null, java.util.Map.of("before", Calendar.getInstance()));
+        assertRefusedForJdoe(BlobDiffPurgeOp.ID, null, Map.of("before", Calendar.getInstance()));
         // jdoe cannot even read the diff; the auditor check is performed before any access
         assertRefusedForJdoe(BlobDiffDeleteOp.ID, d, null);
         assertRefusedForJdoe(BlobDiffRetryOp.ID, d, null);
@@ -241,7 +243,7 @@ public class TestBlobDiffManagement {
         assertTrue(session.exists(source.getRef()));
     }
 
-    protected void assertRefusedForJdoe(String operationId, Object input, java.util.Map<String, ?> params) {
+    protected void assertRefusedForJdoe(String operationId, Object input, Map<String, ?> params) {
         restartTransaction();
         try (CloseableCoreSession jdoe = coreFeature.openCoreSession("jdoe")) {
             run(jdoe, operationId, input, params);
@@ -747,7 +749,7 @@ public class TestBlobDiffManagement {
 
     /** An .xlsx by mime type and filename only: the extractor is found, then fails on the bytes. */
     protected Blob corruptXlsx(String content) throws Exception {
-        return BlobAuditTestHelper.blob(content.getBytes(StandardCharsets.UTF_8), BlobAuditTestHelper.XLSX_MIME,
+        return BlobAuditTestHelper.blob(content.getBytes(UTF_8), BlobAuditTestHelper.XLSX_MIME,
                 "corrupt.xlsx");
     }
 

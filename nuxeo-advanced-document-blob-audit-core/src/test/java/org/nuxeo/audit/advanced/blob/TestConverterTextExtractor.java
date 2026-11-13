@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -23,7 +24,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.Writer;
 import java.lang.management.ManagementFactory;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -215,12 +215,12 @@ public class TestConverterTextExtractor {
     public void testTheConverterOutputIsReadOnlyUpToMaxLines() throws Exception {
         File file = Framework.createTempFile("blobaudit-test-", ".txt");
         try {
-            try (Writer writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
+            try (Writer writer = Files.newBufferedWriter(file.toPath(), UTF_8)) {
                 for (int i = 0; i < 200_000; i++) {
                     writer.write("Line " + i + " of a very long converted document\n");
                 }
             }
-            Blob blob = new FileBlob(file, "text/plain", StandardCharsets.UTF_8.name(), "long.txt", null);
+            Blob blob = new FileBlob(file, "text/plain", UTF_8.name(), "long.txt", null);
             ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
             long before = threads.getCurrentThreadAllocatedBytes();
 

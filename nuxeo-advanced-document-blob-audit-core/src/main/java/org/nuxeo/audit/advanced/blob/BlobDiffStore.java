@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_NAME;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_TITLE;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.CONTAINER_TYPE;
@@ -29,7 +30,6 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_SUMMARY;
 import static org.nuxeo.audit.advanced.blob.BlobAuditConstants.XP_TRUNCATED;
 
 import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -59,7 +59,7 @@ import org.nuxeo.ecm.core.api.security.impl.ACPImpl;
  *
  * @since 2025.1
  */
-public final class BlobDiffStore {
+public class BlobDiffStore {
 
     private static final Logger log = LogManager.getLogger(BlobDiffStore.class);
 
@@ -259,7 +259,7 @@ public final class BlobDiffStore {
             diffDoc.setPropertyValue(BlobAuditConstants.XP_SIMILARITY, result.similarity());
             if (STATUS_OK.equals(status) && !result.isEmpty()) {
                 // A blob, not a string: it stays out of the SQL/Mongo record and out of full-text.
-                Blob diffBlob = Blobs.createBlob(result.unified(), "text/plain", StandardCharsets.UTF_8.name(),
+                Blob diffBlob = Blobs.createBlob(result.unified(), "text/plain", UTF_8.name(),
                         name + ".diff.txt");
                 diffDoc.setPropertyValue(XP_DIFF_BLOB, (Serializable) diffBlob);
             }

@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.lang.Boolean.TRUE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -36,7 +37,7 @@ public class TestBlobDiffConfigDescriptor {
     @Test
     public void testImageInventoryCanBeTurnedOn() {
         BlobDiffConfigDescriptor config = new BlobDiffConfigDescriptor();
-        config.imageInventory = Boolean.TRUE;
+        config.imageInventory = TRUE;
         assertTrue(config.isImageInventory());
     }
 
@@ -59,7 +60,7 @@ public class TestBlobDiffConfigDescriptor {
         shipped.enabled = true;
         shipped.maxBlobSize = 2048L;
         shipped.maxLines = 50;
-        shipped.imageInventory = Boolean.TRUE;
+        shipped.imageInventory = TRUE;
         shipped.xpaths = new ArrayList<>(List.of("file:content", "files:files/*/file"));
 
         BlobDiffConfigDescriptor override = new BlobDiffConfigDescriptor();

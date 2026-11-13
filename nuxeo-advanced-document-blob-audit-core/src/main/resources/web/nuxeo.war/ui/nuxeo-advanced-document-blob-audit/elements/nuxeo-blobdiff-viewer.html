@@ -57,11 +57,9 @@
         _lines: { type: Array, value: function () { return []; } },
         _visible: { type: Array, value: function () { return []; } }
       },
-      /*
-        A request still in flight belongs to the previous diff: it is aborted, and whatever it
-        returns is ignored, so its lines can never be rendered under the metadata of the new one.
-        Same rule as nuxeo-resource, which aborts superseded requests.
-      */
+      // A request still in flight belongs to the previous diff: it is aborted, and whatever it
+      // returns is ignored, so its lines can never be rendered under the metadata of the new one.
+      // Same rule as nuxeo-resource, which aborts superseded requests.
       _load: function (url) {
         if (this._controller) {
           this._controller.abort();

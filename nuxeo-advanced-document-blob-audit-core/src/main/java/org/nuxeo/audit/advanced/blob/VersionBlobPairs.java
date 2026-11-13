@@ -44,7 +44,7 @@ import org.nuxeo.runtime.api.Framework;
  *
  * @since 2025.1
  */
-public final class VersionBlobPairs {
+public class VersionBlobPairs {
 
     private static final Logger log = LogManager.getLogger(VersionBlobPairs.class);
 

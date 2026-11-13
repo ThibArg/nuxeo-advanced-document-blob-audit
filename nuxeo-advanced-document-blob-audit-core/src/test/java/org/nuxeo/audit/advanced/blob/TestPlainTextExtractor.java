@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -24,8 +25,6 @@ import java.util.Map;
 
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor;
-import java.nio.charset.StandardCharsets;
-
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 
@@ -59,7 +58,7 @@ public class TestPlainTextExtractor {
      */
     @Test
     public void testUnknownEncodingFallsBackToUtf8() throws Exception {
-        Blob blob = new ByteArrayBlob("alpha\nbeta".getBytes(StandardCharsets.UTF_8));
+        Blob blob = new ByteArrayBlob("alpha\nbeta".getBytes(UTF_8));
         blob.setMimeType("text/plain");
         blob.setFilename("f.txt");
         blob.setEncoding("definitely-not-a-charset");
@@ -72,7 +71,7 @@ public class TestPlainTextExtractor {
     /** An encoding name that is syntactically illegal, not merely unknown. */
     @Test
     public void testIllegalEncodingNameFallsBackToUtf8() throws Exception {
-        Blob blob = new ByteArrayBlob("alpha".getBytes(StandardCharsets.UTF_8));
+        Blob blob = new ByteArrayBlob("alpha".getBytes(UTF_8));
         blob.setMimeType("text/plain");
         blob.setFilename("f.txt");
         blob.setEncoding("utf 8 !");
@@ -82,7 +81,7 @@ public class TestPlainTextExtractor {
 
     @Test
     public void testBlankEncodingFallsBackToUtf8() throws Exception {
-        Blob blob = new ByteArrayBlob("h\u00e9llo".getBytes(StandardCharsets.UTF_8));
+        Blob blob = new ByteArrayBlob("h\u00e9llo".getBytes(UTF_8));
         blob.setMimeType("text/plain");
         blob.setFilename("f.txt");
         blob.setEncoding("   ");

@@ -213,16 +213,16 @@ public class TextDiffer {
      *
      * @since 2025.1
      */
-    protected final class Body {
+    protected class Body {
 
-        private final StringBuilder text = new StringBuilder();
+        protected final StringBuilder text = new StringBuilder();
 
-        private int emitted;
+        protected int emitted;
 
-        private boolean cut;
+        protected boolean cut;
 
         /** Appends the entry if it fits; past the budget, the entry is not even rendered. */
-        void offer(Supplier<String> entry) {
+        protected void offer(Supplier<String> entry) {
             if (cut || emitted >= maxEntries) {
                 cut = true;
                 return;
@@ -238,11 +238,11 @@ public class TextDiffer {
             emitted++;
         }
 
-        boolean isCut() {
+        protected boolean isCut() {
             return cut;
         }
 
-        String text() {
+        protected String text() {
             return text.toString();
         }
     }
@@ -481,7 +481,7 @@ public class TextDiffer {
      * the cache misses on the string data, which matters on paragraphs of a few hundred characters.
      * Interning is a single O(n+m) pass, and equal ids mean equal strings by construction.
      */
-    protected static final class Alignment {
+    protected static class Alignment {
 
         protected final List<String> aValues;
 

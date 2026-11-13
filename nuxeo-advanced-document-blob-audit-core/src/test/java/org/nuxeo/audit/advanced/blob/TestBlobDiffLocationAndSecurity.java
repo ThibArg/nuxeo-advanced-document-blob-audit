@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
@@ -62,6 +63,7 @@ import org.nuxeo.ecm.core.api.security.ACP;
 import org.nuxeo.ecm.core.api.security.SecurityConstants;
 import org.nuxeo.ecm.core.api.security.impl.ACLImpl;
 import org.nuxeo.ecm.core.api.security.impl.ACPImpl;
+import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.test.CoreFeature;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.ecm.platform.query.api.PageProviderService;
@@ -187,18 +189,17 @@ public class TestBlobDiffLocationAndSecurity {
         assertEquals(1, diffs.size());
         DocumentModel diff = diffs.get(0);
         Calendar date = (Calendar) diff.getPropertyValue(BlobAuditConstants.XP_DATE);
-        /*
-          Render the expected path in UTC, like BlobDiffStore.CONTAINER_PATH_FORMAT does.
-          Formatting the Calendar with %t* uses its own (local) zone, so east of Greenwich the
-          test failed for every run between midnight and the UTC offset.
-         */
+        // Render the expected path in UTC, like BlobDiffStore.CONTAINER_PATH_FORMAT does.
+        // Formatting the Calendar with %t* uses its own (local) zone, so east of Greenwich the
+        // test failed for every run between midnight and the UTC offset.
         String expectedParent = CONTAINER_PATH + "/"
                 + BlobDiffStore.CONTAINER_PATH_FORMAT.format(date.toInstant());
         assertEquals(expectedParent, session.getParentDocument(diff.getRef()).getPathAsString());
 
         // every BlobDiff of the repository lives under the container
         assertEquals(allDiffs(session).size(),
-                session.query("SELECT * FROM BlobDiff WHERE ecm:path STARTSWITH '" + CONTAINER_PATH + "'").size());
+                session.query("SELECT * FROM BlobDiff WHERE ecm:path STARTSWITH "
+                        + NXQL.escapeString(CONTAINER_PATH)).size());
     }
 
     @Test
@@ -369,9 +370,9 @@ public class TestBlobDiffLocationAndSecurity {
         assertFalse("a correct ACL must be left untouched", BlobDiffStore.repairSecurity(session, root));
 
         ACL local = session.getACP(root.getRef()).getACL(ACL.LOCAL_ACL);
-        assertTrue(java.util.Arrays.stream(local.getACEs())
-                                   .noneMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
-                                           && ace.isGranted()));
+        assertTrue(Arrays.stream(local.getACEs())
+                         .noneMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
+                                 && ace.isGranted()));
     }
 
     /* --------------------------------------------------------- location guard */

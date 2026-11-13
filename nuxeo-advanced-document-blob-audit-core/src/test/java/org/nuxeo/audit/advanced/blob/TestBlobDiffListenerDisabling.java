@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.lang.Boolean.TRUE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -117,7 +118,7 @@ public class TestBlobDiffListenerDisabling {
     public void testContextDataFlagDisablesTheListenerOnSaveDocument() throws Exception {
         DocumentModel doc = createVersionedFile("muted-save", "v1");
         doc = setBlob(doc, "v2");
-        doc.putContextData(DISABLE_BLOB_DIFF_LISTENER, Boolean.TRUE);
+        doc.putContextData(DISABLE_BLOB_DIFF_LISTENER, TRUE);
         doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
         DocumentModel saved = session.saveDocument(doc);
         session.save();
@@ -134,7 +135,7 @@ public class TestBlobDiffListenerDisabling {
     public void testTheFlagDoesNotLeakToTheNextVersion() throws Exception {
         DocumentModel doc = createVersionedFile("no-leak", "v1");
         doc = setBlob(doc, "v2");
-        doc.putContextData(DISABLE_BLOB_DIFF_LISTENER, Boolean.TRUE);
+        doc.putContextData(DISABLE_BLOB_DIFF_LISTENER, TRUE);
         doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
         session.saveDocument(doc);
         session.save();

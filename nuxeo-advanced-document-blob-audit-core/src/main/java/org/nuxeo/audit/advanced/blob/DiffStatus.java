@@ -44,9 +44,9 @@ public enum DiffStatus {
     /** Decided by the work: the audit entry is the nominal one. */
     ERROR(BlobAuditConstants.STATUS_ERROR, null);
 
-    private final String value;
+    protected final String value;
 
-    private final String auditComment;
+    protected final String auditComment;
 
     DiffStatus(String value, String auditComment) {
         this.value = value;

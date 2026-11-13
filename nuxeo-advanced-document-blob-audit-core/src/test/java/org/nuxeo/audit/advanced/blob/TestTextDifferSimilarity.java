@@ -48,7 +48,7 @@ public class TestTextDifferSimilarity {
     protected static List<String> lines(String prefix, int count) {
         List<String> lines = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            lines.add(String.format("%s line number %03d", prefix, i));
+            lines.add("%s line number %03d".formatted(prefix, i));
         }
         return lines;
     }

@@ -15,6 +15,8 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.lang.Boolean.TRUE;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -162,7 +164,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     /** Returns whether the feature is on; off unless a contribution sets {@code enabled="true"}. */
     public boolean isEnabled() {
-        return Boolean.TRUE.equals(enabled);
+        return TRUE.equals(enabled);
     }
 
     /** Returns the size in bytes past which a blob is never extracted. */
@@ -204,7 +206,7 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      * @since 2025.1
      */
     public boolean isImageInventory() {
-        return Boolean.TRUE.equals(imageInventory);
+        return TRUE.equals(imageInventory);
     }
 
     /** Returns the document types diffed as configured; empty or {@value #ANY} means every type. */

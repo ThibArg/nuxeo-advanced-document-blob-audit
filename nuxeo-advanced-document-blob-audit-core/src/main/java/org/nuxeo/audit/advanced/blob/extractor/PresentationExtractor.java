@@ -15,8 +15,9 @@
  */
 package org.nuxeo.audit.advanced.blob.extractor;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
@@ -297,7 +298,7 @@ public class PresentationExtractor implements BlobContentExtractor {
 
         protected TitleText(int maxValueLength) {
             this.maxValueLength = maxValueLength;
-            digest.update(PREFIX.getBytes(StandardCharsets.UTF_8));
+            digest.update(PREFIX.getBytes(UTF_8));
         }
 
         protected void add(String paragraph) {
@@ -342,7 +343,7 @@ public class PresentationExtractor implements BlobContentExtractor {
             if (room > 0) {
                 head.append(text, start, Math.min(end, start + room));
             }
-            digest.update(text.substring(start, end).getBytes(StandardCharsets.UTF_8));
+            digest.update(text.substring(start, end).getBytes(UTF_8));
         }
 
         /** Returns how many characters of the title are held: at most {@code maxValueLength}, prefix included. */

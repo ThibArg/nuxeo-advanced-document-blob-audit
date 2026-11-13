@@ -165,7 +165,7 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
      *
      * @since 2025.1
      */
-    protected static final class Inventory {
+    protected static class Inventory {
 
         protected final List<ContentLine> images = new ArrayList<>();
 

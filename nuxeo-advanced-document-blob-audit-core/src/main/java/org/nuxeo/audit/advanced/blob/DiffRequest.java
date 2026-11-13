@@ -139,28 +139,28 @@ public record DiffRequest(String repository, String sourceId, String sourceTitle
      * Returns the source title the diff was written with, or {@code null}. The diff is titled
      * {@code <source title> - <xpath>}; passed whole, every retry would append the xpath again.
      */
-    private static String sourceTitle(DocumentModel diff, String xpath) {
+    protected static String sourceTitle(DocumentModel diff, String xpath) {
         String title = diff.getTitle();
         String suffix = " - " + xpath;
         return title != null && title.endsWith(suffix) ? title.substring(0, title.length() - suffix.length()) : null;
     }
 
-    private static String string(DocumentModel doc, String xpath) {
+    protected static String string(DocumentModel doc, String xpath) {
         Object value = doc.getPropertyValue(xpath);
         return value == null ? null : value.toString();
     }
 
     /** The six properties of one side of the pair, so that old and new go through the same lines. */
-    private record Side(String provider, String key, String filename, String mimeType, String digest,
+    protected record Side(String provider, String key, String filename, String mimeType, String digest,
             String length) {
 
-        static final Side OLD = new Side(XP_OLD_BLOB_PROVIDER, XP_OLD_BLOB_KEY, XP_OLD_FILENAME, XP_OLD_MIMETYPE,
-                XP_OLD_DIGEST, XP_OLD_LENGTH);
+        protected static final Side OLD = new Side(XP_OLD_BLOB_PROVIDER, XP_OLD_BLOB_KEY, XP_OLD_FILENAME,
+                XP_OLD_MIMETYPE, XP_OLD_DIGEST, XP_OLD_LENGTH);
 
-        static final Side NEW = new Side(XP_NEW_BLOB_PROVIDER, XP_NEW_BLOB_KEY, XP_NEW_FILENAME, XP_NEW_MIMETYPE,
-                XP_NEW_DIGEST, XP_NEW_LENGTH);
+        protected static final Side NEW = new Side(XP_NEW_BLOB_PROVIDER, XP_NEW_BLOB_KEY, XP_NEW_FILENAME,
+                XP_NEW_MIMETYPE, XP_NEW_DIGEST, XP_NEW_LENGTH);
 
-        void write(DocumentModel diff, FrozenBlob blob) {
+        protected void write(DocumentModel diff, FrozenBlob blob) {
             if (blob == null) {
                 return;
             }
@@ -172,7 +172,7 @@ public record DiffRequest(String repository, String sourceId, String sourceTitle
             diff.setPropertyValue(length, blob.length() < 0 ? null : Long.valueOf(blob.length()));
         }
 
-        FrozenBlob read(DocumentModel diff) {
+        protected FrozenBlob read(DocumentModel diff) {
             String providerId = string(diff, provider);
             String storageKey = string(diff, key);
             if (providerId == null || storageKey == null) {

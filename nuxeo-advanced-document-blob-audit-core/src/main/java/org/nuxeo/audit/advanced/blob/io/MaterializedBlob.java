@@ -110,7 +110,7 @@ public class MaterializedBlob implements AutoCloseable {
         delete(copy);
     }
 
-    private static void delete(File file) {
+    protected static void delete(File file) {
         if (file == null) {
             return;
         }

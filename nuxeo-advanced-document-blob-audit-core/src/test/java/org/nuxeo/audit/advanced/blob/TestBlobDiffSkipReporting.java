@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.lang.Boolean.TRUE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -442,7 +443,7 @@ public class TestBlobDiffSkipReporting {
         DocumentModel updated = session.getDocument(doc.getRef());
         updated.setPropertyValue("file:content",
                 (Serializable) textBlob(largeText("v2"), "text/plain", "notes.bin"));
-        updated.putContextData(BlobModificationListener.DISABLE_BLOB_DIFF_LISTENER, Boolean.TRUE);
+        updated.putContextData(BlobModificationListener.DISABLE_BLOB_DIFF_LISTENER, TRUE);
         updated.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
         session.saveDocument(updated);
         session.save();

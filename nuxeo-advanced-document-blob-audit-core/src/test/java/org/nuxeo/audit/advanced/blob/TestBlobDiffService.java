@@ -15,6 +15,7 @@
  */
 package org.nuxeo.audit.advanced.blob;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -29,7 +30,6 @@ import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.xlsx;
 
 import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
@@ -183,7 +183,7 @@ public class TestBlobDiffService {
      */
     @Test
     public void testCorruptedSpreadsheetRaisesInsteadOfLookingUnsupported() throws Exception {
-        Blob corrupted = BlobAuditTestHelper.blob("not a zip at all".getBytes(StandardCharsets.UTF_8),
+        Blob corrupted = BlobAuditTestHelper.blob("not a zip at all".getBytes(UTF_8),
                 BlobAuditTestHelper.XLSX_MIME, "corrupt.xlsx");
 
         assertThrows(NuxeoException.class, () -> component().extract(corrupted));

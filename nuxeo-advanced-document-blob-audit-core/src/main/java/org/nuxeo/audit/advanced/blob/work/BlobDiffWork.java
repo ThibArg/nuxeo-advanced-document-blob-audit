@@ -244,7 +244,7 @@ public class BlobDiffWork extends AbstractWork {
         setStatus("Done");
     }
 
-    private static String filenameOf(FrozenBlob side) {
+    protected static String filenameOf(FrozenBlob side) {
         return side == null ? null : side.filename();
     }
 

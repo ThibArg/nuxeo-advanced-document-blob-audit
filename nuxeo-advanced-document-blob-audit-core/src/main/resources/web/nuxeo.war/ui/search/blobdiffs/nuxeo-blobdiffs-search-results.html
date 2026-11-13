@@ -189,11 +189,9 @@
         }
       },
 
-      /*
-        The filter lives in the drawer form, which is a sibling of this element in the application
-        shell rather than an ancestor, so there is no binding to write to. openSearch() does the
-        lookup once, for both callers.
-      */
+      // The filter lives in the drawer form, which is a sibling of this element in the application
+      // shell rather than an ancestor, so there is no binding to write to. openSearch() does the
+      // lookup once, for both callers.
       _filterOnSource: function (e) {
         Nuxeo.BlobAudit.openSearch({ 'bdsearch:sourceId': e.model.item.properties['bdiff:sourceId'] });
       },

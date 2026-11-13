@@ -54,7 +54,7 @@ public class SlideHandler extends DefaultHandler {
         PARAGRAPH, RUN, TEXT, FRAME, GRAPHIC, TABLE_DATA, TABLE, ROW, CELL, PICTURE, BLIP_FILL, SKIP
     }
 
-    protected static final class Frame {
+    protected static class Frame {
 
         protected final Role role;
 

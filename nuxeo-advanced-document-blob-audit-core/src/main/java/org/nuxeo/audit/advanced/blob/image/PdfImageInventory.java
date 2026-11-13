@@ -15,12 +15,13 @@
  */
 package org.nuxeo.audit.advanced.blob.image;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Collections.newSetFromMap;
+
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -121,7 +122,7 @@ public class PdfImageInventory extends AbstractImageInventory {
         /** Placements of each fully walked form, in order; {@code null} for an image over budget. */
         protected final Map<COSBase, List<String>> forms = new IdentityHashMap<>();
 
-        protected final Set<COSBase> onPath = Collections.newSetFromMap(new IdentityHashMap<>());
+        protected final Set<COSBase> onPath = newSetFromMap(new IdentityHashMap<>());
 
         /** Counts dropped images too, so that replaying them is bounded by {@code maxLines} as well. */
         protected int placements;
@@ -245,7 +246,7 @@ public class PdfImageInventory extends AbstractImageInventory {
                 + ";Width=" + stream.getInt(COSName.WIDTH) + ";Height=" + stream.getInt(COSName.HEIGHT)
                 + ";BitsPerComponent=" + stream.getInt(COSName.BITS_PER_COMPONENT) + "\n";
         MessageDigest digest = newDigest();
-        digest.update(parameters.getBytes(StandardCharsets.UTF_8));
+        digest.update(parameters.getBytes(UTF_8));
         try (InputStream in = budget.meter(stream.createRawInputStream())) {
             return digestStream(digest, in);
         }
