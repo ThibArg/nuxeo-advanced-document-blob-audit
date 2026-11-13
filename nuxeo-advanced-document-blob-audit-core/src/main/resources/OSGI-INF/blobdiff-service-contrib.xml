@@ -107,8 +107,11 @@
       of the smaller one (in characters), the file was replaced rather than edited: the pair is
       filed as skippedContentReplaced, with its counters and without its body. minSimilarity=0 keeps
       every full diff. Not measured when either side has fewer than minSimilarityLines lines.
+      Ordered last on purpose: text/* is a catch-all, and the lowest order wins, so at any lower order
+      it would take a text type another contribution lists explicitly (text/rtf, read by converter).
+      1000 also keeps it behind a contribution that sets no order (100).
     -->
-    <extractor name="plainText" order="20"
+    <extractor name="plainText" order="1000"
                class="org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor">
       <mimeTypes>
         <mimeType>text/*</mimeType>
@@ -130,6 +133,9 @@
       the converter cuts all of them into paragraphs. PDF and legacy .ppt use the same class but
       contributions of their own, so that a Word document replaced by its PDF rendition, or by a
       deck, is audited as skippedFormatChanged instead of producing a diff where every line differs.
+      An .rtf comes as text/rtf, the type the platform mimetype registry normalizes it to (some
+      browsers send it too), or as application/rtf: both are listed, or the first would fall into
+      plainText's text/*.
     -->
     <extractor name="converter" order="90"
                class="org.nuxeo.audit.advanced.blob.extractor.ConverterTextExtractor">
@@ -138,6 +144,7 @@
         <mimeType>application/msword</mimeType>
         <mimeType>application/vnd.oasis.opendocument.text</mimeType>
         <mimeType>application/rtf</mimeType>
+        <mimeType>text/rtf</mimeType>
       </mimeTypes>
       <property name="converter">any2text</property>
       <property name="minLineLength">1</property>

@@ -235,6 +235,15 @@ Splitting text formats by mime type was rejected: text mime types are unreliable
 holding JSON renamed `.json`), and a genuine edit would lose its diff. Coverage:
 `TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`.
 
+`plainText` is ordered **last** (1000), behind the converters (90) and behind any contribution that
+sets no order (`ExtractorDescriptor.DEFAULT_ORDER`, 100). The lowest order wins and its `text/*`
+accepts every text type, so at any lower order it took the text types other contributions list
+explicitly: `.rtf`, which the platform mimetype registry normalizes to `text/rtf`, was read as raw
+RTF markup and every Word ↔ RTF version was a format change without a diff, while the same file
+sent as `application/rtf` was diffed by `converter`. Matching an exact type before a wildcard,
+whatever the order, was rejected: it would change the meaning of `order` for every existing
+contribution. Coverage: `TestBlobDiffService#testAnExplicitlyListedTextTypeIsNotTakenByTheTextCatchAll`.
+
 ### A text file replaced by another one
 
 Within `plainText`, a `.json` replaced by an unrelated `.xml` is still a diffable pair whose diff

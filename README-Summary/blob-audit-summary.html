@@ -254,7 +254,7 @@ extended    xpath             = file:content
 
 <!-- ============================================================ 6 -->
 <h2 id="s6"><span class="num">6.</span>Choosing the extractor: an ordered MIME-type ladder</h2>
-<p>No scoring, no lookup table: extractors are sorted by <code>order</code> and the <strong>first one that accepts the MIME type wins</strong> (lower-cased, <code>; charset=…</code> removed). <code>text/*</code> is the only wildcard shipped; everything else is an exact match.</p>
+<p>No scoring, no lookup table: extractors are sorted by <code>order</code> and the <strong>first one that accepts the MIME type wins</strong> (lower-cased, <code>; charset=…</code> removed). <code>text/*</code> is the only wildcard shipped, and it sits last (order 1000), so a text type another contribution lists — <code>text/rtf</code>, read by <code>converter</code> — never falls into it; everything else is an exact match.</p>
 <div class="figure">
 <svg viewBox="0 0 1100 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
   <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
@@ -270,12 +270,12 @@ extended    xpath             = file:content
     <text x="56" y="184" font-weight="700" font-size="12.5">order 15 · presentation</text>
     <text x="56" y="208">.pptx  .ppsx  .potx  .pptm  .ppsm</text>
     <rect x="40" y="248" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
-    <text x="56" y="272" font-weight="700" font-size="12.5">order 20 · plainText</text>
-    <text x="56" y="296">text/* · json · xml · x-yaml · javascript · sql</text>
+    <text x="56" y="270" font-weight="700" font-size="12.5">order 90 · converter · pdf · legacyPresentation</text>
+    <text x="56" y="290" font-size="11.5">.docx .doc .odt .rtf  |  .pdf  |  .ppt (legacy)</text>
+    <text x="56" y="307" font-size="11" fill="#555" font-style="italic">same class, three contributions: never compared with each other</text>
     <rect x="40" y="336" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
-    <text x="56" y="358" font-weight="700" font-size="12.5">order 90 · converter · pdf · legacyPresentation</text>
-    <text x="56" y="378" font-size="11.5">.docx .doc .odt .rtf  |  .pdf  |  .ppt (legacy)</text>
-    <text x="56" y="395" font-size="11" fill="#555" font-style="italic">same class, three contributions: never compared with each other</text>
+    <text x="56" y="360" font-weight="700" font-size="12.5">order 1000 · plainText (last: the text/* catch-all)</text>
+    <text x="56" y="384">text/* · json · xml · x-yaml · javascript · sql</text>
   </g>
   <g stroke="#777" stroke-width="2">
     <line x1="250" y1="138" x2="250" y2="158" marker-end="url(#a3)"/>
@@ -303,12 +303,12 @@ extended    xpath             = file:content
     <text x="556" y="208">slide markers, paragraphs, table rows, notes · <tspan font-family="Menlo, monospace" font-size="11">## Slide: Q3</tspan></text>
     <rect x="540" y="248" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
     <rect x="950" y="256" width="96" height="20" rx="10" fill="#d9e7f7"/><text x="998" y="270" font-size="10.5" text-anchor="middle" font-weight="700" fill="#0d47a1">POSITIONAL</text>
-    <text x="556" y="272" font-size="13" font-weight="700">PlainTextExtractor</text>
-    <text x="556" y="296">one line (BOM stripped, trimmed, blank lines dropped)</text>
+    <text x="556" y="272" font-size="13" font-weight="700">ConverterTextExtractor</text>
+    <text x="556" y="296">platform converter <tspan font-family="Menlo, monospace" font-size="11">any2text</tspan>, then one line</text>
     <rect x="540" y="336" width="520" height="66" rx="10" fill="#fff" stroke="#333" stroke-width="1.6"/>
     <rect x="950" y="344" width="96" height="20" rx="10" fill="#d9e7f7"/><text x="998" y="358" font-size="10.5" text-anchor="middle" font-weight="700" fill="#0d47a1">POSITIONAL</text>
-    <text x="556" y="360" font-size="13" font-weight="700">ConverterTextExtractor</text>
-    <text x="556" y="384">platform converter <tspan font-family="Menlo, monospace" font-size="11">any2text</tspan>, then one line</text>
+    <text x="556" y="360" font-size="13" font-weight="700">PlainTextExtractor</text>
+    <text x="556" y="384">one line (BOM stripped, trimmed, blank lines dropped)</text>
   </g>
   <rect x="40" y="420" width="1020" height="44" rx="10" fill="#fff8e1" stroke="#b26a00" stroke-width="2"/>
   <text x="60" y="447" font-size="12.5" font-weight="700">No extractor accepts it</text>
@@ -318,7 +318,7 @@ extended    xpath             = file:content
 <div class="caption">Walked top to bottom; nothing below the first match is consulted.</div>
 </div>
 <div class="callout blue">
-  <strong>Extension point.</strong> Adding a format = contributing one extractor to the <code>extractors</code> point, with its MIME types and an <code>order</code> (lower to pre-empt a built-in, higher to catch what the built-ins miss). The diff engine does not change. Beware: a contribution at order 5 accepting <code>*</code> would shadow everything.
+  <strong>Extension point.</strong> Adding a format = contributing one extractor to the <code>extractors</code> point, with its MIME types and an <code>order</code> (lower to pre-empt a built-in; <code>plainText</code>, the <code>text/*</code> catch-all, is at 1000, so a text type listed at any lower order — 100 when none is set — goes to the new extractor). The diff engine does not change. Beware: a contribution accepting <code>*</code> would shadow everything above its order.
 </div>
 <div class="callout">
   <strong>One contribution, one comparability class.</strong> A version is only diffed against the previous one when the <em>same</em> contribution reads both files. Two different ones — an <code>.xlsx</code> replaced by a <code>.docx</code>, a Word document replaced by its PDF rendition, a <code>.ppt</code> by a <code>.pptx</code> — give <code>skippedFormatChanged</code>: the audit entry is written, no diff is computed. The extractions cut the document differently (cells, paragraphs, rendered lines), so such a diff would report everything as removed then added, and copy both documents into <code>/change-diff</code> for nothing. A conversion <em>inside</em> one class is still diffed: <code>.xls</code> → <code>.xlsx</code>, <code>.doc</code> → <code>.docx</code>, <code>.txt</code> → <code>.json</code> (every text format is in <code>plainText</code>, which reads raw lines whatever the MIME type). <code>pdf</code> and <code>legacyPresentation</code> use the very same class and properties as <code>converter</code> and exist as separate contributions for that reason alone. So <strong>where a MIME type is contributed decides what can be compared with what</strong>: to compare two formats, put them in one contribution; to stop comparing two, split it. When one side has no extractor at all, <code>skippedUnsupportedType</code> wins.

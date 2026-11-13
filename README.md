@@ -117,7 +117,7 @@ Two extractors do not cut a document into units the same way: comparing the cell
 | `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
 | `presentation` | pptx, pptm, ppsx, potx | yes |
 | `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: lines are read raw, whatever the mime type — but see the next section |
-| `converter` | docx, doc, odt, rtf | yes: the converter cuts all of them into paragraphs |
+| `converter` | docx, doc, odt, rtf (`application/rtf` or `text/rtf`) | yes: the converter cuts all of them into paragraphs |
 | `pdf` | pdf | — |
 | `legacyPresentation` | ppt | — |
 
@@ -164,7 +164,7 @@ With `<xpath>*</xpath>`, blobs inside lists such as `files:files` are watched, a
 
 Keyed content is compared as two maps, so the diff is exact and independent of the extraction order. Positional content is aligned with Hirschberg's algorithm, and a removal immediately followed by an addition is reported as a modification. No external diff library is needed.
 
-**Adding a format.** Implement `BlobContentExtractor` and contribute it; the lowest `order` wins for a mime type, so a specialised extractor overrides a generic one. Any format the `any2text` converter reads only needs a `<mimeType>` on a `ConverterTextExtractor` contribution.
+**Adding a format.** Implement `BlobContentExtractor` and contribute it; the lowest `order` wins for a mime type, so a specialised extractor overrides a generic one. The shipped generic one, `plainText` and its `text/*`, has order 1000, behind any contribution that sets no order (100): a `text/…` type you list explicitly goes to your extractor. Any format the `any2text` converter reads only needs a `<mimeType>` on a `ConverterTextExtractor` contribution.
 
 ```xml
 <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">

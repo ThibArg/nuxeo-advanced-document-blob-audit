@@ -347,6 +347,25 @@ public class TestBlobDiffService {
                 textBlob("new", newMimeType, "new.bin"));
     }
 
+    /**
+     * The {@code text/*} catch-all of {@code plainText} must not take a text type another contribution
+     * lists: an .rtf comes as {@code text/rtf}, the type the platform normalizes it to, and belongs to
+     * the {@code converter} class with .doc, .docx and .odt - read as raw text, it would be markup, and
+     * every Word to RTF version a format change without a diff.
+     */
+    @Test
+    public void testAnExplicitlyListedTextTypeIsNotTakenByTheTextCatchAll() throws Exception {
+        assertTrue(component().findExtractor("text/rtf") instanceof ConverterTextExtractor);
+        assertTrue(component().findExtractor("application/rtf") instanceof ConverterTextExtractor);
+        assertTrue(component().findExtractor("text/plain") instanceof PlainTextExtractor);
+        assertTrue(component().findExtractor("text/x-unlisted") instanceof PlainTextExtractor);
+
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("application/msword", "text/rtf"));
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility(DOCX_MIME, "text/rtf; charset=UTF-8"));
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("application/rtf", "text/rtf"));
+        assertEquals(DiffEligibility.FORMAT_CHANGED, pairEligibility("text/plain", "text/rtf"));
+    }
+
     /* ------------------------------------------------------- replaced content */
 
     /**

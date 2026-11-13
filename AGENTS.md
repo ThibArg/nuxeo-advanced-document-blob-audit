@@ -129,8 +129,11 @@ the **only** eligibility call of `BlobDiffTrigger` and of `BlobDiffWork#work`: d
 outliving a configuration change); the purge dialog offers them. The contributions are the rules:
 `ConverterTextExtractor` is contributed three times (`converter`, `pdf`, `legacyPresentation`) — do
 not fold `pdf` or `legacyPresentation` back into `converter`; every text format stays in
-`plainText`. Coverage:
-`TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`, the format cases of
+`plainText`. `plainText` stays **last** (order 1000, above `DEFAULT_ORDER`): its `text/*` would take
+any text type another contribution lists at a higher order, such as `text/rtf` in `converter`. `.rtf`
+is listed under both `application/rtf` and `text/rtf`. Coverage:
+`TestBlobDiffService#testThePairEligibilityComparesTheExtractorContributions`,
+`#testAnExplicitlyListedTextTypeIsNotTakenByTheTextCatchAll`, the format cases of
 `TestBlobDiffSkipReporting`, `TestBlobDiffManagement#testARetryOnAPairThatChangedFormatIsFiledAsSuch`.
 Why: `docs/DESIGN.md` §4.
 
@@ -405,7 +408,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 333 tests, 27 test classes
+mvn -o install                                     # full build: 334 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -559,4 +562,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 106.
+`git log --grep '^Item '`. Next free number: 107.
