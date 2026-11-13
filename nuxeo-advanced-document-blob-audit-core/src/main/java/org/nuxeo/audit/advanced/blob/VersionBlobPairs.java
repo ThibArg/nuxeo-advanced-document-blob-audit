@@ -104,8 +104,7 @@ public class VersionBlobPairs {
             return pairs;
         }
         for (String schema : current.getSchemas()) {
-            for (String template : BLOB_XPATH_TEMPLATES.computeIfAbsent(schema,
-                    VersionBlobPairs::computeBlobXPathTemplates)) {
+            for (String template : templates(schema)) {
                 if (template.indexOf('*') < 0) {
                     pairs.add(new BlobPair(template, safeGetBlob(previous, template),
                             safeGetBlob(current, template), false));
@@ -115,6 +114,35 @@ public class VersionBlobPairs {
             }
         }
         return pairs;
+    }
+
+    /**
+     * Returns whether the document holds a blob at one of the xpaths {@link #of} would read on it.
+     * <p>
+     * A check-in versions the live document as it stands, so a live document holding none gives a
+     * new version holding none, and no pair with a new blob to compare: the listener then skips the
+     * version lookups altogether. Reads the properties of the document only, no query.
+     *
+     * @since 2025.1
+     */
+    public static boolean holdsBlob(DocumentModel doc, BlobDiffConfigDescriptor config) {
+        if (!config.isEveryXPath()) {
+            return config.getXPaths().stream().anyMatch(xpath -> safeGetBlob(doc, xpath) != null);
+        }
+        for (String schema : doc.getSchemas()) {
+            for (String template : templates(schema)) {
+                boolean found = template.indexOf('*') < 0 ? safeGetBlob(doc, template) != null
+                        : !blobsAt(template, doc).isEmpty();
+                if (found) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    protected static List<String> templates(String schema) {
+        return BLOB_XPATH_TEMPLATES.computeIfAbsent(schema, VersionBlobPairs::computeBlobXPathTemplates);
     }
 
     /**

@@ -16,6 +16,7 @@
 package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
@@ -36,8 +37,11 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.api.VersioningOption;
+import org.nuxeo.ecm.core.api.event.DocumentEventTypes;
 import org.nuxeo.ecm.core.api.versioning.VersioningService;
+import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.platform.query.api.PageProviderService;
+import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
@@ -349,5 +353,63 @@ public class TestBlobDiffVersionPairing {
             files.add(entry);
         }
         return files;
+    }
+
+    /* ------------------------------------- item 100: no blob, no lookup */
+
+    /** Counts the version lookups instead of making them. */
+    protected static class CountingListener extends BlobModificationListener {
+
+        protected int lookups;
+
+        @Override
+        protected void capturePreviousVersion(CoreSession s, DocumentModel liveDoc, DocumentEventContext context) {
+            lookups++;
+        }
+
+        @Override
+        protected void scheduleDiffs(BlobDiffService service, CoreSession s, DocumentModel liveDoc,
+                DocumentEventContext context, BlobDiffConfigDescriptor config, long eventTime) {
+            lookups++;
+        }
+    }
+
+    /** Hands both check-in events of the document to the listener, and returns its lookups. */
+    protected int lookupsFor(DocumentModel doc) {
+        var counting = new CountingListener();
+        for (String event : List.of(DocumentEventTypes.ABOUT_TO_CHECKIN, DocumentEventTypes.DOCUMENT_CHECKEDIN)) {
+            counting.handleEvent(new DocumentEventContext(session, session.getPrincipal(), doc).newEvent(event));
+        }
+        return counting.lookups;
+    }
+
+    /**
+     * Item 100: every check-in of an accepted type paid a privileged version query on
+     * {@code aboutToCheckIn}, then the load of the version pair on {@code documentCheckedIn}, before
+     * finding that the document held no blob to compare.
+     */
+    @Test
+    public void testADocumentWithoutABlobSkipsTheVersionLookups() throws Exception {
+        DocumentModel empty = session.createDocument(session.createDocumentModel("/", "no-blob", "File"));
+        DocumentModel note = session.createDocument(session.createDocumentModel("/", "a-note", "Note"));
+        DocumentModel file = createVersionedFile("with-blob", "v1");
+
+        assertEquals("a File holding no blob", 0, lookupsFor(empty));
+        assertEquals("a type without the file schema", 0, lookupsFor(note));
+        assertEquals("a File holding a blob: one lookup per event", 2, lookupsFor(file));
+    }
+
+    /** Item 100, {@code *} mode: a blob inside a list is a blob, and a list of none is not. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-allxpaths-config.xml")
+    public void testABlobInAListIsSeenBeforeTheVersionLookups() throws Exception {
+        BlobDiffConfigDescriptor config = Framework.getService(BlobDiffService.class).getConfig();
+        DocumentModel listed = fileWithAttachments("listed-only", "alpha");
+        DocumentModel empty = fileWithAttachments("empty-list");
+
+        assertTrue(VersionBlobPairs.holdsBlob(session.getDocument(listed.getRef()), config));
+        assertFalse(VersionBlobPairs.holdsBlob(session.getDocument(empty.getRef()), config));
+        assertEquals(2, lookupsFor(session.getDocument(listed.getRef())));
+        assertEquals(0, lookupsFor(session.getDocument(empty.getRef())));
     }
 }

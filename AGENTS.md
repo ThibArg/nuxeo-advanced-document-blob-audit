@@ -96,8 +96,11 @@ version `saveDocument` creates itself from a `VERSIONING_OPTION` (not automatic 
 `collaborative-save`, not `checkIn`, `restoreToVersion` nor `publishDocument`);
 `BlobModificationListener.runDisabled(Runnable|Supplier)`, thread-scoped, restored in a `finally`;
 `EventServiceAdmin.setListenerEnabledFlag("blobModificationListener", false)`. Any change to
-`handleEvent` keeps these checks first, before any I/O. Coverage: `TestBlobDiffListenerDisabling`.
-Why: `docs/DESIGN.md` §2; the exact reach is in the README.
+`handleEvent` keeps these checks first, before any I/O. Then, before any version lookup,
+`VersionBlobPairs#holdsBlob` returns early when the live document holds no blob at the xpaths the
+pairs would read: keep it ahead of `capturePreviousVersion` and `scheduleDiffs`. Coverage:
+`TestBlobDiffListenerDisabling`, `TestBlobDiffVersionPairing` (the "no blob" cases). Why:
+`docs/DESIGN.md` §1, §2; the exact reach is in the README.
 
 **Blobs inside a list are paired by content, never by index alone.**
 `VersionBlobPairs#pairListEntries` expands a list template on each version: a digest on both sides
@@ -388,7 +391,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 324 tests, 27 test classes
+mvn -o install                                     # full build: 326 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -541,4 +544,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 100.
+`git log --grep '^Item '`. Next free number: 101.

@@ -199,6 +199,11 @@ public class BlobModificationListener implements EventListener {
         if (!config.isEnabled() || !config.acceptsDocType(liveDoc.getType())) {
             return;
         }
+        // The new version holds what the live document holds: with no blob there, nothing can be
+        // compared, and the version lookups would cost queries in the user's transaction for nothing.
+        if (!VersionBlobPairs.holdsBlob(liveDoc, config)) {
+            return;
+        }
         CoreSession session = liveDoc.getCoreSession();
         if (session == null) {
             return;

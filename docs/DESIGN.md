@@ -24,7 +24,14 @@ event in the user transaction, which the route of `blobaudit-audit-contrib.xml` 
 entry.
 
 Everything synchronous is cheap: two version references, two document loads, digests and mime
-types. No binary is ever read in the user transaction. The work is scheduled with
+types. No binary is ever read in the user transaction. Right after the switches and the scope checks
+(`enabled`, `docTypes`), `VersionBlobPairs#holdsBlob` reads the properties of the live document the
+pairs would read: a check-in versions the live document as it stands, so with no blob there no pair
+can have a new blob to compare, and both events return before any version lookup. Without it, every
+check-in of an accepted type — `collaborative-save` snapshots, publishing, notes, folders — paid a
+privileged query and the load of the pair for nothing. A listener running after this one on
+`aboutToCheckIn` and adding a blob is still covered: the capture is skipped, and `documentCheckedIn`
+falls back on the query of §2. Coverage: `TestBlobDiffVersionPairing` (the "no blob" cases). The work is scheduled with
 `afterCommit=true`: a rollback creates neither the audit entry nor a `BlobDiff`.
 
 ### What travels with the work
