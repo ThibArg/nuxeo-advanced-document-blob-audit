@@ -28,6 +28,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.model.PropertyNotFoundException;
 import org.nuxeo.ecm.core.schema.SchemaManager;
 import org.nuxeo.ecm.core.schema.TypeConstants;
 import org.nuxeo.ecm.core.schema.types.ComplexType;
@@ -253,7 +254,8 @@ public class VersionBlobPairs {
      * Resolves the {@code *} of a list template against the actual entries of a document.
      * <p>
      * Only the list properties that really lead to a blob are read, instead of every property of
-     * every schema.
+     * every schema. A list the document does not carry is not expanded; any other failure to read it
+     * propagates, see {@link #safeGetBlob}.
      */
     protected static void expandTemplate(String template, DocumentModel doc, List<String> xpaths) {
         int star = template.indexOf('*');
@@ -262,9 +264,10 @@ public class VersionBlobPairs {
         try {
             Object value = doc.getPropertyValue(listPath);
             size = value instanceof List<?> list ? list.size() : 0;
-        } catch (RuntimeException e) { // NOSONAR - an unreadable list is simply not expanded
-            // The xpath template comes from the schema, the document may not carry the schema.
-            log.debug("Cannot read list {} on {} to expand template {}", listPath, doc.getId(), template, e);
+        } catch (PropertyNotFoundException e) {
+            // The template comes from the schemas of the new version: the previous one may not
+            // carry the schema of a facet added since.
+            log.debug("No list {} on {} to expand template {}", listPath, doc.getId(), template);
             return;
         }
         for (int i = 0; i < size; i++) {
@@ -277,12 +280,21 @@ public class VersionBlobPairs {
         }
     }
 
+    /**
+     * Returns the blob at the xpath, or {@code null} when the document holds none there - no such
+     * schema on the document, no such list entry, or a value that is not a blob.
+     * <p>
+     * Only {@link PropertyNotFoundException} means "no blob". Any other failure propagates: answered
+     * {@code null}, a binary that changed would leave no audit entry at all, and nothing above
+     * {@code DEBUG} would tell. Raised from the synchronous listener, the platform logs it at
+     * {@code ERROR} and goes on with the check-in.
+     */
     protected static Blob safeGetBlob(DocumentModel doc, String xpath) {
         try {
             Object value = doc.getPropertyValue(xpath);
             return value instanceof Blob blob ? blob : null;
-        } catch (RuntimeException e) { // NOSONAR - an unreadable property is not a binary change
-            log.debug("Cannot read property {} on {}", xpath, doc.getId(), e);
+        } catch (PropertyNotFoundException e) {
+            log.debug("No property {} on {}", xpath, doc.getId());
             return null;
         }
     }

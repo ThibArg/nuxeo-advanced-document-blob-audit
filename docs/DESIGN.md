@@ -157,6 +157,15 @@ pooled request thread would silently stop auditing the instance. Coverage:
 blob yields `null` and is skipped downstream. A blob added or removed is never diffed: the feature
 audits the replacement of an existing blob.
 
+"No blob" means exactly a `PropertyNotFoundException` — a schema the document does not carry, a list
+entry past its end — or a value that is not a blob (`VersionBlobPairs#safeGetBlob`, and
+`#expandTemplate` for a list). Any other failure to read a property propagates: answered `null`, a
+binary that changed would leave no audit entry at all, which reads as "the binary did not change",
+with nothing above `DEBUG` to tell otherwise. Raised from the synchronous listener, the platform's
+`EventServiceImpl#fireEvent` logs it at `ERROR` and goes on with the check-in, unless the transaction
+is already marked for rollback. Coverage: `TestBlobDiffVersionPairing` (the "no blob, or no answer"
+cases).
+
 With `<xpath>*</xpath>`, the xpaths come from the schemas of the **new version**
 (`DocumentModel#getSchemas()`, which includes the schemas of facets added to the document;
 `DocumentType#getSchemas()` would miss them). They are computed per schema, as templates

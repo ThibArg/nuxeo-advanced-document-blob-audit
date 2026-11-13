@@ -18,6 +18,7 @@ package org.nuxeo.audit.advanced.blob;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.textBlob;
 
@@ -36,8 +37,10 @@ import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.IdRef;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.event.DocumentEventTypes;
+import org.nuxeo.ecm.core.api.impl.DocumentModelImpl;
 import org.nuxeo.ecm.core.api.versioning.VersioningService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.platform.query.api.PageProviderService;
@@ -411,5 +414,46 @@ public class TestBlobDiffVersionPairing {
         assertFalse(VersionBlobPairs.holdsBlob(session.getDocument(empty.getRef()), config));
         assertEquals(2, lookupsFor(session.getDocument(listed.getRef())));
         assertEquals(0, lookupsFor(session.getDocument(empty.getRef())));
+    }
+
+    /* ---------------------------------------- item 102: no blob, or no answer */
+
+    /** A document whose properties cannot be read, the way a storage failure would make them. */
+    protected static DocumentModel unreadable() {
+        return new DocumentModelImpl("File") {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public Serializable getPropertyValue(String xpath) {
+                throw new NuxeoException("storage unavailable");
+            }
+        };
+    }
+
+    /**
+     * Item 102: what the document does not carry is "no blob": a schema it lacks, a list entry past
+     * its end, a property that is not a blob.
+     */
+    @Test
+    public void testAPropertyTheDocumentDoesNotCarryHoldsNoBlob() throws Exception {
+        DocumentModel doc = createVersionedFile("partial", "v1");
+
+        assertNull(VersionBlobPairs.safeGetBlob(doc, "bdextra:attachment"));
+        assertNull(VersionBlobPairs.safeGetBlob(doc, "nosuchschema:content"));
+        assertNull(VersionBlobPairs.safeGetBlob(doc, "files:files/3/file"));
+        assertNull(VersionBlobPairs.safeGetBlob(doc, "dc:title"));
+        assertTrue(VersionBlobPairs.blobsAt("bdextra:list/*/file", doc).isEmpty());
+    }
+
+    /**
+     * Item 102: any other failure was answered "no blob" too, logged at DEBUG: a binary that changed
+     * left no audit entry, and nothing told. It now propagates, and the platform logs it at ERROR.
+     */
+    @Test
+    public void testAPropertyThatCannotBeReadIsNotTakenForNoBlob() {
+        DocumentModel doc = unreadable();
+
+        assertThrows(NuxeoException.class, () -> VersionBlobPairs.safeGetBlob(doc, "file:content"));
+        assertThrows(NuxeoException.class, () -> VersionBlobPairs.blobsAt("files:files/*/file", doc));
     }
 }

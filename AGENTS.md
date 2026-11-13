@@ -108,7 +108,9 @@ is unchanged wherever it sits; a new blob is compared with the one at its xpath 
 kept its shape and that one is gone; a new blob in a list that also lost an entry is
 `skippedListChanged`. Configured indexed xpaths (`files:files/0/file`) stay compared by index. With
 `<xpath>*</xpath>` the templates come from `DocumentModel#getSchemas()` of the new version (instance
-facets included), cached per schema and cleared by `BlobDiffComponent#stop`. Coverage:
+facets included), cached per schema and cleared by `BlobDiffComponent#stop`. Only a
+`PropertyNotFoundException` reads as "no blob" (`safeGetBlob`, `expandTemplate`); never widen that
+catch: any other failure would leave a changed binary unaudited without a trace. Coverage:
 `TestBlobDiffVersionPairing`. Why: `docs/DESIGN.md` §3.
 
 **The order of the checks in `BlobDiffTrigger#scheduleIfNeeded` is significant.** Eligibility, then
@@ -393,7 +395,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 327 tests, 27 test classes
+mvn -o install                                     # full build: 329 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -546,4 +548,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 102.
+`git log --grep '^Item '`. Next free number: 103.
