@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.Assume;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
@@ -48,6 +50,8 @@ import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.ecm.core.event.EventServiceAdmin;
 import org.nuxeo.runtime.api.Framework;
+
+import com.sun.management.ThreadMXBean;
 
 /**
  * Fixture builders shared by the tests.
@@ -95,6 +99,27 @@ public class BlobAuditTestHelper {
                 UTF_8.name());
         blob.setFilename(filename);
         return blob;
+    }
+
+    /**
+     * Returns the bytes the current thread has allocated so far, the reading the memory bounds of the
+     * tests are measured with.
+     * <p>
+     * Skips the calling test, through {@link Assume}, on a JVM that cannot measure them: its platform
+     * bean is not a {@code com.sun.management.ThreadMXBean}, or the measurement is off, in which case
+     * every reading is {@code -1}, every difference {@code 0}, and every upper bound would pass
+     * without measuring anything.
+     *
+     * @since 2025.1
+     */
+    public static long allocatedBytes() {
+        java.lang.management.ThreadMXBean bean = ManagementFactory.getThreadMXBean();
+        Assume.assumeTrue("thread allocation cannot be measured on this JVM",
+                bean instanceof ThreadMXBean threads && threads.isThreadAllocatedMemorySupported()
+                        && threads.isThreadAllocatedMemoryEnabled());
+        long allocated = ((ThreadMXBean) bean).getCurrentThreadAllocatedBytes();
+        Assume.assumeTrue("thread allocation measurement was turned off", allocated >= 0);
+        return allocated;
     }
 
     /**

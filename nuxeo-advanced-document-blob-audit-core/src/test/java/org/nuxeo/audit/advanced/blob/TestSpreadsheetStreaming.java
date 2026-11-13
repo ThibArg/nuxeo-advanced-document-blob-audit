@@ -19,6 +19,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.XLSX_MIME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.onDisk;
 
 import java.io.ByteArrayInputStream;
@@ -27,7 +28,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,8 +50,6 @@ import org.junit.After;
 import org.junit.Test;
 import org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor;
 import org.nuxeo.ecm.core.api.Blob;
-
-import com.sun.management.ThreadMXBean;
 
 /**
  * RES-03 (code review 2026-10): OOXML workbooks are streamed with SAX instead of being loaded through
@@ -253,12 +251,11 @@ public class TestSpreadsheetStreaming {
             sheet.append("</row>");
         }
         Blob blob = onDisk(workbook(sheet.append("</sheetData></worksheet>").toString(), "big.xlsx"));
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = new SpreadsheetExtractor().extract(blob, 100);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(100, content.size());
         assertTrue(content.truncated());
         assertTrue("extracting 100 cells allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
@@ -288,12 +285,11 @@ public class TestSpreadsheetStreaming {
                     }
                     out.write("</sheetData></worksheet>");
                 })));
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = new SpreadsheetExtractor().extract(blob, 100);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(100, content.size());
         assertTrue(content.truncated());
         assertEquals(sharedString(0), content.lines().get(0).value());
@@ -370,12 +366,11 @@ public class TestSpreadsheetStreaming {
                         + "<c r=\"B1\" t=\"inlineStr\"><is><t>" + inline + "</t></is></c>" //
                         + "<c r=\"C1\" t=\"str\"><v>" + cached + "</v></c>" //
                         + "</row></sheetData></worksheet>"))));
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = new SpreadsheetExtractor().extract(blob, MAX_LINES);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         int max = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
         Map<String, String> cells = byKey(content.lines());
         assertEquals("the shared string", ContentLine.compact(shared, max), cells.get("Data!A1"));

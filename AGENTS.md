@@ -232,7 +232,8 @@ keeps `httpEnabled` at its default `false`; `BlobDiff.Purge` is the only entry p
 query built server side, `submit()` and not `submitTransactional()`); the computation removes only
 `BlobDiff` documents and checks `isAbortedCommand` before each batch; `BlobDiff.PurgeStatus` and
 `BlobDiff.PurgeAbort` go through `BlobDiffPurgeAction#purgeStatus`, which answers any other command
-as `UNKNOWN`. Coverage: `TestBlobDiffPurgeAction`. Why: `docs/DESIGN.md` §7.
+as `UNKNOWN`. Coverage: `TestBlobDiffPurgeAction` (`httpEnabled` pinned by
+`#testThePurgeActionIsNotExposedOverHttp`). Why: `docs/DESIGN.md` §7.
 
 **Never put a `<dataFile>` on a vocabulary the plugin does not own.** It would replace the
 platform's rows. `blobContentModified` is added at runtime by
@@ -386,7 +387,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 322 tests, 27 test classes
+mvn -o install                                     # full build: 323 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -428,10 +429,12 @@ Test resources deployed per class or per test (`src/test/resources/`):
 | `blobaudit-test-dynamicfacet-contrib.xml` + `schemas/blobaudit-test-extra.xsd` | a facet whose schema holds a blob (`TestBlobDiffVersionPairing`) |
 | `blobaudit-test-partial-config.xml` | overrides nothing but `docTypes` and one `converter` property (`TestBlobDiffService`) |
 | `blobaudit-test-keepalldiffs-config.xml` | `minSimilarity=0` on `plainText` |
-| `blobaudit-test-purgegate-contrib.xml` | `PurgeGateListener` holds the first `BlobDiff` removal until released (`TestBlobDiffPurgeAction` abort case) |
+| `blobaudit-test-purgegate-contrib.xml` | `PurgeGateListener` holds the first `BlobDiff` removal until released (`TestBlobDiffPurgeAction` abort and exclusivity cases) |
 
 Test helpers: `BlobAuditTestHelper` (`DiffRequest` and `BlobDiff` fixtures, `createUnguarded` for a
-diff forged outside the container, `onDisk` for file-backed blobs), `BlobAuditFeature`.
+diff forged outside the container, `onDisk` for file-backed blobs, `allocatedBytes` for every memory
+bound: it skips the test where the JVM cannot measure allocations, rather than let the bound pass
+unmeasured), `BlobAuditFeature`.
 
 What each test class guards is named by the invariants above. When a change adds or removes tests,
 update the count on the first line of this section.
@@ -537,4 +540,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 97.
+`git log --grep '^Item '`. Next free number: 98.

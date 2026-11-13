@@ -47,6 +47,7 @@ import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.PathRef;
+import org.nuxeo.ecm.core.bulk.BulkAdminService;
 import org.nuxeo.ecm.core.bulk.BulkService;
 import org.nuxeo.ecm.core.bulk.CoreBulkFeature;
 import org.nuxeo.ecm.core.query.sql.NXQL;
@@ -303,8 +304,12 @@ public class TestBlobDiffPurgeAction {
      * The action is exclusive: a second purge must not run beside the first one. This is also what
      * pins {@code submit()} rather than {@code submitTransactional()} in the operation - the latter
      * defers the exclusivity check to commit time, where it can no longer be reported cleanly.
+     * <p>
+     * The first purge is held at its first removal while the second one is submitted: left to run, it
+     * could complete before, and the second one would rightly be accepted.
      */
     @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-purgegate-contrib.xml")
     public void testASecondPurgeIsRefusedWhileOneIsRunning() throws Exception {
         DocumentModel source = file("concurrent", textBlob("x", "text/plain", "x.txt"));
         for (int i = 0; i < 50; i++) {
@@ -312,14 +317,20 @@ public class TestBlobDiffPurgeAction {
         }
         txFeature.nextTransaction();
 
-        JsonNode first = run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
-        String commandId = first.get("commandId").asText();
+        PurgeGateListener.arm();
+        String commandId;
         try {
-            run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
-            fail("a second purge must be refused while one is running");
-        } catch (Exception e) {
-            assertTrue("expected an exclusivity error, got " + e, messageOf(e).contains("already running"));
+            JsonNode first = run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
+            commandId = first.get("commandId").asText();
+            assertTrue("the purge never reached its first removal", PurgeGateListener.awaitHeld());
+            try {
+                run(session, BlobDiffPurgeOp.ID, null, Map.of("before", beforeDaysAgo(30)));
+                fail("a second purge must be refused while one is running");
+            } catch (Exception e) {
+                assertTrue("expected an exclusivity error, got " + e, messageOf(e).contains("already running"));
+            }
         } finally {
+            PurgeGateListener.release();
             restartTransaction();
         }
         assertTrue(bulkService.await(commandId, TIMEOUT));
@@ -408,6 +419,17 @@ public class TestBlobDiffPurgeAction {
     }
 
     /* ==================== access control ==================== */
+
+    /**
+     * Item 97: the purge stays off the HTTP bulk surface. With {@code httpEnabled}, any authenticated
+     * user could submit it through {@code Bulk.RunAction} or {@code /search/bulk/blobDiffPurge} with a
+     * query of their own, bypassing the auditor check of {@code BlobDiff.Purge}.
+     */
+    @Test
+    public void testThePurgeActionIsNotExposedOverHttp() {
+        assertFalse("blobDiffPurge must keep httpEnabled at false",
+                Framework.getService(BulkAdminService.class).isHttpEnabled(BlobDiffPurgeAction.ACTION_NAME));
+    }
 
     @Test
     public void testNonAuditorIsRefusedOnEveryPurgeOperation() throws Exception {

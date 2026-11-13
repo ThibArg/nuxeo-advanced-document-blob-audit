@@ -602,7 +602,8 @@ The purge runs on the Bulk Action Framework, as the `blobDiffPurge` action:
   bucket of a command it no longer knows, and it caches commands, so without it a stopped purge would
   delete everything already scrolled. An abort takes effect at the next batch of 50.
 
-Coverage: `TestBlobDiffPurgeAction`.
+Coverage: `TestBlobDiffPurgeAction`, which pins `httpEnabled` through `BulkAdminService#isHttpEnabled`
+and holds the first purge with `PurgeGateListener` while the second is refused.
 
 The `blobDiffSource` enricher computes the existence and the trash state of the source with a
 privileged session — an auditor may know that a source was deleted — and writes its title, path and

@@ -19,11 +19,11 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.Writer;
-import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,8 +44,6 @@ import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
-
-import com.sun.management.ThreadMXBean;
 
 /**
  * Tests for the Word / PDF path.
@@ -221,12 +219,11 @@ public class TestConverterTextExtractor {
                 }
             }
             Blob blob = new FileBlob(file, "text/plain", UTF_8.name(), "long.txt", null);
-            ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-            long before = threads.getCurrentThreadAllocatedBytes();
+            long before = allocatedBytes();
 
             DiffableContent content = passThrough().extract(blob, 100);
 
-            long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+            long allocated = allocatedBytes() - before;
             assertEquals(100, content.size());
             assertTrue(content.truncated());
             assertTrue("keeping 100 lines allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);

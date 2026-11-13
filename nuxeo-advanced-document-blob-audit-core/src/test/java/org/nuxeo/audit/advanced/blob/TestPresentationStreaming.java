@@ -19,6 +19,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.PPTX_MIME;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
 import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.onDisk;
 import static org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor.NOTES_PREFIX;
 import static org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor.SLIDE_MARKER;
@@ -26,7 +27,6 @@ import static org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor.TABL
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.lang.management.ManagementFactory;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -62,8 +62,6 @@ import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.nuxeo.ecm.core.api.Blob;
 import org.xml.sax.SAXException;
-
-import com.sun.management.ThreadMXBean;
 
 /**
  * RES-03 (code review 2026-10), second half: PPTX decks are streamed slide by slide with SAX instead
@@ -376,19 +374,15 @@ public class TestPresentationStreaming {
         return textShape(2, null, paragraphs);
     }
 
-    protected static long allocated() {
-        return ((ThreadMXBean) ManagementFactory.getThreadMXBean()).getCurrentThreadAllocatedBytes();
-    }
-
     /** The point of streaming: one slide of 200 000 paragraphs, of which {@code maxLines} are wanted. */
     @Test
     public void testStreamingStopsAtMaxLines() throws Exception {
         Blob blob = onDisk(deck("big.pptx", false, paragraphs(200_000)));
-        long before = allocated();
+        long before = allocatedBytes();
 
         DiffableContent content = new PresentationExtractor().extract(blob, 100);
 
-        long allocated = allocated() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(100, content.size());
         assertTrue(content.truncated());
         assertTrue("extracting 100 lines allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
@@ -398,11 +392,11 @@ public class TestPresentationStreaming {
     @Test
     public void testTheImageInventoryDoesNotBuildTheSlide() throws Exception {
         Blob blob = onDisk(deck("big.pptx", false, paragraphs(200_000) + picture(3, "r:embed=\"" + RID + "\"")));
-        long before = allocated();
+        long before = allocatedBytes();
 
         DiffableContent content = new PresentationImageInventory().extract(blob, MAX_LINES);
 
-        long allocated = allocated() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(1, content.size());
         assertTrue("listing one picture allocated " + allocated + " bytes", allocated < 32L * 1024 * 1024);
     }
@@ -545,11 +539,11 @@ public class TestPresentationStreaming {
                                                           .toList();
         PresentationExtractor extractor = new PresentationExtractor();
         extractor.init(Map.of("maxValueLength", String.valueOf(MAX_VALUE_LENGTH)));
-        long before = allocated();
+        long before = allocatedBytes();
 
         DiffableContent content = extractor.extract(blob, MAX_LINES);
 
-        long allocated = allocated() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(expected, values(content));
         assertEquals(3, content.size());
         assertTrue("reading a paragraph of " + length + " characters allocated " + allocated + " bytes",

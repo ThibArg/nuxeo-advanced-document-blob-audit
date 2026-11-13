@@ -19,6 +19,7 @@ import static java.util.Collections.nCopies;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -27,7 +28,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -70,8 +70,6 @@ import org.nuxeo.audit.advanced.blob.image.WordImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
 import org.nuxeo.runtime.api.Framework;
-
-import com.sun.management.ThreadMXBean;
 
 public class TestImageInventoryExtractor {
 
@@ -314,12 +312,11 @@ public class TestImageInventoryExtractor {
     @Test
     public void testAPdfFlateBombIsDigestedWithoutBeingDecoded() throws Exception {
         Blob blob = pdfWithFlateImage("bomb.pdf", 64L * 1024 * 1024);
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = extract(blob, MAX_LINES);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals("the image must be inventoried from its encoded bytes, not dropped", 1, content.size());
         assertFalse(content.truncated());
         assertTrue("extracting the inventory allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
@@ -631,12 +628,11 @@ public class TestImageInventoryExtractor {
             return xml.replace("<sheetData/>", rows);
         });
         Blob blob = BlobAuditTestHelper.onDisk(BlobAuditTestHelper.blob(bytes, BlobAuditTestHelper.XLSX_MIME, "big.xlsx"));
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = extract(blob, MAX_LINES);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(1, content.size());
         assertTrue("listing one picture allocated " + allocated + " bytes", allocated < 16L * 1024 * 1024);
     }
@@ -785,12 +781,11 @@ public class TestImageInventoryExtractor {
     @Test
     public void testAPictureAnchoredManyTimesInAnXlsIsCopiedOnce() throws Exception {
         Blob blob = xlsAnchoredManyTimes(png(512), 100);
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long before = threads.getCurrentThreadAllocatedBytes();
+        long before = allocatedBytes();
 
         DiffableContent content = new SpreadsheetImageInventory().extract(blob, MAX_LINES);
 
-        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        long allocated = allocatedBytes() - before;
         assertEquals(100, content.size());
         assertTrue("listing 100 placements allocated " + allocated + " bytes", allocated < 24L * 1024 * 1024);
     }

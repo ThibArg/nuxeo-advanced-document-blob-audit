@@ -17,15 +17,13 @@ package org.nuxeo.audit.advanced.blob;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.nuxeo.audit.advanced.blob.BlobAuditTestHelper.allocatedBytes;
 
-import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
 import org.junit.Test;
-
-import com.sun.management.ThreadMXBean;
 
 /**
  * Scaling tests for the positional diff, guarding the property that motivated the use of
@@ -74,10 +72,9 @@ public class TestTextDifferScaling {
         DiffableContent before = lines(paragraphs(REAL_WORLD_LINES, ""));
         DiffableContent after = lines(paragraphs(REAL_WORLD_LINES, " REWRITTEN"));
 
-        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        long start = threads.getCurrentThreadAllocatedBytes();
+        long start = allocatedBytes();
         DiffResult result = differ.diff(before, after);
-        long allocated = threads.getCurrentThreadAllocatedBytes() - start;
+        long allocated = allocatedBytes() - start;
 
         assertEquals(REAL_WORLD_LINES, result.removed() + result.changed());
         // A full matrix needs 4 * 4901 * 4901 bytes, ~92 MB, for this exact input.
