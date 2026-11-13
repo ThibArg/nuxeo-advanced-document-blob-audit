@@ -608,9 +608,11 @@ and holds the first purge with `PurgeGateListener` while the second is refused.
 The `blobDiffSource` enricher computes the existence and the trash state of the source with a
 privileged session — an auditor may know that a source was deleted — and writes its title, path and
 type only when the caller can read it: the one place where privileged data is narrowed before it
-reaches a caller (`TestBlobDiffManagement#testEnricherHidesASourceTheAuditorCannotRead`). No
-`documentResolver` on `bdiff:sourceId`: its validation would forbid recording an `error` diff for a
-deleted source.
+reaches a caller (`TestBlobDiffManagement#testEnricherHidesASourceTheAuditorCannotRead`). It costs
+two repository operations per diff, one privileged load and the caller's `Read` check, since the
+search results enrich a whole page of diffs, each on a source of its own: the title, path and type are
+read in that load, and only written when the check passes. No `documentResolver` on
+`bdiff:sourceId`: its validation would forbid recording an `error` diff for a deleted source.
 
 ### Logs, names, dates and concurrency
 

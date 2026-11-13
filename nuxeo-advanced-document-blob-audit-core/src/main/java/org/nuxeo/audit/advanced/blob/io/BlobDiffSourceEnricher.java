@@ -24,6 +24,7 @@ import org.nuxeo.audit.advanced.blob.BlobAuditConstants;
 import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.DocumentNotFoundException;
 import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.api.security.SecurityConstants;
 import org.nuxeo.ecm.core.io.marshallers.json.enrichers.AbstractJsonEnricher;
@@ -55,6 +56,22 @@ public class BlobDiffSourceEnricher extends AbstractJsonEnricher<DocumentModel> 
         super(NAME);
     }
 
+    /**
+     * What the enricher needs of the source, read in one privileged load.
+     *
+     * @since 2025.1
+     */
+    protected record Source(boolean trashed, String title, String path, String type) {
+    }
+
+    /**
+     * Writes the state of the source in two repository operations per {@code BlobDiff}: one privileged
+     * load, and the caller's {@code Read} check. The search results enrich a whole page of diffs, each
+     * on its own source.
+     * <p>
+     * Title, path and type are read in the privileged load, but only written when the caller holds
+     * {@code Read}: the output is exactly what reading them with the caller's session gives.
+     */
     @Override
     public void write(JsonGenerator jg, DocumentModel document) throws IOException {
         jg.writeFieldName(NAME);
@@ -68,21 +85,24 @@ public class BlobDiffSourceEnricher extends AbstractJsonEnricher<DocumentModel> 
         var ref = new IdRef(sourceId.toString());
         try (SessionWrapper wrapper = ctx.getSession(document)) {
             CoreSession session = wrapper.getSession();
-            boolean[] state = CoreInstance.doPrivileged(session, s -> {
-                boolean exists = s.exists(ref);
-                return new boolean[] { exists, exists && s.getDocument(ref).isTrashed() };
+            Source source = CoreInstance.doPrivileged(session, s -> {
+                try {
+                    DocumentModel doc = s.getDocument(ref);
+                    return new Source(doc.isTrashed(), doc.getTitle(), doc.getPathAsString(), doc.getType());
+                } catch (DocumentNotFoundException e) {
+                    return null;
+                }
             });
-            boolean readable = state[0] && session.hasPermission(ref, SecurityConstants.READ);
+            boolean readable = source != null && session.hasPermission(ref, SecurityConstants.READ);
             jg.writeStartObject();
             jg.writeStringField("uid", ref.toString());
-            jg.writeBooleanField("exists", state[0]);
-            jg.writeBooleanField("trashed", state[1]);
+            jg.writeBooleanField("exists", source != null);
+            jg.writeBooleanField("trashed", source != null && source.trashed());
             jg.writeBooleanField("readable", readable);
             if (readable) {
-                DocumentModel source = session.getDocument(ref);
-                jg.writeStringField("title", source.getTitle());
-                jg.writeStringField("path", source.getPathAsString());
-                jg.writeStringField("type", source.getType());
+                jg.writeStringField("title", source.title());
+                jg.writeStringField("path", source.path());
+                jg.writeStringField("type", source.type());
             }
             jg.writeEndObject();
         }

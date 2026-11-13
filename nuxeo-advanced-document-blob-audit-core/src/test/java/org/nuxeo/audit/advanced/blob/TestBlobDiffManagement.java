@@ -811,6 +811,8 @@ public class TestBlobDiffManagement {
         assertTrue(info.get("readable").asBoolean());
         assertEquals(source.getPathAsString(), info.get("path").asText());
         assertEquals(source.getId(), info.get("uid").asText());
+        assertEquals(source.getTitle(), info.get("title").asText());
+        assertEquals("File", info.get("type").asText());
     }
 
     @Test
