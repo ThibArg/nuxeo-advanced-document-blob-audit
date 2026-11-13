@@ -335,6 +335,7 @@ A purge is asynchronous; the Web UI runs this sequence for you, and a script sch
 - **No scheduled retention.** The purge is manual, or scheduled by your own script following the sequence above.
 - **Retry** needs the binaries to be still in the blob store.
 - **Diff-to-diff navigation in Web UI.** Opening a `BlobDiff` from another one — from the drawer queue or from a link — updates the URL, the title and the header, but the page keeps showing the previous diff; a reload shows the right one. Under investigation: the document never reaches the plugin's view layout.
+- **Web UI with `org.nuxeo.web.ui.expressions.eval=false`** (the setting that enables the Content-Security-Policy of Web UI): the drawer entry, the drawer search form and the "Content changes" tab are hidden from everyone, administrators included, because their visibility filter calls a helper of the plugin that the sandboxed expressions cannot reach, and `#!/search/blobdiffs` shows an empty pane. Nothing else is affected: the diffs are recorded, a `BlobDiff` opened from its URL is displayed with its actions, and the operations and the server checks work as usual. Hiding Edit on `BlobDiff` documents works in both modes.
 
 ## Build and Tests
 

@@ -742,6 +742,15 @@ same button behind a filter excluding `BlobDiff`: `nuxeo-slots` replaces a conte
 registered with the same or a higher priority, and the plugin bundle is appended to the `web-ui`
 bundle, so it registers after the platform. Re-check this override when upgrading Web UI. An
 `Immutable` facet would not do: the core derives immutability from versions and proxies.
+The filter is `!this.hasType(document, 'BlobDiff')`: `FiltersBehavior` and `document` only, like
+the platform's expressions. With `org.nuxeo.web.ui.expressions.eval=false` (the Content-Security-
+Policy mode), `nuxeo-filter` runs its expression in a sandbox holding `this` (`FiltersBehavior`),
+`document` and `user`, nothing else; an expression calling `Nuxeo.BlobAudit` raises there, the
+filter stays closed, and since this content replaces the platform's, Edit would vanish on every
+document type. The three visibility filters (drawer entry, drawer form, document tab) do call
+`Nuxeo.BlobAudit.isAuditor`, which reads the configured auditors group: in that mode they hide the
+feature from everyone, a limitation the README states. They are cosmetic, the server enforces the
+access.
 `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it, and would get a 404.
 
 `nuxeo-blobdiff-viewer` aborts the request in flight when it is handed another diff and ignores any

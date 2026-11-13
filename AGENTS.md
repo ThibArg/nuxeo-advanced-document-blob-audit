@@ -350,7 +350,12 @@ when broken; there is no test. Why: `docs/DESIGN.md` §8.
 **The Web UI overrides are deliberate.** `blobDiffSource` is added to the list property
 `org.nuxeo.web.ui.enrichers.document` (the `BlobDiff` view fetches the document once); the
 `editDocumentAction` slot content is re-contributed to hide Edit on `BlobDiff` — re-check both when
-upgrading Web UI. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose. Why: `docs/DESIGN.md` §8.
+upgrading Web UI. Its filter expression uses `FiltersBehavior` and `document` only
+(`!this.hasType(document, 'BlobDiff')`), never a `Nuxeo.*` global: with
+`org.nuxeo.web.ui.expressions.eval=false` the sandbox cannot reach one, and a failing filter there
+hides Edit on every type. The three visibility filters keep `Nuxeo.BlobAudit.isAuditor` on purpose
+(the README states the CSP-mode limitation). `nuxeo-blobdiff-metadata-layout.html` is empty on
+purpose. Why: `docs/DESIGN.md` §8.
 
 ## Conventions
 
@@ -532,4 +537,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 96.
+`git log --grep '^Item '`. Next free number: 97.

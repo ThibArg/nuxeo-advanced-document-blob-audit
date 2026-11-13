@@ -35,10 +35,6 @@
         return schemas.indexOf('file') >= 0 || schemas.indexOf('files') >= 0;
       },
 
-      isEditable: function (document) {
-        return !!document && document.type !== 'BlobDiff';
-      },
-
       /**
        * The <nuxeo-search-form> of the audit search, or null.
        *

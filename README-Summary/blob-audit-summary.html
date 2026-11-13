@@ -533,6 +533,7 @@ extended    xpath             = file:content
   <li><strong>Image inventory.</strong> The image reader is chosen from the <em>new</em> version's MIME type; a failing inventory falls back to the text diff, with a WARN.</li>
   <li><strong>Imports and migrations</strong>: mute the listener, or every re-versioned document produces a diff.</li>
   <li><strong>Retry</strong> works only while the old binaries are still in the blob store (the binary GC can remove them).</li>
+  <li><strong>Web UI in CSP mode</strong> (<code>org.nuxeo.web.ui.expressions.eval=false</code>): the drawer entry, its search form and the "Content changes" tab are hidden from everyone; diffs, operations and the BlobDiff page still work, and Edit stays hidden on BlobDiff only.</li>
 </ul>
 
 <footer>Merged from three summaries of the plugin sources (README.md, AGENTS.md, contributions, extractors, work, Web UI). No code was modified or built.</footer>

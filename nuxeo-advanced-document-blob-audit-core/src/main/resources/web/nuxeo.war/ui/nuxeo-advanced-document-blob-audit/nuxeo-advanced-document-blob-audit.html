@@ -92,10 +92,15 @@
   same name replaces it) with the same button, minus BlobDiff documents: a diff is a record, it has
   no edit layout. Web UI only shows Edit to holders of WriteProperties, so this concerns
   administrators. Re-check this override when upgrading Web UI.
+
+  The expression uses nothing but FiltersBehavior and document, like the platform's own: with
+  org.nuxeo.web.ui.expressions.eval=false (CSP), nuxeo-filter runs it in a sandbox where no global
+  such as Nuxeo.BlobAudit exists, and since this replaces the platform action, a failing expression
+  would hide Edit on every document type.
 -->
 <nuxeo-slot-content name="editDocumentAction" slot="DOCUMENT_ACTIONS" order="10">
   <template>
-    <nuxeo-filter document="[[document]]" expression="Nuxeo.BlobAudit.isEditable(document)">
+    <nuxeo-filter document="[[document]]" expression="!this.hasType(document, 'BlobDiff')">
       <template>
         <nuxeo-document-edit-button document="[[document]]"></nuxeo-document-edit-button>
       </template>
