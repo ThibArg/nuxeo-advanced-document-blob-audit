@@ -362,8 +362,9 @@ What each test class covers, and the test resources, are listed in [`AGENTS.md`]
 These solutions are provided for inspiration and we encourage customers to use them as code samples and learning
 resources.
 
-This is a moving project (no API maintenance, no deprecation process, etc.) If any of these solutions are found to be
-useful for the Nuxeo Platform in general, they will be integrated directly into platform, not maintained here.
+> [!TIP]
+> If you need this feature,  **we strongly recommend a Nuxeo Partner or your dev team forks the code
+> and takes ownership** (tuning, maintenance, support)
 
 ## Licence
 
@@ -371,10 +372,6 @@ useful for the Nuxeo Platform in general, they will be integrated directly into 
 
 ## About Nuxeo
 
-Nuxeo Platform is an open source highly scalable, cloud-native, enterprise content management product with rich multimedia support, written in Java. Data can be stored in both SQL & NoSQL databases.
-
-The development of the Nuxeo Platform is mostly done by Nuxeo employees with an open development model.
-
-The source code, documentation, roadmap, issue tracker, testing, benchmarks are all public.
-
-More information is available at [Hyland/Nuxeo](https://www.hyland.com/en/solutions/products/nuxeo-platform).
+[Nuxeo](https://www.hyland.com/en/products/nuxeo-platform), developed by [Hyland](https://www.hyland.com),
+is a Content Services platform. It provides an easy-to-use, highly customizable and extensible
+architecture for building content-centric applications.
