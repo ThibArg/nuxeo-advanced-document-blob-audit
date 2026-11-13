@@ -206,7 +206,7 @@
   <text x="580" y="308" font-size="12" font-family="Menlo, monospace">skippedNotManaged</text>
   <text x="780" y="308" font-size="12">no provider / key</text>
   <text x="580" y="326" font-size="12" font-family="Menlo, monospace">skippedListChanged</text>
-  <text x="780" y="326" font-size="12">list entries moved</text>
+  <text x="780" y="326" font-size="12">entries removed / moved</text>
   <line x1="255" y1="308" x2="255" y2="341" stroke="#777" stroke-width="2" marker-end="url(#a2)"/>
   <text x="265" y="330" font-size="12" fill="#2e7d32" font-weight="700">yes</text>
   <rect x="40" y="343" width="430" height="72" rx="10" fill="#e9f5ea" stroke="#2e7d32" stroke-width="2"/>
@@ -247,14 +247,14 @@ extended    xpath             = file:content
 </div>
 <ul>
   <li><strong>Frozen pair.</strong> The storage keys (provider + key) of both files are captured at check-in: a later edit cannot turn v1.0 → v1.1 into v1.0 → "whatever is current".</li>
-  <li><strong>Idempotent.</strong> Deterministic work id (a pair is never queued twice) and correlation-id check (a job that runs twice never creates two BlobDiffs). Transient failures are retried twice.</li>
+  <li><strong>Idempotent.</strong> A job that runs twice never creates two BlobDiffs: the correlation-id check runs before the read and again before the write. The work id is a readable name, not a deduplication key (LTS 2025 ignores <code>IF_NOT_RUNNING_OR_SCHEDULED</code>). Transient failures are retried twice.</li>
   <li><strong>Isolated.</strong> Dedicated <code>blobDiff</code> queue, 2 threads: a burst of large Office/PDF check-ins cannot starve other work.</li>
-  <li><strong>Always leaves a trace.</strong> Once the audit entry has a correlation id, the job ends with a <code>BlobDiff</code>: <code>ok</code>, <code>skipped…</code> (the configuration moved meanwhile — <code>maxBlobSize</code> lowered, an extractor disabled, a MIME type moved to another contribution) or <code>error</code> (retryable).</li>
+  <li><strong>Always leaves a trace.</strong> Once the audit entry has a correlation id, the job ends with a <code>BlobDiff</code>: <code>ok</code>, <code>skippedContentReplaced</code> (a text file replaced by an unrelated one of another format: counters and similarity, no body), <code>skipped…</code> (the configuration moved meanwhile — <code>maxBlobSize</code> lowered, an extractor disabled, a MIME type moved to another contribution) or <code>error</code> (retryable; a failed local copy of a file ends there too).</li>
 </ul>
 
 <!-- ============================================================ 6 -->
 <h2 id="s6"><span class="num">6.</span>Choosing the extractor: an ordered MIME-type ladder</h2>
-<p>No scoring, no lookup table: extractors are sorted by <code>order</code> and the <strong>first one that accepts the MIME type wins</strong> (lower-cased, <code>; charset=…</code> removed). <code>text/*</code> is the only wildcard; everything else is an exact match.</p>
+<p>No scoring, no lookup table: extractors are sorted by <code>order</code> and the <strong>first one that accepts the MIME type wins</strong> (lower-cased, <code>; charset=…</code> removed). <code>text/*</code> is the only wildcard shipped; everything else is an exact match.</p>
 <div class="figure">
 <svg viewBox="0 0 1100 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica, Arial, sans-serif">
   <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker></defs>
@@ -324,8 +324,8 @@ extended    xpath             = file:content
   <strong>One contribution, one comparability class.</strong> A version is only diffed against the previous one when the <em>same</em> contribution reads both files. Two different ones — an <code>.xlsx</code> replaced by a <code>.docx</code>, a Word document replaced by its PDF rendition, a <code>.ppt</code> by a <code>.pptx</code> — give <code>skippedFormatChanged</code>: the audit entry is written, no diff is computed. The extractions cut the document differently (cells, paragraphs, rendered lines), so such a diff would report everything as removed then added, and copy both documents into <code>/change-diff</code> for nothing. A conversion <em>inside</em> one class is still diffed: <code>.xls</code> → <code>.xlsx</code>, <code>.doc</code> → <code>.docx</code>, <code>.txt</code> → <code>.json</code> (every text format is in <code>plainText</code>, which reads raw lines whatever the MIME type). <code>pdf</code> and <code>legacyPresentation</code> use the very same class and properties as <code>converter</code> and exist as separate contributions for that reason alone. So <strong>where a MIME type is contributed decides what can be compared with what</strong>: to compare two formats, put them in one contribution; to stop comparing two, split it. When one side has no extractor at all, <code>skippedUnsupportedType</code> wins.
 </div>
 
-<h3>Optional: the image inventory (<code>imageAnalysisLevel = 1</code>)</h3>
-<p>Text extraction ignores pictures. At level 1 (default 0, off), a <strong>second ladder</strong> (the <code>imageExtractors</code> point: <code>imageWord</code>, <code>imageSpreadsheet</code>, <code>imagePresentation</code>, <code>imagePdf</code>, all backed by <code>ImageInventoryExtractor</code>) lists every placed image with a stable key and its SHA-256, e.g. <code>excel:image:Budget:B4:F18</code>, <code>powerpoint:slide:3:image:image1.png</code>, <code>pdf:page:2:image:1</code>. The result is a keyed diff appended under a <code># Images</code> heading. Images are compared by hash, not visually; PDF images are <strong>never decoded</strong> (raw stream hashed — protects against compression bombs), so a re-compressed identical-looking picture is reported as changed.</p>
+<h3>Optional: the image inventory (<code>imageInventory = true</code>)</h3>
+<p>Text extraction ignores pictures. When <code>imageInventory</code> is on (default off), a <strong>second ladder</strong> (the <code>imageExtractors</code> point: <code>imageWord</code>, <code>imageSpreadsheet</code>, <code>imagePresentation</code>, <code>imagePdf</code>, one class per format — <code>WordImageInventory</code>, <code>SpreadsheetImageInventory</code>, <code>PresentationImageInventory</code>, <code>PdfImageInventory</code>) lists every placed image with a stable key and its SHA-256, e.g. <code>excel:image:Budget:B4:F18</code>, <code>powerpoint:slide:3:image:image1.png</code>, <code>pdf:page:2:image:1</code>. The result is a keyed diff appended under a <code># Images</code> heading. Images are compared by hash, not visually; PDF images are <strong>never decoded</strong> (raw stream hashed — protects against compression bombs), so a re-compressed identical-looking picture is reported as changed.</p>
 
 <!-- ============================================================ 7 -->
 <h2 id="s7"><span class="num">7.</span>The diff engine: one <code>TextDiffer</code> for every format</h2>
@@ -424,21 +424,21 @@ extended    xpath             = file:content
       <tr><td>Versions</td><td>previous/new VersionId &amp; Label, versionSeriesId</td></tr>
       <tr><td>Who / when</td><td>user, date (= check-in time), correlationId</td></tr>
       <tr><td>Files</td><td>old/new filename, digest, MIME type, length, storage key (used by Retry)</td></tr>
-      <tr><td>Result</td><td>status, summary, added, removed, changed, truncated</td></tr>
+      <tr><td>Result</td><td>status, summary, added, removed, changed, truncated, similarity</td></tr>
       <tr><td>Diff</td><td><code>bdiff:diff</code>, a blob <code>&lt;name&gt;.diff.txt</code></td></tr>
     </table>
     <p style="font-size:.9em;color:var(--muted);margin:4px 0">Stored as a blob (not a DB field), type flagged <code>NotFulltextIndexable</code>, hidden in navigation and collections.</p>
   </div>
   <div class="card">
     <h3>Where it lives</h3>
-<pre>/change-diff        hidden · local ACL: auditorsGroup →
+<pre>/change-diff        hidden · local ACL: auditors group →
  │                   Read, Remove, RemoveChildren;
  │                   inheritance BLOCKED
  └── 2026/10/24      dated folders (UTC), inherit the ACL
       └── &lt;sourceId&gt;-&lt;time&gt;-&lt;correlationId&gt;</pre>
     <ul style="font-size:.92em">
       <li>Root created at <strong>every startup</strong> (even when disabled); ACL checked and repaired.</li>
-      <li>Statuses: <code>ok</code>, <code>error</code> (retryable), <code>retrying</code>, <code>skippedTooLarge</code>, <code>skippedUnsupportedType</code>, <code>skippedFormatChanged</code>.</li>
+      <li>Statuses: <code>ok</code>, <code>error</code> (retryable; it stays <code>error</code> while its replay runs), <code>skippedContentReplaced</code> (no body), and <code>skippedTooLarge</code>, <code>skippedUnsupportedType</code>, <code>skippedFormatChanged</code> when the job re-checks the pair. <code>skippedNotManaged</code> and <code>skippedListChanged</code> are audit <code>skipReason</code>s only: no BlobDiff.</li>
     </ul>
   </div>
 </div>
@@ -468,9 +468,9 @@ extended    xpath             = file:content
 <!-- ============================================================ 10 -->
 <h2 id="s10"><span class="num">10.</span>What auditors get in Web UI</h2>
 <div class="two-cols">
-  <div class="card"><h3>① Drawer: "Content changes audit"</h3>Search page: date range, source, user, "truncated only"; facets on status, format, xpath, user. Needs Elasticsearch/OpenSearch.</div>
+  <div class="card"><h3>① Drawer: "Content changes audit"</h3>Search page: date range, source, user, "truncated only"; facets on status, format, xpath, user. The list works on any instance; the facets need a search engine (OpenSearch/Elasticsearch) and stay empty without one.</div>
   <div class="card"><h3>② Document tab: "Content changes"</h3>On documents with the <code>file</code> or <code>files</code> schema: list of their diffs (date, v1.0 → v1.1, user, xpath, summary, status), plus "open all" to the pre-filtered search.</div>
-  <div class="card"><h3>③ BlobDiff page</h3>Metadata, the colour-coded diff (green +, red −, orange ~), and <em>Download</em>, <em>Retry</em> (error only), <em>Delete permanently</em>.</div>
+  <div class="card"><h3>③ BlobDiff page</h3>Metadata, the colour-coded diff (green +, red −, orange ~), and <em>Download</em>, <em>Retry</em> (error only), <em>Delete permanently</em>. No <em>Edit</em>: a diff is a record.</div>
   <div class="card"><h3>④ Housekeeping</h3><em>Purge</em> older than a date (optionally by status), async bulk action with progress/abort, then empty folders cleaned. <strong>No automatic retention.</strong></div>
 </div>
 <p style="font-size:.92em;color:var(--muted)">Operations: <code>BlobDiff.Retry</code>, <code>.Delete</code>, <code>.Purge</code>, <code>.PurgeStatus</code>, <code>.PurgeAbort</code>, <code>.CleanEmptyFolders</code> — auditors only.</p>
@@ -485,9 +485,9 @@ extended    xpath             = file:content
     <tr><td><code>xpaths</code></td><td><code>file:content</code></td><td><code>*</code> = every blob property</td></tr>
     <tr><td><code>maxBlobSize</code></td><td>10 MB</td><td>Above: <code>skippedTooLarge</code></td></tr>
     <tr><td><code>maxLines</code></td><td>10,000</td><td>Units extracted per file</td></tr>
-    <tr><td><code>maxDiffEntries</code> / <code>maxDiffChars</code> / <code>maxValueLength</code></td><td>5,000 / 4 MB / 4,096</td><td>Size of the stored diff</td></tr>
-    <tr><td><code>imageAnalysisLevel</code></td><td>0</td><td>1 = image inventory</td></tr>
-    <tr><td>auditors group</td><td><code>administrators</code></td><td>Who reads / manages diffs</td></tr>
+    <tr><td><code>maxDiffEntries</code> / <code>maxDiffChars</code> / <code>maxValueLength</code></td><td>5,000 / 4,194,304 chars / 4,096</td><td>Size of the stored diff</td></tr>
+    <tr><td><code>imageInventory</code></td><td>false</td><td>true = image inventory</td></tr>
+    <tr><td>auditors group</td><td><code>administrators</code></td><td>Who reads / manages diffs: property <code>org.nuxeo.web.ui.blobaudit.auditorsGroup</code></td></tr>
     <tr><td>queue <code>blobDiff</code></td><td>2 threads</td><td>Diff concurrency</td></tr>
   </table>
   <div>
@@ -510,13 +510,14 @@ extended    xpath             = file:content
 <h2 id="s12"><span class="num">12.</span>Code map</h2>
 <table>
   <tr><th>Class / package</th><th>Role</th></tr>
-  <tr><td><code>BlobModificationListener</code> <span class="badge s">SYNC</span></td><td>Check-in hooks, exact version pairing</td></tr>
-  <tr><td><code>BlobDiffTrigger</code>, <code>DiffEligibility</code>, <code>FrozenBlobs</code> <span class="badge s">SYNC</span></td><td>Scope, digest check, skip or schedule; freeze the storage keys</td></tr>
+  <tr><td><code>BlobModificationListener</code>, <code>VersionBlobPairs</code> <span class="badge s">SYNC</span></td><td>Check-in hooks, exact version pairing, which blobs to compare</td></tr>
+  <tr><td><code>BlobDiffTrigger</code>, <code>DiffEligibility</code>, <code>DiffRequest</code>, <code>FrozenBlob</code> <span class="badge s">SYNC</span></td><td>Scope, digest check, skip or schedule; freeze the storage keys</td></tr>
   <tr><td><code>work/BlobDiffWork</code> <span class="badge a">ASYNC</span></td><td>Read → extract + diff (no tx) → write BlobDiff</td></tr>
-  <tr><td><code>BlobDiffComponent</code> / <code>BlobDiffService</code></td><td>Config and extractor registries</td></tr>
-  <tr><td><code>extractor/*</code>, <code>image/ImageInventoryExtractor</code></td><td>Format → <code>DiffableContent</code></td></tr>
+  <tr><td><code>BlobDiffComponent</code> / <code>BlobDiffService</code></td><td>Config and extractor registries, eligibility, diff</td></tr>
+  <tr><td><code>BlobDiffStore</code>, <code>DiffStatus</code></td><td><code>/change-diff</code> folders, ACL repair, BlobDiff creation; the statuses and their audit comments</td></tr>
+  <tr><td><code>BlobContentExtractor</code>, <code>extractor/*</code>, <code>image/*</code>, <code>io/MaterializedBlob</code>, <code>io/OoxmlPackages</code></td><td>Format → <code>DiffableContent</code>, from one local file per binary</td></tr>
   <tr><td><code>TextDiffer</code>, <code>DiffResult</code></td><td>Format-agnostic diff</td></tr>
-  <tr><td><code>BlobDiffRepositoryInit</code></td><td><code>/change-diff</code> creation and ACL repair</td></tr>
+  <tr><td><code>BlobDiffRepositoryInit</code></td><td><code>/change-diff</code> creation and ACL repair at each startup</td></tr>
   <tr><td><code>BlobDiffLocationListener</code>, <code>BlobDiffAccess</code> <span class="badge r">SECURITY</span></td><td>Keep diffs in the container, auditor checks</td></tr>
   <tr><td><code>operations/*</code>, <code>bulk/BlobDiffPurgeAction</code></td><td>Retry, delete, purge</td></tr>
 </table>
@@ -526,10 +527,10 @@ extended    xpath             = file:content
 <ul>
   <li><strong>No version, no audit.</strong> A file replaced without versioning shows up at the next version, compared with the previous one.</li>
   <li><strong>Text only.</strong> Formatting is not diffed; a scanned PDF without OCR gives <code>ok</code> with an empty diff.</li>
-  <li><strong>A change of format is not diffed.</strong> A new version read by another extractor contribution than the previous one (<code>.xlsx</code> → <code>.docx</code>, <code>.docx</code> → <code>.pdf</code>, <code>.ppt</code> → <code>.pptx</code>) is audited as <code>skippedFormatChanged</code>, with no diff (§6). A conversion within one contribution (<code>.xls</code> → <code>.xlsx</code>, <code>.doc</code> → <code>.docx</code>, <code>.txt</code> → <code>.json</code>) is still diffed.</li>
+  <li><strong>A change of format is not diffed.</strong> A new version read by another extractor contribution than the previous one (<code>.xlsx</code> → <code>.docx</code>, <code>.docx</code> → <code>.pdf</code>, <code>.ppt</code> → <code>.pptx</code>) is audited as <code>skippedFormatChanged</code>, with no diff (§6). A conversion within one contribution (<code>.xls</code> → <code>.xlsx</code>, <code>.doc</code> → <code>.docx</code>, <code>.txt</code> → <code>.json</code>) is still diffed — except a text file replaced by an unrelated one of another format, filed <code>skippedContentReplaced</code>: counters and similarity, no body.</li>
   <li><strong>Excel is structurally sensitive.</strong> Inserting a row shifts every cell below; renaming a sheet = all cells removed then added.</li>
   <li><strong>MIME matching is exact.</strong> <code>application/x-yaml</code> and <code>text/yaml</code> match, <code>application/yaml</code> does not.</li>
-  <li><strong>Image inventory quirks.</strong> The image reader is chosen from the <em>new</em> version's MIME type. Macro-enabled <code>.pptm/.ppsm</code> and a PDF MIME type with parameters yield an empty image inventory silently (text is unaffected).</li>
+  <li><strong>Image inventory.</strong> The image reader is chosen from the <em>new</em> version's MIME type; a failing inventory falls back to the text diff, with a WARN.</li>
   <li><strong>Imports and migrations</strong>: mute the listener, or every re-versioned document produces a diff.</li>
   <li><strong>Retry</strong> works only while the old binaries are still in the blob store (the binary GC can remove them).</li>
 </ul>
