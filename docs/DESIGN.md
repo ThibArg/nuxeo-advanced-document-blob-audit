@@ -635,6 +635,12 @@ The purge runs on the Bulk Action Framework, as the `blobDiffPurge` action:
   exclusivity check — to `beforeCompletion`, so a concurrent purge would surface as a commit failure
   instead of a 409, and the returned id would not be queryable until commit. The operation writes
   nothing to the repository, so there is nothing to undo;
+- the refusal of a second purge is mapped to a 409 from **both** exceptions the platform uses for it:
+  `ConcurrentUpdateException` from NXP-33925 on, `IllegalStateException` on the LTS 2025 hotfixes
+  before it (2025.24.15 included), which `BulkServiceImpl#submit` raises for nothing else. Left
+  uncaught, the latter reaches Automation as an `OperationException`: a 500 and an `ERROR` in
+  `server.log` for a normal, transient refusal. Coverage:
+  `TestBlobDiffPurgeAction#testASecondPurgeIsRefusedWhileOneIsRunning`, which asserts the status;
 - `BlobDiff.PurgeStatus` and `BlobDiff.PurgeAbort` go through `BlobDiffPurgeAction#purgeStatus`:
   `BulkService#getStatus` and `#abort` check neither the action nor the owner of a command id, so any
   other command looks `UNKNOWN` — no oracle — and is never aborted. Any auditor may stop any purge, by

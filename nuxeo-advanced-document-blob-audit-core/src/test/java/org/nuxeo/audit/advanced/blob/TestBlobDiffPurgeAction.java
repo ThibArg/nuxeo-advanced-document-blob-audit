@@ -46,6 +46,7 @@ import org.nuxeo.ecm.core.api.CloseableCoreSession;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
+import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.PathRef;
 import org.nuxeo.ecm.core.bulk.BulkAdminService;
 import org.nuxeo.ecm.core.bulk.BulkService;
@@ -328,6 +329,7 @@ public class TestBlobDiffPurgeAction {
                 fail("a second purge must be refused while one is running");
             } catch (Exception e) {
                 assertTrue("expected an exclusivity error, got " + e, messageOf(e).contains("already running"));
+                assertEquals("a purge already running is a 409, never a 500", 409, statusOf(e));
             }
         } finally {
             PurgeGateListener.release();
@@ -467,6 +469,14 @@ public class TestBlobDiffPurgeAction {
             sb.append(t.getMessage()).append(' ');
         }
         return sb.toString();
+    }
+
+    /**
+     * The HTTP status a caller gets: Automation passes a {@link NuxeoException} raised by the operation
+     * through with its status, and wraps anything else into an {@code OperationException}, a 500.
+     */
+    protected int statusOf(Exception e) {
+        return e instanceof NuxeoException nuxeoException ? nuxeoException.getStatusCode() : 500;
     }
 
     protected void restartTransaction() {

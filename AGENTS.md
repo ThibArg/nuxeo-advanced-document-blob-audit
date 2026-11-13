@@ -248,7 +248,9 @@ out. Do not reintroduce a `configuration` contribution for it. Coverage:
 
 **The purge stays off the HTTP surface and removes nothing but diffs.** The `blobDiffPurge` action
 keeps `httpEnabled` at its default `false`; `BlobDiff.Purge` is the only entry point (auditor check,
-query built server side, `submit()` and not `submitTransactional()`); the computation removes only
+query built server side, `submit()` and not `submitTransactional()`, a second purge refused with 409
+from `ConcurrentUpdateException` and from `IllegalStateException` — the platform raises one or the
+other depending on the hotfix); the computation removes only
 `BlobDiff` documents and checks `isAbortedCommand` before each batch; `BlobDiff.PurgeStatus` and
 `BlobDiff.PurgeAbort` go through `BlobDiffPurgeAction#purgeStatus`, which answers any other command
 as `UNKNOWN`. Coverage: `TestBlobDiffPurgeAction` (`httpEnabled` pinned by
@@ -562,4 +564,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 108.
+`git log --grep '^Item '`. Next free number: 109.

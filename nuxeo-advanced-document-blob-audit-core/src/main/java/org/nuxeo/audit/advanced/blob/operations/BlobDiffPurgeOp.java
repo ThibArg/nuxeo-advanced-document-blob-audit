@@ -114,9 +114,14 @@ public class BlobDiffPurgeOp {
              * the repository, so there is no work to undo if it does not commit.
              */
             commandId = Framework.getService(BulkService.class).submit(command);
-        } catch (ConcurrentUpdateException e) {
-            // 409, not the default 500: a purge already running is a legitimate, transient refusal
-            // the caller can act on, like every other refusal this plugin reports.
+        } catch (ConcurrentUpdateException | IllegalStateException e) {
+            /*
+             * 409, not the default 500: a purge already running is a legitimate, transient refusal the
+             * caller can act on, like every other refusal this plugin reports. The bulk service signals
+             * it with ConcurrentUpdateException from NXP-33925 on, with IllegalStateException on the
+             * LTS 2025 hotfixes before it; its submit() raises the latter for nothing else (the other
+             * refusals are IllegalArgumentException), so both mean "already running".
+             */
             throw new NuxeoException("A BlobDiff purge is already running on this repository", e, 409);
         }
         log.info("BlobDiff purge scheduled by {}: command {} (before {}, status {})", user, commandId,
