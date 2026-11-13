@@ -116,7 +116,7 @@ Two extractors do not cut a document into units the same way: comparing the cell
 |---|---|---|
 | `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
 | `presentation` | pptx, pptm, ppsx, potx | yes |
-| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: lines are read raw, whatever the mime type — but see the next section |
+| `plainText` | `text/*`, json, xml, yaml (`application/yaml`, `application/x-yaml`), javascript, sql | yes: lines are read raw, whatever the mime type — but see the next section |
 | `converter` | docx, doc, odt, rtf (`application/rtf` or `text/rtf`) | yes: the converter cuts all of them into paragraphs |
 | `pdf` | pdf | — |
 | `legacyPresentation` | ppt | — |

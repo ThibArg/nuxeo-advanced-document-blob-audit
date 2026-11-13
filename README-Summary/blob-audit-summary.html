@@ -275,7 +275,7 @@ extended    xpath             = file:content
     <text x="56" y="307" font-size="11" fill="#555" font-style="italic">same class, three contributions: never compared with each other</text>
     <rect x="40" y="336" width="420" height="66" rx="10" fill="#e8f1fb" stroke="#1565c0" stroke-width="2"/>
     <text x="56" y="360" font-weight="700" font-size="12.5">order 1000 · plainText (last: the text/* catch-all)</text>
-    <text x="56" y="384">text/* · json · xml · x-yaml · javascript · sql</text>
+    <text x="56" y="384">text/* · json · xml · yaml, x-yaml · javascript · sql</text>
   </g>
   <g stroke="#777" stroke-width="2">
     <line x1="250" y1="138" x2="250" y2="158" marker-end="url(#a3)"/>
@@ -529,7 +529,7 @@ extended    xpath             = file:content
   <li><strong>Text only.</strong> Formatting is not diffed; a scanned PDF without OCR gives <code>ok</code> with an empty diff.</li>
   <li><strong>A change of format is not diffed.</strong> A new version read by another extractor contribution than the previous one (<code>.xlsx</code> → <code>.docx</code>, <code>.docx</code> → <code>.pdf</code>, <code>.ppt</code> → <code>.pptx</code>) is audited as <code>skippedFormatChanged</code>, with no diff (§6). A conversion within one contribution (<code>.xls</code> → <code>.xlsx</code>, <code>.doc</code> → <code>.docx</code>, <code>.txt</code> → <code>.json</code>) is still diffed — except a text file replaced by an unrelated one of another format, filed <code>skippedContentReplaced</code>: counters and similarity, no body.</li>
   <li><strong>Excel is structurally sensitive.</strong> Inserting a row shifts every cell below; renaming a sheet = all cells removed then added.</li>
-  <li><strong>MIME matching is exact.</strong> <code>application/x-yaml</code> and <code>text/yaml</code> match, <code>application/yaml</code> does not.</li>
+  <li><strong>MIME matching is exact.</strong> A textual type outside <code>text/*</code> is read only when listed: <code>application/x-yaml</code> and <code>application/yaml</code> are, <code>application/toml</code> is not — add it to <code>plainText</code>.</li>
   <li><strong>Image inventory.</strong> The image reader is chosen from the <em>new</em> version's MIME type; a failing inventory falls back to the text diff, with a WARN.</li>
   <li><strong>Imports and migrations</strong>: mute the listener, or every re-versioned document produces a diff.</li>
   <li><strong>Retry</strong> works only while the old binaries are still in the blob store (the binary GC can remove them).</li>

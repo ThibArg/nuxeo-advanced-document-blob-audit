@@ -366,6 +366,18 @@ public class TestBlobDiffService {
         assertEquals(DiffEligibility.FORMAT_CHANGED, pairEligibility("text/plain", "text/rtf"));
     }
 
+    /**
+     * YAML is read as text under its registered type (RFC 9512) as under the older {@code x-} one, and
+     * a file moving from one to the other is diffed: a client sending the registered type must not
+     * turn every YAML version into {@code skippedUnsupportedType}.
+     */
+    @Test
+    public void testTheRegisteredYamlTypeIsReadAsText() throws Exception {
+        assertTrue(component().findExtractor("application/yaml") instanceof PlainTextExtractor);
+        assertTrue(component().findExtractor("application/x-yaml") instanceof PlainTextExtractor);
+        assertEquals(DiffEligibility.ELIGIBLE, pairEligibility("application/x-yaml", "application/yaml"));
+    }
+
     /* ------------------------------------------------------- replaced content */
 
     /**

@@ -408,7 +408,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 334 tests, 27 test classes
+mvn -o install                                     # full build: 335 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -562,4 +562,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 107.
+`git log --grep '^Item '`. Next free number: 108.

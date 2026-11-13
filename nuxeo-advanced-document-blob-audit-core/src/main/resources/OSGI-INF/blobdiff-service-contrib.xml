@@ -118,6 +118,8 @@
         <mimeType>application/json</mimeType>
         <mimeType>application/xml</mimeType>
         <mimeType>application/x-yaml</mimeType>
+        <!-- The type RFC 9512 registered; clients sending it would otherwise get skippedUnsupportedType. -->
+        <mimeType>application/yaml</mimeType>
         <mimeType>application/javascript</mimeType>
         <mimeType>application/sql</mimeType>
       </mimeTypes>
