@@ -295,7 +295,7 @@ Deletion and purge are **permanent** (no trash): both dialogs show a warning and
 
 | Operation | Purpose |
 |---|---|
-| `BlobDiff.Delete` | Permanently deletes the input `BlobDiff` documents; any other type is refused (400) |
+| `BlobDiff.Delete` | Permanently deletes the input `BlobDiff` documents, a document listed twice once; any other type is refused (400) |
 | `BlobDiff.Purge(before, status?)` | Schedules the permanent deletion of the diffs dated before a day (UTC), optionally of one status, on the Bulk Action Framework. Returns `{"commandId": "...", "state": "SCHEDULED"}`; refused with 409 while a purge runs |
 | `BlobDiff.PurgeStatus(commandId)` | `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}`. Any id that is not a purge answers `UNKNOWN` |
 | `BlobDiff.PurgeAbort(commandId)` | Stops a purge at its next batch of 50 diffs. Deleted diffs are not restored; running the purge again finishes the job |

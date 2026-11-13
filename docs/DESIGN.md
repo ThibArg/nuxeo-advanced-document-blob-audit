@@ -652,6 +652,19 @@ The purge runs on the Bulk Action Framework, as the `blobDiffPurge` action:
 Coverage: `TestBlobDiffPurgeAction`, which pins `httpEnabled` through `BulkAdminService#isHttpEnabled`
 and holds the first purge with `PurgeGateListener` while the second is refused.
 
+`BlobDiff.Delete` keeps one ref per document id. `CoreSession#removeDocuments` skips a ref that lies
+under one already removed, not a ref to the same document: on DBS the second removal reads the state
+of the document it has just removed and fails on `null` — a 500 that rolls the whole deletion back —
+and on VCS it goes through, the document logged as removed twice. Web UI can send a diff twice: the
+audit page refreshes as soon as a deletion returns, the search index has not yet dropped the deleted
+diffs, so the page comes back short of its stale total, and the next range the table fetches from
+that index repeats the rows already shown (`_fillItemsRange` of `nuxeo-page-provider-display-behavior`)
+— and a selection can then hold one diff in two rows. The delete dialog therefore runs the operation
+with `sync-indexing`, as the platform's own delete button does, and keeps one entry per uid, so that
+the count it shows is the count deleted. Coverage: `TestBlobDiffManagement#testADiffListedTwiceIsDeletedOnce`,
+which counts the `documentRemoved` entries: on VCS, the default test repository, the double removal
+shows nowhere else.
+
 The `blobDiffSource` enricher computes the existence and the trash state of the source with a
 privileged session — an auditor may know that a source was deleted — and writes its title, path and
 type only when the caller can read it: the one place where privileged data is narrowed before it

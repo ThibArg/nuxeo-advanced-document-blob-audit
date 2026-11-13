@@ -15,8 +15,9 @@
  */
 package org.nuxeo.audit.advanced.blob.operations;
 
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.nuxeo.audit.advanced.blob.BlobAuditConstants;
 import org.nuxeo.audit.advanced.blob.BlobDiffAccess;
@@ -54,21 +55,24 @@ public class BlobDiffDeleteOp {
     }
 
     /**
-     * Permanently deletes the given {@code BlobDiff} documents, checked before any is deleted.
+     * Permanently deletes the given {@code BlobDiff} documents, checked before any is deleted. A
+     * document listed more than once is deleted once.
      *
      * @throws NuxeoException (400) if one of them is not a {@code BlobDiff}
      */
     @OperationMethod
     public void run(DocumentModelList docs) {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
-        List<DocumentRef> refs = new ArrayList<>(docs.size());
+        // CoreSession#removeDocuments removes every ref it is given: a second removal of one document
+        // fails on a DBS repository, rolling the whole deletion back, and is logged twice on VCS.
+        Map<String, DocumentRef> refs = new LinkedHashMap<>(docs.size());
         for (DocumentModel doc : docs) {
             if (!BlobAuditConstants.DIFF_DOCTYPE.equals(doc.getType())) {
                 throw new NuxeoException("Not a BlobDiff document: " + doc.getId(), 400);
             }
-            refs.add(doc.getRef());
+            refs.putIfAbsent(doc.getId(), doc.getRef());
         }
-        session.removeDocuments(refs.toArray(DocumentRef[]::new));
+        session.removeDocuments(refs.values().toArray(DocumentRef[]::new));
         session.save();
     }
 }

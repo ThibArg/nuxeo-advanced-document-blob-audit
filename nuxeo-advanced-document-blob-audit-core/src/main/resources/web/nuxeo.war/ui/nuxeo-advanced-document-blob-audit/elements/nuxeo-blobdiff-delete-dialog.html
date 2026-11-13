@@ -1,13 +1,17 @@
 <!--
   Permanent deletion of BlobDiff documents, with warning and explicit acknowledgment.
   Usage: this.$.deleteDialog.open(docs).then(deleted => ...)
+
+  sync-indexing: the caller refreshes its results as soon as the deletion returns. Read from a
+  search index that has not yet dropped the deleted diffs, the page comes back short of its stale
+  total, and the next range fetched repeats the rows already shown.
 -->
 <dom-module id="nuxeo-blobdiff-delete-dialog">
   <template>
     <style include="nuxeo-blobdiff-styles nuxeo-styles">
       .buttons { display: flex; justify-content: flex-end; gap: 8px; }
     </style>
-    <nuxeo-operation id="op" op="BlobDiff.Delete"></nuxeo-operation>
+    <nuxeo-operation id="op" op="BlobDiff.Delete" sync-indexing></nuxeo-operation>
     <nuxeo-dialog id="dialog" with-backdrop no-auto-focus>
       <h2>[[i18n('label.blobaudit.delete.title')]]</h2>
       <div class="blobdiff-warning">
@@ -17,7 +21,7 @@
       <paper-checkbox checked="{{_ack}}">[[i18n('label.blobaudit.delete.ack')]]</paper-checkbox>
       <div class="buttons">
         <paper-button dialog-dismiss class="secondary">[[i18n('command.cancel')]]</paper-button>
-        <paper-button class="primary" disabled$="[[!_canDelete(_ack, _busy)]]" on-tap="_delete">
+        <paper-button class="primary" disabled$="[[!_canDelete(_ack, _busy, _docs.length)]]" on-tap="_delete">
           [[i18n('label.blobaudit.delete.confirm')]]
         </paper-button>
       </div>
@@ -33,12 +37,21 @@
         _busy: { type: Boolean, value: false }
       },
       open: function (docs) {
-        this._docs = (docs || []).filter(Boolean);
+        // One diff per uid: a selection can hold a row twice, and the count shown must be the
+        // number of diffs deleted.
+        var seen = {};
+        this._docs = (docs || []).filter(function (d) {
+          if (!d || !d.uid || seen[d.uid]) {
+            return false;
+          }
+          seen[d.uid] = true;
+          return true;
+        });
         this._ack = false;
         this.$.dialog.open();
         return new Promise(function (resolve) { this._resolve = resolve; }.bind(this));
       },
-      _canDelete: function (ack, busy) { return ack && !busy; },
+      _canDelete: function (ack, busy, count) { return ack && !busy && count > 0; },
       _delete: function () {
         this._busy = true;
         this.$.op.input = 'docs:' + this._docs.map(function (d) { return d.uid; }).join(',');

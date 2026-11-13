@@ -263,6 +263,15 @@ other depending on the hotfix); the computation removes only
 as `UNKNOWN`. Coverage: `TestBlobDiffPurgeAction` (`httpEnabled` pinned by
 `#testThePurgeActionIsNotExposedOverHttp`). Why: `docs/DESIGN.md` §7.
 
+**A deletion removes each diff once.** `BlobDiffDeleteOp#run(DocumentModelList)` keeps one ref per
+document id: `CoreSession#removeDocuments` removes every ref it is given, and a second removal of one
+document fails on DBS (`rootState` null, the whole deletion rolled back with a 500) and is logged
+twice on VCS. `nuxeo-blobdiff-delete-dialog` keeps `sync-indexing` on its operation and one entry per
+uid: its callers refresh as soon as it returns, and a list read from an index that has not dropped the
+deleted diffs repeats rows. Coverage: `TestBlobDiffManagement#testADiffListedTwiceIsDeletedOnce`,
+which counts the `documentRemoved` entries (on DBS, the same test with `-Dnuxeo.test.core=mem
+-Dnuxeo.test.directory=sql` fails on the `null`). Why: `docs/DESIGN.md` §7.
+
 **Never put a `<dataFile>` on a vocabulary the plugin does not own.** It would replace the
 platform's rows. `blobContentModified` is added at runtime by
 `BlobDiffComponent#registerAuditEventType`: `hasEntry`, in a transaction, privileged, any
@@ -420,7 +429,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 335 tests, 27 test classes
+mvn -o install                                     # full build: 336 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -581,4 +590,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 110.
+`git log --grep '^Item '`. Next free number: 111.

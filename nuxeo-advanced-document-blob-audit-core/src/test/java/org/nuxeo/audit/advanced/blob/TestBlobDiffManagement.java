@@ -42,6 +42,7 @@ import org.nuxeo.audit.advanced.blob.operations.BlobDiffDeleteOp;
 import org.nuxeo.audit.advanced.blob.operations.BlobDiffPurgeOp;
 import org.nuxeo.audit.advanced.blob.operations.BlobDiffRetryOp;
 import org.nuxeo.audit.advanced.blob.work.BlobDiffWork;
+import org.nuxeo.audit.api.LogEntry;
 import org.nuxeo.ecm.automation.AutomationService;
 import org.nuxeo.ecm.automation.OperationContext;
 import org.nuxeo.ecm.core.api.Blob;
@@ -52,6 +53,8 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.NuxeoPrincipal;
 import org.nuxeo.ecm.core.api.VersioningOption;
+import org.nuxeo.ecm.core.api.event.DocumentEventTypes;
+import org.nuxeo.ecm.core.api.impl.DocumentModelListImpl;
 import org.nuxeo.ecm.core.api.impl.SimpleDocumentModel;
 import org.nuxeo.ecm.core.api.impl.UserPrincipal;
 import org.nuxeo.ecm.core.api.security.ACE;
@@ -67,6 +70,7 @@ import org.nuxeo.ecm.core.io.registry.context.RenderingContext;
 import org.nuxeo.ecm.core.query.sql.NXQL;
 import org.nuxeo.ecm.core.test.CoreFeature;
 import org.nuxeo.ecm.core.work.api.WorkManager;
+import org.nuxeo.ecm.platform.query.api.PageProviderService;
 import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
@@ -104,6 +108,9 @@ public class TestBlobDiffManagement {
 
     @Inject
     protected LogCaptureFeature.Result logs;
+
+    @Inject
+    protected PageProviderService pageProviderService;
 
     /* ---------------------------------------------------------------- helpers */
 
@@ -168,6 +175,12 @@ public class TestBlobDiffManagement {
         return session.query("SELECT * FROM BlobDiff WHERE bdiff:sourceId = " + NXQL.escapeString(sourceId));
     }
 
+    @SuppressWarnings("unchecked")
+    protected List<LogEntry> auditEntries(String eventId, String docId) {
+        return (List<LogEntry>) (List<?>) pageProviderService.getPageProvider("BLOBAUDIT_ENTRIES", null, null, null,
+                Map.of("coreSession", (Serializable) session), eventId, docId).getCurrentPage();
+    }
+
     /* ------------------------------------------------------------ binary keys */
 
     @Test
@@ -201,9 +214,27 @@ public class TestBlobDiffManagement {
         DocumentModel d1 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
         DocumentModel d2 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
 
-        run(session, BlobDiffDeleteOp.ID,
-                new org.nuxeo.ecm.core.api.impl.DocumentModelListImpl(List.of(d1, d2)), null);
+        run(session, BlobDiffDeleteOp.ID, new DocumentModelListImpl(List.of(d1, d2)), null);
         assertTrue(diffsOf(source.getId()).isEmpty());
+    }
+
+    /**
+     * A results list refreshed before the search index caught up with a deletion shows rows twice, so
+     * a selection can hold one diff twice. The platform removes every ref it is given and fails on the
+     * second removal of a document, which rolled the whole deletion back with a 500.
+     */
+    @Test
+    public void testADiffListedTwiceIsDeletedOnce() throws Exception {
+        DocumentModel source = file("listed-twice", textBlob("x", "text/plain", "x.txt"));
+        DocumentModel d1 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
+        DocumentModel d2 = diff(source, new Date(), BlobAuditConstants.STATUS_OK, null, null);
+
+        // Two models of one document, as Automation resolves each id of a "docs:" input on its own.
+        run(session, BlobDiffDeleteOp.ID, new DocumentModelListImpl(
+                List.of(session.getDocument(d1.getRef()), d2, session.getDocument(d1.getRef()))), null);
+        txFeature.nextTransaction();
+        assertTrue(diffsOf(source.getId()).isEmpty());
+        assertEquals(1, auditEntries(DocumentEventTypes.DOCUMENT_REMOVED, d1.getId()).size());
     }
 
     @Test

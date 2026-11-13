@@ -406,6 +406,7 @@ Run them once the scenarios above have produced diffs.
 | F8 | carol | select the S22 diff > **Delete permanently** | the dialog requires the acknowledgment; the diff is gone (no trash) |
 | F9 | carol | toolbar **Purge**: before = **tomorrow**, status = **Error** | progress, then "n content diff(s) purged": the S19 error diffs only; the other diffs stay |
 | F10 | carol | **Content changes** tab of `S23 Attachments`; **Field** facet of the audit page | the S23 row shows field `files:files/0/file`; the facet lists `file:content` and `files:files/0/file` |
+| F11 | carol | **Content changes audit**: select a dozen diffs > **Delete permanently**; as soon as the list refreshes, scroll down, select another dozen and delete them | each deletion succeeds, no "Delete failed"; the refreshed list never shows a row twice and the dialog counts the diffs selected (plugin item 110) |
 
 ---
 
@@ -441,7 +442,7 @@ Run them once the scenarios above have produced diffs.
 | S26 Restricted source | ☐ pass ☐ fail | |
 | S27 Trash, delete | ☐ pass ☐ fail | |
 | S28 Charset | ☐ pass ☐ fail | |
-| F1–F10 | ☐ pass ☐ fail | |
+| F1–F11 | ☐ pass ☐ fail | |
 
 ## 5. Known behaviours, not to be reported as new bugs
 

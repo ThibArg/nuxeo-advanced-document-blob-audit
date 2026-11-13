@@ -870,7 +870,7 @@ sending the registered type loses the diff of every YAML file.
 
 ## 6. Security and auditor operations
 
-Run after § 5 (they use the diffs of S01, S08, S19, S22).
+Run after § 5 (they use the diffs of S01, S08, S19, S22, S27).
 
 ### A1 — a non-auditor reaches no diff and no operation
 
@@ -948,7 +948,14 @@ code=$(opcode carol BlobDiff.Delete "doc:$S22_D" '{}')
 case $code in 200 | 204) verdict PASS "BlobDiff.Delete answered $code" ;; *) verdict FAIL "BlobDiff.Delete answered $code" ;; esac
 denied "the deleted diff is gone, not trashed" "$(nxcode "$NX_ADMIN" GET "/api/v1/id/$S22_D")"
 check "BlobDiff.Delete refuses another document type" 400 "$(opcode carol BlobDiff.Delete "doc:$S01" '{}')"
+# The same diff listed twice, as a results list refreshed before the index caught up can select it.
+code=$(opcode carol BlobDiff.Delete "docs:$S27_D,$S27_D" '{}')
+case $code in 200 | 204) verdict PASS "a diff listed twice: BlobDiff.Delete answered $code" ;; *) verdict FAIL "a diff listed twice: BlobDiff.Delete answered $code" ;; esac
+denied "the diff listed twice is gone" "$(nxcode "$NX_ADMIN" GET "/api/v1/id/$S27_D")"
 ```
+
+A 500 on the diff listed twice means a plugin older than item 110: the platform removed the document
+twice and the whole deletion was rolled back.
 
 ### A5 — purge of the error diffs, then empty folders
 
@@ -1016,7 +1023,8 @@ Part F of `runbook.md`:
 - the `BlobDiff` view: colored diff, "Show more" past 1 000 lines (S21), the "Format: x → y" badge
   (S08, S09, S11, S12), the "Content replaced" explanation (S08 `-02`), **no Edit** action, the source
   badges *In trash* / *Source deleted* / *Source not accessible to you* (S26, S27);
-- the delete and purge dialogs: the acknowledgment checkbox, the progress of the purge;
+- the delete and purge dialogs: the acknowledgment checkbox, the progress of the purge; two deletions
+  of a dozen diffs in a row, with no "Delete failed" and no row shown twice (F11);
 - the known diff-to-diff navigation issue: opening a `BlobDiff` from another one keeps the previous
   one on screen until a reload (open item, not a regression).
 
