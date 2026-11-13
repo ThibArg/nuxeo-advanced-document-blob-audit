@@ -25,20 +25,29 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.Base64;
+import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.inject.Inject;
 
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.ClientAnchor;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.Document;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.nuxeo.audit.advanced.blob.image.PdfImageInventory;
+import org.nuxeo.audit.advanced.blob.image.SpreadsheetImageInventory;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.impl.blob.ByteArrayBlob;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
+import org.nuxeo.runtime.test.runner.LogCaptureFeature;
 
 /**
  * Covers item 10: the binaries are materialised once for the whole diff, and the image inventory
@@ -47,7 +56,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * @since 2025.1
  */
 @RunWith(FeaturesRunner.class)
-@Features(BlobAuditFeature.class)
+@Features({ BlobAuditFeature.class, LogCaptureFeature.class })
 @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-imageinventory-config.xml")
 public class TestBlobDiffImageExtraction {
 
@@ -59,6 +68,9 @@ public class TestBlobDiffImageExtraction {
 
     @Inject
     protected BlobDiffService blobDiffService;
+
+    @Inject
+    protected LogCaptureFeature.Result logs;
 
     /* ==================== fixtures ==================== */
 
@@ -195,5 +207,62 @@ public class TestBlobDiffImageExtraction {
                 result.unified().contains("# Images"));
         assertEquals("the old binary must be read exactly once", 1, oldBlob.reads.get());
         assertEquals("the new binary must be read exactly once", 1, newBlob.reads.get());
+    }
+
+    /* ==================== logs ==================== */
+
+    /** A workbook holding one picture on a sheet of the given name, in either format. */
+    protected Blob workbookWithPicture(Workbook workbook, String sheetName, byte[] picture, String filename,
+            String mimeType) throws Exception {
+        try (workbook; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            ClientAnchor anchor = workbook.getCreationHelper().createClientAnchor();
+            anchor.setCol1(1);
+            anchor.setRow1(3);
+            anchor.setCol2(5);
+            anchor.setRow2(17);
+            workbook.createSheet(sheetName)
+                    .createDrawingPatriarch()
+                    .createPicture(anchor, workbook.addPicture(picture, Workbook.PICTURE_TYPE_PNG));
+            workbook.write(out);
+            return BlobAuditTestHelper.blob(out.toByteArray(), mimeType, filename);
+        }
+    }
+
+    /**
+     * Item 98: a sheet name is content of the workbook, and the image inventory logged it, within the
+     * key of a picture it dropped. Its warnings now name the media part, or the sheet by its number.
+     */
+    @Test
+    @LogCaptureFeature.FilterOn(logLevel = "WARN")
+    public void testADroppedSpreadsheetPictureIsLoggedWithoutItsSheetName() throws Exception {
+        // Within the 31 characters of a sheet name, or POI trims it, and says so in a warning.
+        String sheetName = "Salaries " + UUID.randomUUID().toString().substring(0, 8);
+        byte[] picture = new byte[4096];
+        new Random(98).nextBytes(picture);
+        var capped = new SpreadsheetImageInventory() {
+            @Override
+            protected long maxImageBytes() {
+                return 1024;
+            }
+        };
+
+        for (Blob blob : List.of(
+                workbookWithPicture(new XSSFWorkbook(), sheetName, picture, "pictures.xlsx",
+                        BlobAuditTestHelper.XLSX_MIME),
+                workbookWithPicture(new HSSFWorkbook(), sheetName, picture, "pictures.xls",
+                        "application/vnd.ms-excel"))) {
+            DiffableContent content = capped.extract(blob, 100);
+            assertTrue("the over-sized picture must be dropped", content.truncated());
+        }
+
+        List<String> warnings = logs.getCaughtEventMessages();
+        for (String warning : warnings) {
+            assertFalse(warning, warning.contains(sheetName));
+        }
+        // POI warns too, about the property sets of the .xls: only the plugin's are counted.
+        List<String> skipped = warnings.stream().filter(warning -> warning.startsWith("Skipping ")).toList();
+        assertEquals("one warning per dropped picture: " + warnings, 2, skipped.size());
+        assertTrue(warnings.toString(), skipped.get(0).contains("/xl/media/"));
+        assertTrue(warnings.toString(), skipped.get(1).contains("excel:image:#1:B4:F18"));
     }
 }

@@ -276,13 +276,15 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
                     // look changed.
                     String location = anchor == null ? "image:" + (++ordinal) : anchor(anchor);
                     String key = occurrence(seen, "excel:image:" + sheet.getSheetName() + ":" + location);
+                    // The sheet by its number, not its name: what the logs may hold.
+                    String label = "excel:image:#" + (i + 1) + ":" + location;
                     // getData() copies the picture on every call: memoized on the picture index, and
                     // only called on the first placement.
                     int index = picture instanceof HSSFPicture hssf ? hssf.getPictureIndex() : -1;
                     String digest = digestOnce(budget, index >= 0 ? Integer.valueOf(index) : key, () -> {
                         byte[] bytes = data.getData();
                         budget.spend(bytes.length);
-                        return digestBytes(bytes, key);
+                        return digestBytes(bytes, label);
                     });
                     if (budget.exhausted) {
                         return true;
@@ -303,12 +305,15 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
      * whenever it is 16 bytes or more long, to look for a Mac PNG header, so the caller reads it once
      * per picture through {@link #digestOnce}, keyed on the picture index.
      *
+     * @param label names the picture in the log: the sheet by its number, never by its name, which is
+     *            content of the document
      * @return the digest, or {@code null} if the image is over budget and must be dropped
      * @since 2025.1
      */
-    protected String digestBytes(byte[] bytes, String key) {
+    protected String digestBytes(byte[] bytes, String label) {
         if (bytes.length > maxImageBytes()) {
-            log.warn("Skipping {}: {} bytes, over the {} byte inventory budget", key, bytes.length, maxImageBytes());
+            log.warn("Skipping {}: {} bytes, over the {} byte inventory budget", label, bytes.length,
+                    maxImageBytes());
             return null;
         }
         return digest(bytes);

@@ -295,7 +295,7 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
         ImageBudget budget = inventory.budget;
         String digest;
         try {
-            digest = digestOnce(budget, media.getPartName(), () -> digestOoxmlPicture(media, key, budget));
+            digest = digestOnce(budget, media.getPartName(), () -> digestOoxmlPicture(media, budget));
         } catch (IOException e) {
             throw new SAXException(e);
         }
@@ -311,21 +311,26 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
      * {@code PictureData#getData()} returns the <b>inflated</b> image as a single array, capped only
      * by POI's own {@code MAX_IMAGE_SIZE} (100 MB in 5.5.1). The part is streamed instead, so the
      * {@link #maxImageBytes()} budget is the same across the four formats.
+     * <p>
+     * A dropped picture is logged by its part name, never by its inventory key: the key of a
+     * spreadsheet picture carries the name of its sheet, content of the document, which the server
+     * log must not hold.
      *
      * @return the digest, or {@code null} if the image is over budget and must be dropped
      * @since 2025.1
      */
-    protected String digestOoxmlPicture(PackagePart part, String key, ImageBudget budget) throws IOException {
+    protected String digestOoxmlPicture(PackagePart part, ImageBudget budget) throws IOException {
+        String name = part.getPartName().getName();
         long declared = part.getSize();
         if (declared > maxImageBytes()) {
-            log.warn("Skipping {}: {} declared bytes, over the {} byte inventory budget", key, declared,
+            log.warn("Skipping {}: {} declared bytes, over the {} byte inventory budget", name, declared,
                     maxImageBytes());
             return null;
         }
         try (InputStream in = budget.meter(part.getInputStream())) {
             String digest = digestStream(newDigest(), in);
             if (digest == null) {
-                log.warn("Skipping {}: inflates past the {} byte inventory budget", key, maxImageBytes());
+                log.warn("Skipping {}: inflates past the {} byte inventory budget", name, maxImageBytes());
             }
             return digest;
         }

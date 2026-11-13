@@ -325,8 +325,9 @@ relationships of the sheet part; Word keeps its zip-stream reading and ratio pre
 is never decoded (`digestPdfImage`: no `createInputStream()`, `getImage()` nor `getWidth()`); a PDF
 form is walked once per document (`PdfWalk`, cycle and `MAX_FORM_DEPTH` guards; never recurse
 outside `collectPdfForm`). Ordinals and `#n` suffixes advance before the drop check, so a dropped
-image never renumbers. Coverage: `TestImageInventoryExtractor`, `TestBlobDiffImageExtraction`. Why:
-`docs/DESIGN.md` §6.
+image never renumbers. A dropped image is logged by its part name, or for `.xls` by its sheet number,
+never by its key: a sheet name is document content. Coverage: `TestImageInventoryExtractor`,
+`TestBlobDiffImageExtraction`. Why: `docs/DESIGN.md` §6, §7.
 
 ### Search and Web UI
 
@@ -387,7 +388,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 323 tests, 27 test classes
+mvn -o install                                     # full build: 324 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -540,4 +541,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 98.
+`git log --grep '^Item '`. Next free number: 99.

@@ -616,6 +616,10 @@ deleted source.
 
 - Logs name a side by its filename and provider, never by its key nor its digest: the default key
   strategy makes the key the digest, and either one identifies a binary to whoever reads the logs.
+- Nor does a log hold content of a document: the image inventory names a dropped picture by its
+  media part (`/xl/media/image3.png`), or for `.xls` by the number of its sheet
+  (`excel:image:#2:B4:F18`), never by its inventory key, which carries the sheet name. Coverage:
+  `TestBlobDiffImageExtraction#testADroppedSpreadsheetPictureIsLoggedWithoutItsSheetName`.
 - A diff is named `<sourceId>-<eventTime>-<correlationId>`: one version touching two xpaths makes two
   diffs with the same source and time.
 - Dated paths and the purge boundary are formatted in UTC and `Locale.ROOT`: in the JVM zone, two
