@@ -1,6 +1,24 @@
 # nuxeo-advanced-document-blob-audit
 
+Audit changes inside a file between two versions.
+
+## TL;DR
+
+* Each time a version is created, this plugin records what changed *inside* its file.
+  * (Excel cells, PowerPoint slides, Word paragraphs, PDF and text lines - jon, xml, txt, ...).
+  * When the content of the file changed:
+    * The document gets an audit entry with the diff info (not the diff itself)
+    * The changes go into a `BlobDiff` document that only auditors/administrators can read
+* It is off by default: Turn it on only for the document types that need it.
+
+
+
+
+
 Audit **what actually changed inside a file** between two successive versions of a document: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents paragraph by paragraph, PDFs line by line as rendered, and text formats line by line.
+
+
+
 
 A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
 
