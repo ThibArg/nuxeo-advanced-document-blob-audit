@@ -45,7 +45,7 @@ Only the creation of a version is audited, never an ordinary save. The design no
 </component>
 ```
 
-3. Choose the auditors group. It is the single setting of the group, read by the server checks, by the ACL of `/change-diff` and by Web UI. Default: `administrators`, whose members always have access.
+3. Choose the auditors group. It is the single setting of the group, read by the server checks, by the ACL of `/change-diff` and by Web UI. Default: `administrators`, whose members always have access. The plugin contributes no value of its own, so this contribution needs no other `<require>` than the one above and is never overridden, whatever the order Nuxeo loads the components in. The ACL of `/change-diff` follows the new group at the next start.
 
 ```xml
 <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">

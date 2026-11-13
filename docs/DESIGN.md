@@ -601,6 +601,15 @@ or of the auditors group, the latter read from the configuration property
 `Nuxeo.UI.config.blobaudit.auditorsGroup`, so server and UI cannot disagree. The check is in
 addition to the ACL, for what does more than the ACL enforces (scheduling a work, a bulk purge).
 
+The default group, `administrators`, lives in the code (`BlobAuditConstants.DEFAULT_AUDITORS_GROUP`,
+and the same literal in `nuxeo-blobdiff-common.html`), never in a contribution of the bundle.
+`ConfigurationService` keeps the last contribution registered, and the components of
+`nxserver/config` are deployed before the bundles: an integrator's component requiring only
+`BlobDiffComponent`, as the README shows, was registered before a default the bundle contributed in
+a component of its own, and lost to it. The configured group was then locked out of the diffs, of
+the operations and of Web UI, with nothing logged. With no default contributed, there is nothing to
+order against. Coverage: `TestBlobDiffLocationAndSecurity#testTheBundleContributesNoAuditorsGroup`.
+
 The purge runs on the Bulk Action Framework, as the `blobDiffPurge` action:
 
 - **not `httpEnabled`** (the default): it stays out of `Bulk.RunAction` and of

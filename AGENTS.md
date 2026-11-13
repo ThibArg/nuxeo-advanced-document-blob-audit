@@ -57,7 +57,7 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
       `SpreadsheetImageInventory`, `PresentationImageInventory`, `PdfImageInventory`.
     - `io/`: `MaterializedBlob`, `OoxmlPackages`, `BlobCharsets`, `BlobDiffSourceEnricher`.
     - `operations/` (the six `BlobDiff.*` operations), `bulk/BlobDiffPurgeAction`, `work/BlobDiffWork`.
-  - `src/main/resources/OSGI-INF/` — 11 components, all listed in `META-INF/MANIFEST.MF`, plus
+  - `src/main/resources/OSGI-INF/` — 10 components, all listed in `META-INF/MANIFEST.MF`, plus
     `deployment-fragment.xml` and `l10n/`.
   - `src/main/resources/schemas/` — `blobdiff.xsd` (`bdiff:`) and `blobdiffsearch.xsd` (`bdsearch:`,
     the search document of `BLOB_DIFFS_ADMIN`, never persisted).
@@ -234,6 +234,15 @@ in the caller's session under `CONTAINER_LOCK`; paths and the purge boundary use
 `TestBlobDiffLocationAndSecurity`, `TestBlobDiffService` (the container cases). Why:
 `docs/DESIGN.md` §7.
 
+**The bundle never contributes the auditors group.** `org.nuxeo.web.ui.blobaudit.auditorsGroup` has
+its default in the code only: `BlobAuditConstants.DEFAULT_AUDITORS_GROUP`, and the `'administrators'`
+literal of `nuxeo-blobdiff-common.html`. `ConfigurationService` keeps the last contribution and
+`nxserver/config` is deployed before the bundles, so a default contributed by the bundle overrides an
+integrator's group whose component requires only `BlobDiffComponent` — silently locking that group
+out. Do not reintroduce a `configuration` contribution for it. Coverage:
+`TestBlobDiffLocationAndSecurity#testTheBundleContributesNoAuditorsGroup`,
+`#testAConfiguredAuditorsGroupOwnsTheContainer`. Why: `docs/DESIGN.md` §7.
+
 **The purge stays off the HTTP surface and removes nothing but diffs.** The `blobDiffPurge` action
 keeps `httpEnabled` at its default `false`; `BlobDiff.Purge` is the only entry point (auditor check,
 query built server side, `submit()` and not `submitTransactional()`); the computation removes only
@@ -396,7 +405,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 331 tests, 27 test classes
+mvn -o install                                     # full build: 333 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -439,6 +448,7 @@ Test resources deployed per class or per test (`src/test/resources/`):
 | `blobaudit-test-partial-config.xml` | overrides nothing but `docTypes` and one `converter` property (`TestBlobDiffService`) |
 | `blobaudit-test-keepalldiffs-config.xml` | `minSimilarity=0` on `plainText` |
 | `blobaudit-test-purgegate-contrib.xml` | `PurgeGateListener` holds the first `BlobDiff` removal until released (`TestBlobDiffPurgeAction` abort and exclusivity cases) |
+| `blobaudit-test-auditorsgroup-config.xml` | the auditors group set to `auditors`, the component requiring only `BlobDiffComponent`, as in the README |
 
 Test helpers: `BlobAuditTestHelper` (`DiffRequest` and `BlobDiff` fixtures, `createUnguarded` for a
 diff forged outside the container, `onDisk` for file-backed blobs, `allocatedBytes` for every memory
@@ -549,4 +559,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 105.
+`git log --grep '^Item '`. Next free number: 106.

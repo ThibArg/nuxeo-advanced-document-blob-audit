@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<component name="org.nuxeo.audit.advanced.blob.test.auditorsgroup">
+
+  <!--
+    Shaped like the README: the integrator's component requires the service component only, and sets
+    the auditors group. Nothing in the bundle contributes this property, so no ordering can override it.
+  -->
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+
+  <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+    <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">auditors</property>
+  </extension>
+
+</component>

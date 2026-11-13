@@ -114,13 +114,18 @@ public class BlobAuditConstants {
      * Default group granted access on the diff container, used when the configuration property
      * {@link #AUDITORS_GROUP_PROPERTY} is not set. The diffs contain business content extracted from
      * the source documents: choose the audience deliberately.
+     * <p>
+     * A code default, never a contribution: the bundle contributes no value for the property, so an
+     * integrator's contribution cannot be overridden by it, whatever the order the runtime registers
+     * the two in. Components of {@code nxserver/config} are deployed before the bundles, and one that
+     * only requires {@code BlobDiffComponent} would otherwise lose to a default contributed later.
      */
     public static final String DEFAULT_AUDITORS_GROUP = "administrators";
 
     /**
      * Configuration property holding the auditors group. Its {@code org.nuxeo.web.ui.} prefix makes
      * Web UI expose it as {@code Nuxeo.UI.config.blobaudit.auditorsGroup}, so the server and the UI
-     * share a single setting.
+     * share a single setting. Not contributed by the plugin: see {@link #DEFAULT_AUDITORS_GROUP}.
      */
     public static final String AUDITORS_GROUP_PROPERTY = "org.nuxeo.web.ui.blobaudit.auditorsGroup";
 

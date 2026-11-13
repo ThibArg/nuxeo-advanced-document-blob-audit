@@ -68,6 +68,8 @@ import org.nuxeo.ecm.core.test.CoreFeature;
 import org.nuxeo.ecm.core.work.api.WorkManager;
 import org.nuxeo.ecm.platform.query.api.PageProviderService;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.services.config.ConfigurationService;
+import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
@@ -373,6 +375,41 @@ public class TestBlobDiffLocationAndSecurity {
         assertTrue(Arrays.stream(local.getACEs())
                          .noneMatch(ace -> SecurityConstants.EVERYONE.equals(ace.getUsername())
                                  && ace.isGranted()));
+    }
+
+    /**
+     * The bundle contributes no auditors group. A default contributed by the plugin could be registered
+     * after the integrator's value - a component of {@code nxserver/config} only requiring the service
+     * component is - and silently win, locking the configured group out of the diffs and of Web UI.
+     */
+    @Test
+    public void testTheBundleContributesNoAuditorsGroup() {
+        ConfigurationService configuration = Framework.getService(ConfigurationService.class);
+
+        assertTrue(configuration.getString(BlobAuditConstants.AUDITORS_GROUP_PROPERTY).isEmpty());
+        assertEquals(BlobAuditConstants.DEFAULT_AUDITORS_GROUP, BlobDiffAccess.auditorsGroup());
+    }
+
+    /** The group set as the README shows owns the container at the next initialisation, and is auditor. */
+    @Test
+    @Deploy("nuxeo-advanced-document-blob-audit-core:blobaudit-test-auditorsgroup-config.xml")
+    public void testAConfiguredAuditorsGroupOwnsTheContainer() {
+        assertEquals("auditors", BlobDiffAccess.auditorsGroup());
+
+        DocumentModel root = BlobDiffStore.ensureRootContainer(session);
+        session.save();
+
+        List<ACE> local = Arrays.asList(session.getACP(root.getRef()).getACL(ACL.LOCAL_ACL).getACEs());
+        for (String permission : List.of(SecurityConstants.READ, SecurityConstants.REMOVE,
+                SecurityConstants.REMOVE_CHILDREN)) {
+            assertTrue(permission + " must be granted to the configured group",
+                    local.stream()
+                         .anyMatch(ace -> "auditors".equals(ace.getUsername())
+                                 && permission.equals(ace.getPermission()) && ace.isGranted()));
+        }
+        assertTrue("the default group no longer holds the container", local.stream()
+                .noneMatch(ace -> BlobAuditConstants.DEFAULT_AUDITORS_GROUP.equals(ace.getUsername())));
+        assertTrue(BlobDiffAccess.isAuditor(new UserPrincipal("auditor", List.of("auditors"), false, false)));
     }
 
     /* --------------------------------------------------------- location guard */
