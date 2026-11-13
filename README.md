@@ -1,6 +1,6 @@
 # nuxeo-advanced-document-blob-audit
 
-Audit **what actually changed inside a file**: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents and PDFs paragraph by paragraph, and text formats line by line.
+Audit **what actually changed inside a file** between two successive versions of a document: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents paragraph by paragraph, PDFs line by line as rendered, and text formats line by line.
 
 A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
 
@@ -13,72 +13,129 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 > strict regulation constraints. So, if you need it **we strongly recommend a Nuxeo Partner forks the code
 > and takes ownership** (tuning, maintenance, support)
 
-## Principle
+| Step | Where | When |
+|---|---|---|
+| Detect a binary change | `BlobModificationListener`, on each check-in | synchronous: a digest comparison |
+| Write the `blobContentModified` audit entry | the audit log | same transaction, **no business content** |
+| Extract and compare both binaries | `BlobDiffWork`, queue `blobDiff` | asynchronous, after commit, outside any transaction |
+| Store the result | a `BlobDiff` document under `/change-diff` | readable by the auditors only |
 
-| Step | Where | Cost |
-|------|------|------|
-| Binary change detection | BlobModificationListener, synchronous | Digest comparison |
-| blobContentModified audit entry | synchronous | Negligible, **no business data** |
-| Extraction + diff | BlobDiffWork, asynchronous | Outside any transaction, so no transaction timeout applies to it |
-| Result storage | Dedicated BlobDiff document | Blob stored outside the source document |
+Only the creation of a version is audited, never an ordinary save. The design notes, for whoever forks or maintains the plugin, are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-The audit log never contains business content. It stores only the xpath, file names and MIME types, and a `diffCorrelationId` pointing to the BlobDiff document.
+## Quick Start
 
-### Binary Changes That Cannot Be Diffed
+1. Install the package (it requires `nuxeo-web-ui`): `nuxeoctl mp-install nuxeo-advanced-document-blob-audit-<version>.zip`.
+2. Enable the feature, **disabled by default**, and scope it:
 
-A binary that changed but cannot be compared — larger than `maxBlobSize`, in a format no extractor handles, or replaced by a file of another format — is **still audited**. For an audit tool, staying silent would be the worst possible behaviour: the absence of an entry would be indistinguishable from the absence of a change.
+```xml
+<component name="com.example.blobaudit.config">
+  <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
+  <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
+    <config enabled="true">
+      <docTypes>
+        <docType>Contract</docType>
+      </docTypes>
+      <xpaths>
+        <xpath>file:content</xpath>
+      </xpaths>
+      <!-- Optional: also report added, removed and replaced images -->
+      <imageInventory>true</imageInventory>
+    </config>
+  </extension>
+</component>
+```
 
-In that case the plugin writes the `blobContentModified` entry **only**, and creates no BlobDiff document:
+3. Choose the auditors group. It is the single setting of the group, read by the server checks, by the ACL of `/change-diff` and by Web UI. Default: `administrators`, whose members always have access.
 
-| Case | Audit comment | `skipReason` extended info | BlobDiff |
-|------|---------------|----------------------------|----------|
-| Blob over `maxBlobSize` | `file:content : binary changed (too large)` | `skippedTooLarge` | none |
-| No extractor for the mime type | `file:content : binary changed (unsupported format)` | `skippedUnsupportedType` | none |
-| Previous and new blob read by different extractors (an `.xlsx` replaced by a `.docx`, a Word document by its PDF rendition) | `file:content : binary changed (format changed)` | `skippedFormatChanged` | none |
-| Blobs not both managed by a provider | `file:content : binary changed (blob not managed by a provider)` | `skippedNotManaged` | none |
-| A blob of a list changed while other entries were removed or moved | `files:files/0/file : binary changed (list entries also removed or moved, previous file unknown)` | `skippedListChanged` | none |
-| Diffable change | `file:content : binary content modified between versions` | absent | created |
+```xml
+<extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+  <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">auditors</property>
+</extension>
+```
 
-Every entry also carries the `oldFilename`, `newFilename`, `oldMimeType` and `newMimeType` extended infos, so a format change can be read from the entry alone.
+Restrict the feature to the document types that need it: once enabled, the shipped configuration watches every type, and every diff copies business content into `/change-diff`.
 
-The format change case exists because two extractors do not cut a document into lines the same way. A spreadsheet is read cell by cell, a Word document paragraph by paragraph, a PDF one rendered line at a time: comparing the extractions of a `.docx` and of its PDF rendition would report every line as removed and every line as added — a diff as large as both documents, which says nothing an auditor can use and copies all of their content into `/change-diff`. Each extractor contribution is therefore a **comparability class** (see "One Contribution, One Comparability Class" below). A conversion inside one class is still diffed: an `.xls` saved as `.xlsx`, a `.doc` saved as `.docx`, or a `.txt` saved as `.json` — every text format belongs to the `plainText` contribution, which reads raw lines whatever the MIME type (a text file replaced by an unrelated one of another format is the exception, see "A Text File Replaced by Another One" below). When one side has no extractor at all, `skippedUnsupportedType` wins.
+## What Gets Recorded
 
-The "not both managed" case only happens with an unusual blob provider setup: the asynchronous work re-reads both binaries from their provider after commit, which requires a provider id and a key. It also comes with a `WARN` in the logs. Note that such blobs usually carry no digest, and the "did it really change?" guard answers "different" when it cannot tell, so every new version of such a pair is audited.
+### The Audit Entry
 
-The list case only happens with `<xpath>*</xpath>`, the only mode in which blobs inside lists (such as `files:files`) are watched. A list index is not an identity, so the entries are paired **by content**: a file present in both versions, wherever it sits, is unchanged; a new file is compared with the one it replaces only when the list kept its shape and that file is gone. Removing, adding or reordering attachments is therefore not audited, as an added or removed blob never is; a file that changed in a list that also lost an entry is audited without a diff, since which file it replaces cannot be told.
+Each binary change between two versions writes one `blobContentModified` entry on the source document, in the default document category, so it shows in the Web UI history and audit screens under the "Document" filter. The event is added to the `eventTypes` vocabulary at startup, labelled *Binary content modified*. Its comment is `<xpath> : <outcome>`, for instance `file:content : binary content modified between versions`, and its extended infos are:
 
-`skipReason` and `diffCorrelationId` are mutually exclusive: a skipped entry carries no correlation id, because no BlobDiff will ever exist to point at.
+| Key | Value |
+|---|---|
+| `xpath` | the blob property that changed |
+| `oldFilename`, `newFilename` | the file names on the previous and on the new version |
+| `oldMimeType`, `newMimeType` | their mime types |
+| `diffCorrelationId` | the `bdiff:correlationId` of the `BlobDiff` the work creates |
+| `skipReason` | why the change is audited without a diff, see [Statuses](#statuses) |
 
-Nothing at all is written when the property is simply out of scope — feature disabled, document type or xpath not covered — or when the binary did not actually change. The digest comparison always runs first, so a new version of an over-sized document whose binary never moved stays silent, and so do the same bytes uploaded again under another file name or MIME type.
+`diffCorrelationId` and `skipReason` are mutually exclusive. The entry never holds extracted content: that only goes to the `BlobDiff`, which is created once the work has run.
 
-> [!NOTE]
-> `skippedTooLarge`, `skippedUnsupportedType` and `skippedFormatChanged` are also reachable as a `bdiff:status`, on a different path. The check-in described above never schedules a work for them, but `BlobDiffWork` re-evaluates the eligibility of the rehydrated pair before extracting, so a `BlobDiff.Retry`, or a work outliving a configuration change (a lower `maxBlobSize`, a disabled extractor, a MIME type moved to another contribution), can be filed with any of the three. `skippedUnsupportedType` is also what the work records if a side has no extractor left when the diff runs. `skippedNotManaged` and `skippedListChanged`, on the other hand, are skip reasons only: no `BlobDiff` is ever created in those cases.
+### The `BlobDiff` Document
+
+Stored under `/change-diff/YYYY/MM/DD/`, dated in **UTC**, titled `<source title> - <xpath>`, with the facets `HiddenInNavigation`, `NotCollectionMember` and `NotFulltextIndexable` — the binary text of the diff never reaches the full-text index.
+
+| Field | Content |
+|---|---|
+| `bdiff:sourceId`, `bdiff:sourceRepository` | the live source document |
+| `bdiff:xpath` | the blob compared |
+| `bdiff:previousVersionId`, `previousVersionLabel`, `newVersionId`, `newVersionLabel`, `versionSeriesId` | the two versions compared |
+| `bdiff:correlationId` | the link to the audit entry |
+| `bdiff:user`, `bdiff:date` | who created the new version, and when |
+| `bdiff:oldFilename`, `newFilename`, `oldDigest`, `newDigest` | the two files |
+| `bdiff:oldBlobProvider`, `oldBlobKey`, `oldMimeType`, `oldLength`, and the same four `new*` fields | the storage identity of both binaries, used by `BlobDiff.Retry` |
+| `bdiff:status` | see [Statuses](#statuses) |
+| `bdiff:summary`, `added`, `removed`, `changed`, `truncated` | a short summary and exact counters |
+| `bdiff:similarity` | share of the smaller version kept unchanged in the other one, in characters, `0` to `1`; absent when not measured |
+| `bdiff:diff` | the diff, a `text/plain` blob, present on an `ok` diff that found changes |
+
+The body lists `+ added`, `- removed` and, for keyed content, `~ Sheet1!B2 : 1 -> 2` lines; the image inventory follows under a `# Images` line. `bdiff:summary` is a plain **English** sentence ("2 modifications, 1 addition", "No textual change detected"), written once and never translated: a localised summary is built from the counters, as Web UI does.
+
+### Statuses
+
+| Value | Set when | Audit entry | `BlobDiff` | Body | Retry |
+|---|---|---|---|---|---|
+| `ok` | work: diff computed | nominal, with `diffCorrelationId` | yes | yes, unless nothing changed | no |
+| `skippedTooLarge` | check-in: a side over `maxBlobSize`; or work: same re-check on the pair (retry, configuration change) | check-in: `skipReason`; work: the nominal entry | work case only | no | no |
+| `skippedUnsupportedType` | check-in: no extractor; or work: no extractor when the diff runs | same pattern | work case only | no | no |
+| `skippedFormatChanged` | check-in: the two sides read by two extractor contributions; or work: same | same pattern | work case only | no | no |
+| `skippedNotManaged` | check-in: blobs not both managed by a provider | `skipReason` | never | — | — |
+| `skippedListChanged` | check-in (`*` mode): a list also lost an entry | `skipReason` | never | — | — |
+| `skippedContentReplaced` | work: mime type changed and similarity under `minSimilarity` (plain text only) | nominal | yes, counters and similarity | no | no |
+| `error` | work: extraction failed, a blob unreadable, source deleted, local copy failed | nominal | yes | no | yes — `BlobDiff.Retry`, 409 while a replay is pending |
+
+A skipped check-in entry reads `file:content : binary changed (too large)`, `(unsupported format)`, `(format changed)`, `(blob not managed by a provider)` or `(list entries also removed or moved, previous file unknown)`. A binary that changed is always audited, diffable or not: the absence of an entry must mean the absence of a change.
+
+Precedence when several skips apply: out of scope (silent) > `skippedTooLarge` > `skippedUnsupportedType` > `skippedFormatChanged`. The digest comparison runs before any skip is reported, so identical bytes are never audited, not even uploaded again under another name or mime type. Out of scope (feature off, type or xpath not watched): nothing at all. `skippedNotManaged` only happens with an unusual blob provider setup, logs a `WARN`, and since such blobs usually carry no digest, every new version of the pair is audited.
+
+### Format Changes
+
+Two extractors do not cut a document into units the same way: comparing the cells of an `.xlsx` with the paragraphs of the `.docx` that replaced it would report everything as removed and added. A new version is therefore only diffed when **the same extractor contribution** reads both blobs; otherwise the change is `skippedFormatChanged`. Each contribution is a comparability class:
+
+| Contribution | Mime types | Diffed with each other |
+|---|---|---|
+| `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
+| `presentation` | pptx, pptm, ppsx, potx | yes |
+| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: lines are read raw, whatever the mime type — but see the next section |
+| `converter` | docx, doc, odt, rtf | yes: the converter cuts all of them into paragraphs |
+| `pdf` | pdf | — |
+| `legacyPresentation` | ppt | — |
+
+`pdf` and `legacyPresentation` use the same class as `converter`, and are separate for that reason alone: a Word document replaced by its PDF rendition is not diffed. To make two formats comparable, move their mime types into one contribution; to stop comparing two, split it.
 
 ### A Text File Replaced by Another One
 
-Every text format — `.txt`, `.json`, `.xml`, `.csv`, `.yaml`... — is read by the single `plainText` contribution, line by line, whatever the MIME type. A `.json` replaced by an `.xml` is therefore no format change in the sense above, and it is diffed. When the new file is a conversion or an edit of the old one, that diff is exactly what the auditor needs: a `.txt` holding JSON, edited and saved as `.json`, shows the edited line. When the new file is simply **another file** — unrelated data in another format — the diff lists both files whole: every line removed, every line added, and all of their content copied into `/change-diff` for nothing.
+A `.json` replaced by an unrelated `.xml` is read by `plainText` on both sides, so it is no format change, and its diff would list both files whole. Such a pair is filed **`skippedContentReplaced`**: the `BlobDiff` keeps its counters and its similarity, not the body. All three conditions are required:
 
-That second case is filed as **`skippedContentReplaced`**: the `BlobDiff` is created, with its counters and its similarity score, but **without the diff body**. Three conditions, all required:
-
-1. the MIME type changed (compared without case nor parameters: `text/plain; charset=UTF-8` is `text/plain`);
-2. both sides hold at least `minSimilarityLines` lines (5 by default), a percentage meaning little on a handful of lines;
-3. the **similarity** is under `minSimilarity` (`0.1` by default).
-
-The similarity is the share of the smaller version kept unchanged in the other one, **in characters**:
+1. the mime type changed, compared without case nor parameters (`text/plain; charset=UTF-8` is `text/plain`);
+2. both sides hold at least `minSimilarityLines` lines (5);
+3. the similarity is under `minSimilarity` (`0.1`).
 
 ```text
 similarity = characters of the lines kept unchanged / characters of the smaller version
 ```
 
-- *Kept unchanged* is what the alignment of the diff already finds — common beginning, common end, matching lines — so measuring it costs nothing.
-- *Characters, not lines*: two unrelated JSON files share every `{` and `},` line, often half of their lines; counted in characters those weigh next to nothing.
-- *The smaller version*: a large addition, or a mass deletion, keeps the whole smaller side and scores 100 %. Only a pair where **both** sides are mostly new scores low.
-
-Typical scores: unrelated files 0 – 5 %, the same data converted from JSON to XML close to 0 % as well, a heavy edit keeping a third of the file about 33 %, an ordinary edit over 90 %. It is measured on the extracted windows (`maxLines`), like the counters, and stored as `bdiff:similarity` on every diff where it could be measured, so the threshold can be tuned on real data.
-
-A rewrite **in the same format** is never filed this way: the rule is about a file replaced by another one, not about how much an author changed. The decision is taken by `BlobDiffWork` once the diff is computed, so the `blobContentModified` entry of the check-in is the nominal one and carries its `diffCorrelationId`. Only `plainText` sets the rule; the other contributions do not, and a change between two of them is `skippedFormatChanged` anyway.
-
-**Keeping every full diff.** It is a setting: an override of the `plainText` contribution with `minSimilarity` set to `0` stores the body of every diff, as for any other format:
+Unrelated files score 0 to 5 %, the same data converted from JSON to XML close to 0 % too, an ordinary edit over 90 %. A rewrite **in the same format** is always diffed: the rule is about a file replaced by another one, not about how much an author changed. The score is stored on every diff where it was measured, so the threshold can be tuned on real data. To keep every full body, set `minSimilarity` to `0`:
 
 ```xml
 <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
@@ -88,86 +145,40 @@ A rewrite **in the same format** is never filed this way: the rule is about a fi
 </extension>
 ```
 
-The contributions merge (see "Overriding the Configuration"), so this changes nothing else. An invalid value is logged at `ERROR` and disables the rule rather than the extractor.
+Nothing is lost by not storing the body: both versions are immutable and the `BlobDiff` keeps their ids and both blob keys. `BlobDiffService#diff(oldBlob, newBlob)` on the blobs of the two versions returns the full body at any time — the result is only flagged `replaced()`. `BlobDiff.Retry` does not replay this status: it is no incident.
 
-**Recomputing a replaced diff later.** Nothing is lost by not storing the body. The two compared binaries are the blobs of two **versions**, which are immutable, and the `BlobDiff` keeps the storage identity of both (`bdiff:oldBlobProvider` / `oldBlobKey`, `bdiff:newBlobProvider` / `newBlobKey`) along with the ids of the two versions. The full diff can therefore be recomputed at any time, as long as the versions exist: `BlobDiffService#diff(oldBlob, newBlob)` on the blobs of the two versions returns the whole body — the result is only *flagged* `replaced()`, it is `BlobDiffWork` that leaves the body out. `BlobDiff.Retry` does not replay a `skippedContentReplaced` diff: it is not an incident, and replaying it under the same setting would file it the same way.
+### Blobs in Lists
 
-### How the Version Pair Is Established
+With `<xpath>*</xpath>`, blobs inside lists such as `files:files` are watched, and paired **by content**, never by index: a file present on both versions, wherever it sits, is unchanged; a new file is compared with the one at its position only when the list kept its shape and that file is gone. Adding, removing or reordering attachments is therefore not audited, and a file that changed in a list that also lost an entry is `skippedListChanged`, since which file it replaces cannot be told. An explicitly configured indexed xpath (`files:files/0/file`) is compared by index.
 
-The listener hooks the two events of a check-in, **both fired on the live document**:
+## Supported Formats
 
-| Event | What the plugin does |
-|-------|----------------------|
-| `aboutToCheckIn` | Records which version is currently the last one, *before* the new one exists |
-| `documentCheckedIn` | Reads the new version from the platform's `checkedInVersionRef` property and compares it with the recorded one |
+| Format | Contribution | Extractor | Mode | Notes |
+|---|---|---|---|---|
+| xlsx, xlsm, xls | `spreadsheet` | `SpreadsheetExtractor` | keyed, one unit per cell (`Sheet1!B12`) | formulas compared as formulas (`useFormulas`); OOXML read sheet by sheet |
+| pptx, pptm, ppsx, potx | `presentation` | `PresentationExtractor` | positional, one unit per paragraph | `## Slide: <title>` markers, `[table] a \| b` rows, `[notes]` (`includeNotes`) |
+| text, json, xml, csv, yaml, source files | `plainText` | `PlainTextExtractor` | positional, one unit per line | charset and BOM handled; `trimLines`, `skipBlankLines` |
+| docx, doc, odt, rtf | `converter` | `ConverterTextExtractor` | positional, one unit per paragraph | through the platform `any2text` converter |
+| pdf | `pdf` | `ConverterTextExtractor` | positional, one unit per rendered line | indicative: depends on the layout reconstruction |
+| ppt | `legacyPresentation` | `ConverterTextExtractor` | positional | flat slide text, no image inventory |
 
-Capturing the predecessor before the fact makes the pair exact. Nothing is inferred from version numbering, so renumbering versions out of band — a bulk update straight in the database, a migration — no longer affects which pair is compared.
+Keyed content is compared as two maps, so the diff is exact and independent of the extraction order. Positional content is aligned with Hirschberg's algorithm, and a removal immediately followed by an addition is reported as a modification. No external diff library is needed.
 
-Two core call sites notify a check-in without forwarding the event options, so the recorded reference cannot always reach the second event. The plugin then falls back to a query ordered by `ecm:versionCreated`, which is a record of *when* a version was created rather than an assumption about how its label was numbered.
-
-> [!NOTE]
-> Earlier versions of this plugin hooked `documentCreated`, filtered on `isVersion()`, walked back up to the live document and re-derived the previous version from `ORDER BY uid:major_version DESC, uid:minor_version DESC`. That assumed monotonically increasing version numbers and had to skip the diff with a `WARN` whenever the assumption could not be verified. Both the assumption and the bail-out are gone.
-
-## One Engine, Pluggable Extractors
-
-```text
-Blob ──► BlobTextExtractor ──► DiffableContent ──► TextDiffer ──► DiffResult
-          (per format)          (common model)      (single engine)
-```
-
-`DiffableContent` is a list of `ContentLine(key, value)` objects:
-
-- **non-null key** → *identified content*. Compared as maps, providing exact semantic detection of additions, removals, and modifications, independent of extraction order. Spreadsheet mode (`Sheet1!B12`).
-- **null key** → *positional content*. Aligned using Hirschberg/LCS, with consecutive delete+add operations merged into a modification. Used for text, Word, and PDF documents.
-
-No external diff library is required.
-
-### Included Extractors
-
-| Extractor | Formats | Mode | Quality |
-|-----------|----------|------|---------|
-| SpreadsheetExtractor | xlsx, xlsm, xls | keyed, cell-based | Excellent — Sheet1!B12: 100 → 120 |
-| PlainTextExtractor | txt, json, xml, csv, yaml, source files | positional, line-based | Excellent |
-| PresentationExtractor | pptx, pptm, ppsx, potx | positional, paragraph-based, slide-aware | Good — text boxes, tables, notes |
-| ConverterTextExtractor | docx, doc, odt, rtf (`converter`); **pdf** (`pdf`); ppt, legacy (`legacyPresentation`) | positional, paragraph-based | Good (Word), indicative (PDF) |
-
-`ConverterTextExtractor` delegates to the platform `any2text` converter (Apache Tika). Therefore **Word and PDF are supported without any format-specific code**. Supporting a new Tika-recognized format simply requires adding a new `<mimeType>`. It is contributed three times, under three names, for the reason explained in the next section.
-
-### Adding a Format
+**Adding a format.** Implement `BlobContentExtractor` and contribute it; the lowest `order` wins for a mime type, so a specialised extractor overrides a generic one. Any format the `any2text` converter reads only needs a `<mimeType>` on a `ConverterTextExtractor` contribution.
 
 ```xml
 <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
-  <extractor name="myFormat" order="15" class="com.acme.MyExtractor">
+  <extractor name="myFormat" order="15" class="com.example.MyExtractor">
     <mimeTypes>
-      <mimeType>application/vnd.acme</mimeType>
+      <mimeType>application/vnd.example</mimeType>
     </mimeTypes>
   </extractor>
 </extension>
 ```
 
-The extractor with the lowest `order` wins. A specialized extractor overrides a generic one.
+### Image Inventory
 
-### One Contribution, One Comparability Class
-
-A new version is only diffed against the previous one when **the same contribution** reads both blobs. When two different contributions do — an `.xlsx` replaced by a `.docx`, a Word document replaced by its PDF rendition — the change is audited as `skippedFormatChanged`, without a diff (see "Binary Changes That Cannot Be Diffed" above). The check compares contributions, not MIME types, so where a MIME type is contributed decides what can be compared with what:
-
-| Contribution | MIME types | Compared with each other |
-|---|---|---|
-| `spreadsheet` | xlsx, xlsm, xls | yes: an `.xls` saved as `.xlsx` is diffed cell by cell |
-| `presentation` | pptx, pptm, ppsx, potx | yes |
-| `plainText` | `text/*`, json, xml, yaml, javascript, sql | yes: the lines are read raw, whatever the MIME type. A change of MIME type that keeps almost nothing is filed `skippedContentReplaced`, see "A Text File Replaced by Another One" |
-| `converter` | docx, doc, odt, rtf | yes: the converter cuts all of them into paragraphs |
-| `pdf` | pdf | — |
-| `legacyPresentation` | ppt | — |
-
-`pdf` and `legacyPresentation` use the very same class and properties as `converter`, and are contributions of their own for that reason alone: the converter produces one line per rendered line for a PDF and flat slide text for a `.ppt`, so diffing either against a Word document reports everything as changed. To compare two formats that sit in different contributions, move their MIME types into one; to stop comparing two that share one, split it.
-
-### Image Inventory Extractors
-
-Image inventories have a point of their own, `imageExtractors`, because an image extractor and a
-text extractor both run on the same blob: they cannot compete for the same MIME type in a single,
-order-based selection. The descriptor, the MIME type matching and the `enabled` switch are
-identical to `extractors`.
+With `<imageInventory>true</imageInventory>`, the images of Word, Excel, PowerPoint OOXML and PDF files are listed next to the text and compared on their SHA-256: additions, removals and replacements appear under `# Images`. No OCR, no visual comparison. Each format is a contribution of its own to the `imageExtractors` point — `imageWord`, `imageSpreadsheet`, `imagePresentation`, `imagePdf` — so one can be turned off alone:
 
 ```xml
 <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="imageExtractors">
@@ -175,305 +186,55 @@ identical to `extractors`.
 </extension>
 ```
 
-`ImageInventoryExtractor` is contributed once per format (`imageWord`, `imageSpreadsheet`,
-`imagePresentation`, `imagePdf`), so a single format can be turned off — the above disables the PDF
-inventory and leaves the others untouched. Contributions with the same name merge, so naming the
-extractor is enough (see [Overriding the Configuration](#overriding-the-configuration)). These
-extractors only run when `imageAnalysisLevel > 0`, and they are bounded by the same `maxLines` as
-the text.
-
-### Reading the Binaries
-
-Both binaries are materialised on the local filesystem **once per diff**, and every extraction pass
-reads the local copy. On an S3-backed blob provider this is one download per version, whatever the
-number of passes. A blob already backed by a file is used as is and never copied.
-
-## Algorithm: Hirschberg + Prefix/Suffix Trimming
-
-Positional alignment relies on **Hirschberg's algorithm** instead of the traditional LCS table.
-
-A classic `int[n+1][m+1]` matrix costs approximately `4 × n × m` bytes, or about **92 MB** for 4,900 lines, **per concurrent worker**. Hirschberg produces the **same optimal alignment** while requiring only O(min(n,m)) memory.
-
-Hirschberg fixes memory, not time, which stays O(n×m) **on the sequences it is given**. So before aligning anything, the diff strips the longest common prefix and the longest common suffix: only the part that actually differs reaches the alignment. Identical lines produce no diff entry, so the result is unchanged — and since a shared first line always belongs to some optimal alignment, optimality is preserved too.
-
-The alignment then runs over interned line identifiers, so the `n×m` inner loop compares integers rather than calling `String.equals` on paragraphs that usually share a long common prefix.
-
-Measured results (JDK 17, one modified paragraph in a document of N paragraphs):
-
-| Lines | Before | After |
-|--------|--------|--------|
-| 5,000 | 139 ms | **4.7 ms** |
-| 10,000 | 336 ms | **2.4 ms** |
-| 20,000 | 1.45 s | **2.4 ms** |
-
-The cost stops growing with the size of the document: what drives it is the size of the change, not the size of the file.
-
-The worst case — a document rewritten from end to end — shares nothing, trims nothing and stays quadratic, though the integer comparison still helps:
-
-| Lines | Before | After |
-|--------|--------|--------|
-| 10,000 | 229 ms | 138 ms |
-| 20,000 | 891 ms | 339 ms |
-
-This is why `maxLines` still matters, but it now bounds only the pathological case.
-
-## Data Model
-
-Document type: `BlobDiff`
-
-Facets: `HiddenInNavigation`, `NotCollectionMember`, `NotFulltextIndexable`
-
-| Field | Purpose |
-|--------|--------|
-| bdiff:sourceId, bdiff:sourceRepository | Source document |
-| bdiff:xpath | Which blob changed |
-| bdiff:correlationId | Link to the audit entry |
-| bdiff:user, bdiff:date | Who and when |
-| bdiff:oldDigest, bdiff:newDigest | Fast path and proof |
-| bdiff:summary, added/removed/changed, truncated | Short, indexable summary. `bdiff:summary` is a plain **English** sentence by design (see note below); the counters next to it are numbers and translate freely. |
-| bdiff:status | ok, skippedUnsupportedType, skippedTooLarge, skippedFormatChanged, error (see the note above on how the three skip statuses are reached), skippedContentReplaced (counters without body, see "A Text File Replaced by Another One"), retrying (an `error` diff whose `BlobDiff.Retry` is scheduled) |
-| bdiff:similarity | Share of the smaller version kept unchanged in the other one, in characters, `0` to `1`; absent when not measured |
-| bdiff:diff | **Blob containing the full diff** |
-| bdiff:oldBlobProvider, oldBlobKey, oldMimeType, oldLength, newBlobProvider, newBlobKey, newLength | Storage identity of both binaries (since 1.2), used to **retry** a diff in error |
-
-> [!NOTE]
-> `bdiff:summary` is deliberately **not** translated. It is written once, when the diff is computed, and persisted as is — so translating it later would mean rewriting every existing `BlobDiff`, and composing it in the UI instead would mix already-stored English sentences with newly translated ones. A UI that wants a localised summary should build it from `bdiff:added`, `bdiff:removed`, `bdiff:changed` and `bdiff:truncated`, which are stored separately for exactly that reason. The `nuxeo-blobdiff-status` element already does this for its counters.
-
-The diff is stored as a blob, not a string: it stays outside the SQL/Mongo record. The `NotFulltextIndexable` facet is what keeps it outside the full-text index too — without it the platform would run its binary text extraction on the diff and copy the extracted business content into the full-text index and into Elasticsearch, defeating the whole point of the restricted container.
-
-### Container and Security
-
-`/change-diff/YYYY/MM/DD/`, partitioned by date (server time zone). Diff documents are named `<sourceId>-<eventTime>-<correlationId>`, so a single version containing changes on several blob xpaths yields distinct documents.
-
-- **Created at startup, always.** `BlobDiffRepositoryInit` creates `/change-diff` at every repository initialisation, even when the feature is disabled, so the restricted ACL exists before the first diff is written.
-- **Self-healing ACL.** At each startup the local ACL of `/change-diff` is compared with the expected one and reset (with a WARN) if it differs: the auditors group gets `Read`, `Remove` and `RemoveChildren`, then inheritance is blocked. Dated sub-folders have no local ACL and inherit it.
-- **Auditors group** is configurable, default `administrators`. Recommended: the configuration property `org.nuxeo.web.ui.blobaudit.auditorsGroup`, which is also exposed to Web UI (`Nuxeo.UI.config.blobaudit.auditorsGroup`) so the server and the UI share one setting. `<auditorsGroup>` in the `config` extension point still wins when set. Members of the `administrators` group always have access.
-- **Concurrency.** Dated folders are created in the caller's session under an in-JVM lock. A residual cross-node race can only produce a renamed dated sibling (e.g. `14.1727…`), which still lives under the restricted root and inherits its ACL.
-- **Deleted source.** If the source document no longer exists when `BlobDiffWork` runs, a `BlobDiff` with status `error` and summary `Source document no longer exists` is recorded, so the audit entry is never orphaned.
-- **Diffs never leave the container.** `BlobDiffLocationListener` refuses, for every user including administrators, the creation of a `BlobDiff` outside `/change-diff` and any move or copy of something under `/change-diff` to outside it (HTTP 403). The core does not enforce allowed subtypes, so without it any user could create a fabricated `BlobDiff` in their own workspace. Both page providers also only list documents under `/change-diff`, proxies excluded.
-
-Writes are performed with a **system session**: users modifying the file have no permission on this container.
-
-### Asynchronous Pipeline
-
-The synchronous side must stay cheap, and the asynchronous side must be safe to run more than once. Four guarantees back this up.
-
-**Dedicated work queue.** `BlobDiffWork` runs in the `blobDiff` category, bound to its own WorkManager queue (`blobdiff-workmanager-contrib.xml`, `maxThreads=2`). Without it the category would fall back to the shared `default` queue, where a burst of check-ins on large Office or PDF files would starve every other asynchronous work of the instance. Raise `maxThreads` only after measuring: each thread can hold a whole extracted document in memory.
-
-**Deterministic work id.** The work id is derived from the business identity of the comparison — the version pair, or the digest pair when no version context is available — never from the random correlation id. This is what `Scheduling.IF_NOT_RUNNING_OR_SCHEDULED` deduplicates on, so redundant works on the same pair collapse into one.
-
-**Idempotent work.** The WorkManager is *at-least-once*: a node crash, a redeployment or a retry can run the same work twice. Before creating anything, `BlobDiffWork` looks for an existing `BlobDiff` carrying the same `bdiff:correlationId` and returns early if it finds one. The diff being superseded by `BlobDiff.Retry` is excluded from that lookup, since it carries the same correlation id by design.
-
-**Retries.** `getRetryCount()` returns 2. Transient failures are the common case here (an S3 read timing out, a converter momentarily unavailable, a concurrent update on the dated container), and retrying is only safe because of the idempotence guard above.
-
-**Replays.** The work scheduled by `BlobDiff.Retry` runs under an id of its own. Under the id of the run that recorded the error, the stream WorkManager (Kafka deployments) took it for a duplicate of that run and skipped it in silence. While it is pending, the diff is `retrying` and a second retry is refused (HTTP 409). A replay that fails for good puts the diff back in `error`. A `retrying` diff whose replay the WorkManager no longer holds, lost with the in-memory queue of a node that restarted, can be retried again.
-
-**Bounded version lookup.** On each version creation the listener fetches only the **two** most recent versions of the series, with a **privileged** session. Fetching them all made the cost grow quadratically over the life of a document; using the user session silently dropped versions the caller cannot read, so the "previous version" could be the wrong one. Nothing leaks: only ids, labels and blobs of the two versions are used, and the result lands in the restricted container.
-
-### Page Providers
-
-| Name | Backend | Use |
-|---|---|---|
-| `BLOB_DIFFS_ADMIN` | `SearchService` → **the configured search client** | Web UI search and document tab: filters (`bdsearch:*` named parameters of the `BlobDiffSearch` search document) and aggregates on status, format, field and user |
-| `BLOB_DIFFS_FOR_DOCUMENT` | Core (NXQL), always the repository | Diffs of one document, synchronous and read-your-writes |
-
-> [!IMPORTANT]
-> The filter keys sent by the UI keep their **`bdsearch:` prefix** — `bdsearch:sourceId`, not `sourceId`. A prefixed key is resolved deterministically through the schema prefix registry; a bare key is resolved by iterating the schemas of the search document, where a generic name such as `user` can collide with another schema. Note also that the search document type is declared with `<searchDocumentType>`, a **sibling** of `<whereClause>` — `whereClause@docType` is not part of the descriptor and XMap drops it silently.
-
-> [!NOTE]
-> `BLOB_DIFFS_ADMIN` relies on `SearchServicePageProvider`, which lives in `nuxeo-platform-query-api`, **not** in the Elasticsearch bundle — so its component always registers. Adding a `<require>` on `org.nuxeo.elasticsearch.ElasticSearchComponent` would be harmful rather than missing: it would keep the whole contribution — `BLOB_DIFFS_FOR_DOCUMENT` included — pending on any instance without a search engine, and in the tests. What does need a search engine is the *execution*: `SearchService` is resolved at query time. See "Search Engine Prerequisite" below for what happens without one.
-
-## Web UI
-
-Available to members of `administrators` and of the auditors group only.
-
-- **"Content changes audit" search**, reached from its own drawer entry. It is a *named search*, built exactly like the platform ones: the **search form sits in the drawer on the left**, the **results fill the main area on the right**. Filters: date range, source document (`nuxeo-document-suggestion`), user, truncated only. Facets: status, format, field, user. Clicking the drawer icon opens the form and brings the results to the front in one go.
-
-  The results table is a standard `nuxeo-results`, so it comes with the platform sort selector, the selection toolbar, CSV export, and **per-user column preferences** (show/hide, resize, reorder) persisted in local storage. Row actions: open, go to the source, filter on the source, download the diff, retry (errors and pending retries only). Selection action: **permanent deletion**. Toolbar action: **purge** before a date, optionally for one status.
-
-  Saved searches work as they do everywhere else: an auditor can store a set of filters from the drawer header and share it.
-- **"Content changes" tab** on documents holding files (`file` or `files` schema), with one row per version transition rather than per ordinary save. "Open in the content changes audit" switches to the search filtered on that document alone: the filters of an earlier audit search are dropped, so the search lists the same diffs as the tab.
-- **`BlobDiff` document view** (`document/blobdiff/nuxeo-blobdiff-view-layout.html`): source, field, user, date, status and counters, similarity score, files and digests, colored rendering of the diff (`+` / `-` / `~`, `# Images` section, progressive display by 1 000 lines), and the same actions. `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it and would otherwise get a 404.
-
-Wherever a status is shown — results, tab, document view — a **"Format: json → xml"** badge follows it when the two versions do not hold the same MIME type, with both MIME types in its tooltip. It names the file extensions when they differ, the MIME subtypes otherwise.
-
-Deletion is **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.
-
-Hiding the UI is cosmetic. The protection is the ACL of `/change-diff` and the server checks of the operations.
-
-> [!NOTE]
-> A user who is **not** an auditor and navigates to `#!/search/blobdiffs` by hand gets an empty results pane rather than an explicit refusal: the drawer form is filtered out, so Web UI has no search to bind and stamps nothing. The server-side checks are what actually deny access.
-
-### Server Side
-
-| Item | Purpose |
+| Format | Key |
 |---|---|
-| `BlobDiff.Delete` | Permanently deletes the input BlobDiff documents (other types refused) |
-| `BlobDiff.Purge(before, status?)` | **Asynchronous.** Schedules the permanent deletion of diffs dated before a day on the Bulk Action Framework. Returns `{"commandId": "...", "state": "SCHEDULED"}` |
-| `BlobDiff.PurgeStatus(commandId)` | Progress of a purge: `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}`. Any id that is not a purge command answers `UNKNOWN` |
-| `BlobDiff.PurgeAbort(commandId)` | Stops a running purge. Already deleted diffs are not restored. Any other bulk command is left alone |
-| `BlobDiff.CleanEmptyFolders` | Removes the dated folders left empty under `/change-diff`. Returns `{"folders": n}` |
-| `BlobDiff.Retry` | Replays a diff in `error` from its stored binary keys. The diff is `retrying` until the new one, which keeps user, date and correlation id, replaces it. Refused with 409 while a replay of the same diff is still queued or running |
-| `blobDiffSource` enricher | `{uid, exists, trashed, readable, title, path, type}` of the source; title/path/type only when the current user can read it |
+| Word | `word:image:<media-part>` |
+| Excel | `excel:image:<sheet>:<start-cell>:<end-cell>`, `<cell>` alone for a picture on one cell, `image:<ordinal>` for an absolute position |
+| PowerPoint | `powerpoint:slide:<slide>:image:<media-part>` |
+| PDF | `pdf:page:<page>:image:<ordinal>` |
 
-Every operation is refused (`DocumentSecurityException`) to anyone who is not an administrator, a member of `administrators` or of the auditors group.
-
-### The Purge Is Asynchronous
-
-`BlobDiff.Purge` used to delete by batches of 100 in an unbounded loop, committing between batches, **inside the HTTP transaction** — an HTTP timeout was guaranteed at volume. It now submits a `blobDiffPurge` bulk command and returns immediately.
-
-The full sequence, which the Web UI performs for you:
-
-1. `BlobDiff.Purge(before, status?)` → `commandId`;
-2. poll `BlobDiff.PurgeStatus(commandId)` until `state` is `COMPLETED` (or `ABORTED`);
-3. `BlobDiff.CleanEmptyFolders` — the dated folders can only be removed once the command has emptied them.
-
-Notes:
-
-- **Breaking change.** The previous synchronous payload was `{"deleted": n, "folders": m}`. A script that purges on a schedule must be adapted to the three-step sequence above.
-- `deleted` is the exact number of removed documents, published by the action; `processed` counts the ids handed to the computation, which differs as soon as the query matched something the purge refuses to touch.
-- **One purge at a time per repository.** The action is `exclusive`: a second submission is refused with *"A BlobDiff purge is already running on this repository"*. The underlying lock has a TTL, so a command lost mid-flight does not freeze the feature.
-- The command is submitted **under the calling user**, so the deletion stays subject to the ACL of `/change-diff`.
-- **The `blobDiffPurge` action is deliberately not `httpEnabled`.** It is unreachable through `Bulk.RunAction` and through the `/search/bulk/{action}` REST endpoint for anyone but an administrator. `BlobDiff.Purge` is the only supported entry point: it enforces the auditors check and builds the query itself. Turning `httpEnabled` on would publish a delete-by-NXQL API to every authenticated user.
-- The action only ever removes documents of type `BlobDiff`, whatever the query it is given.
-- **What the dialog reports.** A completed purge reports the number of deleted diffs, plus any failed or skipped ones and a reached query limit, which mean another run is needed. A failed status call is retried with a growing delay; after five in a row the dialog closes and says the purge keeps running server side, rather than "Purge failed." Stopping a purge that already completed reports it as completed.
-- **Stopping a purge** (`BlobDiff.PurgeAbort`) takes effect at the next batch of 50 diffs: the batch in progress completes, nothing after it is deleted. Diffs already deleted are not restored; running the purge again finishes the job.
-
-### Deployment
-
-`OSGI-INF/deployment-fragment.xml` unzips `web/nuxeo.war/**` and appends `ui/i18n/messages.json` and `messages-fr.json` (also to `messages-fr-FR.json`) to the Web UI translations. The bundle `ui/nuxeo-advanced-document-blob-audit/nuxeo-advanced-document-blob-audit.html` is registered through `WebResources` (`OSGI-INF/blobaudit-webui-contrib.xml`).
-
-The marketplace package ships the plugin bundle only. Apache POI and PDFBox, which the extractors rely on, come with the LTS 2025 server, in the versions `nuxeo-parent` manages.
-
-```
-web/nuxeo.war/ui/
-├── document/blobdiff/
-│   ├── nuxeo-blobdiff-view-layout.html
-│   └── nuxeo-blobdiff-metadata-layout.html
-├── i18n/
-│   ├── messages.json
-│   └── messages-fr.json
-├── search/blobdiffs/                             (resolved at runtime by filename, see below)
-│   ├── nuxeo-blobdiffs-search-form.html          (left pane, stamped in the drawer)
-│   └── nuxeo-blobdiffs-search-results.html       (right pane, stamped in the main area)
-└── nuxeo-advanced-document-blob-audit/
-    ├── nuxeo-advanced-document-blob-audit.html   (slots: DRAWER_ITEMS, DRAWER_PAGES, DOCUMENT_VIEWS_*)
-    └── elements/                                 (tab, viewer, dialogs, badges, source link)
-```
-
-> [!IMPORTANT]
-> The two files under `search/blobdiffs/` are **not** imported by the bundle. Web UI resolves them at runtime from a hardcoded convention — `<hrefBase><searchName>/nuxeo-<searchName>-search-form.html`, lowercased, `hrefBase` falling back to `/ui/search/` on a server — and `nuxeo-layout` derives the custom element name from the file name. The folder name, the two file names and the two `dom-module` ids must therefore stay in lockstep with `search-name="blobdiffs"`. Get one wrong and the pane renders *"Failed to find search layout for blobdiffs"* (or silently nothing), with no other diagnostic.
+Excel and PowerPoint keys get a `#2`, `#3`… suffix when several pictures share one. Only pictures placed on slides are listed (groups included), not those of layouts and masters; linked (external) pictures are ignored.
 
 ## Configuration
 
-**Disabled by default.**
+Every option of the `config` extension point of `org.nuxeo.audit.advanced.blob.BlobDiffComponent`:
 
-```xml
-<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
-  <config enabled="true">
-    <maxBlobSize>10485760</maxBlobSize>
-    <maxLines>10000</maxLines>
-    <maxDiffEntries>5000</maxDiffEntries>
-    <maxDiffChars>4194304</maxDiffChars>
-    <maxValueLength>4096</maxValueLength>
-    <imageAnalysisLevel>0</imageAnalysisLevel>
-    <docTypes>
-      <docType>Contract</docType>
-    </docTypes>
-    <xpaths>
-      <xpath>file:content</xpath>
-    </xpaths>
-  </config>
-</extension>
-```
+| Option | Default | Meaning |
+|---|---|---|
+| `enabled` (attribute) | `false` | global switch |
+| `docTypes` | empty: every type | document types watched; `*` also means every type |
+| `xpaths` | `file:content` | blob xpaths watched; `*` means every blob xpath of the schemas the document carries, those of facets added to the document included |
+| `maxBlobSize` | `10485760` (10 MB) | a larger binary is never extracted: `skippedTooLarge` |
+| `maxLines` | `10000` | units extracted from each side; past it the diff is `truncated` |
+| `maxDiffEntries` | `5000` | differences written to the body |
+| `maxDiffChars` | `4194304` | length of the whole body, in characters |
+| `maxValueLength` | `4096` | length of a single unit: a longer one keeps its beginning, its length and a digest of the whole |
+| `imageInventory` | `false` | the [image inventory](#image-inventory) |
 
-Auditors group (server and Web UI):
+Extractor properties, set on a contribution of the `extractors` point: `useFormulas` (`spreadsheet`, `true`: with `false`, formulas are compared on the value cached in the file), `includeNotes` (`presentation`, `true`), `trimLines` and `skipBlankLines` (`plainText`, both `true`), `converter` and `minLineLength` (the three `ConverterTextExtractor` contributions, `any2text` and `1`), `minSimilarity` and `minSimilarityLines` (`plainText` only, `0.1` and `5`, see [above](#a-text-file-replaced-by-another-one)). `maxValueLength` is handed to every extractor from the configuration unless its contribution sets one.
 
-```xml
-<extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
-  <property name="org.nuxeo.web.ui.blobaudit.auditorsGroup">auditors</property>
-</extension>
-```
+### Merging Contributions
 
-In production, restrict the feature to specific document types. Computing diffs for every binary in a repository is rarely worth the cost.
+Contributions **merge**: a later one only overrides what it sets, the rest keeps the earlier values. A contribution setting nothing but `enabled="true"` and `docTypes`, like the one of the [Quick Start](#quick-start) without its `xpaths`, keeps the shipped bounds and xpaths.
 
-### Overriding the Configuration
-
-Contributions to `config` **merge**: a later one only overrides what it sets, and anything it leaves out keeps the value of the earlier ones. To narrow the shipped configuration down to one document type, this is enough — `enabled`, the bounds and the xpaths are kept:
-
-```xml
-<require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
-
-<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
-  <config enabled="true">
-    <docTypes>
-      <docType>Contract</docType>
-    </docTypes>
-  </config>
-</extension>
-```
-
-- A list (`docTypes`, `xpaths`) replaces the earlier one only when it is **not empty**. An empty element cannot widen a list back: list `*` instead.
-- `<docType>*</docType>` means every document type, as does an empty `docTypes` everywhere.
-- `<xpath>*</xpath>` means every blob xpath of the document, discovered from the schemas it carries, those of facets added to the document itself included. With no xpath configured anywhere, only `file:content` is diffed.
-- `<config enabled="false">` still switches the feature off: a value that is set always wins.
-
-The `extractors` and `imageExtractors` points merge the same way, by extractor name. An override only names the extractor and sets what it changes; its properties are added to the earlier ones, and its MIME types replace them only when it lists some:
-
-```xml
-<extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="extractors">
-  <extractor name="converter">
-    <property name="minLineLength">2</property>
-  </extractor>
-</extension>
-```
-
-PDF and legacy `.ppt` are read by contributions of their own, `pdf` and `legacyPresentation` (see "One Contribution, One Comparability Class"): an override of `converter` does not reach them, override them by name too.
-
-Two extractor properties are read by the service rather than by the extractor: `minSimilarity` and `minSimilarityLines`, which file a text file replaced by an unrelated one as `skippedContentReplaced`. Only `plainText` sets them (`0.1` and `5`); `minSimilarity` set to `0` keeps every full diff. See "A Text File Replaced by Another One".
+- A list (`docTypes`, `xpaths`) replaces the earlier one only when it is **not empty**: an empty element cannot widen a list back, list `*` instead.
+- A value that is set always wins: `<config enabled="false">` still switches the feature off.
+- The `extractors` and `imageExtractors` points merge the same way, by extractor name: an override names the extractor and sets what it changes; its properties are added to the earlier ones, and its mime types replace them only when it lists some. An override of `converter` does not reach `pdf` nor `legacyPresentation`: override them by name too.
+- An invalid `minSimilarity` is logged at `ERROR` and disables the rule, never the extractor.
 
 ### Bounding the Size of a Diff
 
-Four options bound the work, at two different stages, and they are not interchangeable:
+`maxBlobSize` bounds what may be opened at all, `maxLines` and `maxValueLength` what is extracted — at most `maxLines × maxValueLength` characters held per side — and `maxDiffEntries`, `maxDiffChars` and `maxValueLength` what is written. An Excel cell holds up to 32 767 characters and a Word paragraph is unbounded, so the count alone would not bound the body.
 
-| Option | Stage | Bounds |
-|---|---|---|
-| `maxBlobSize` | before extraction | the binary that may be opened at all |
-| `maxLines` | extraction | how many units are extracted from each side |
-| `maxDiffEntries` | reporting | how **many** differences are written to the diff body |
-| `maxDiffChars` | reporting | the total **length** of the diff body, in characters |
-| `maxValueLength` | extraction and reporting | the length of a **single** unit: a longer one keeps its beginning, its length and a digest of the whole |
+When a cap is reached, `bdiff:truncated` is set and the counters `added`, `removed` and `changed` stay **exact**: only the rendering is shortened. `maxLines` cuts each side on its own, so past the last unit both windows share, a unit missing from one side may simply lie beyond its cut: it is neither reported nor counted. Before that point every reported change is a fact. A value longer than `maxValueLength` is shown as its beginning, its length and a short SHA-256 of the whole (`X… [32767 chars, sha256:…]`), so two values differing only past the beginning still render differently.
 
-`maxDiffEntries` has never bounded anything but the count. An Excel cell accepts 32 767 characters and a Word paragraph is unbounded, so 5 000 entries of worst-case cells render to roughly 320 MB — accumulated in a single `StringBuilder`, copied by `toString()`, copied again into an in-memory blob, then encoded to bytes by the blob provider. `maxDiffChars` and `maxValueLength` are what make the stored diff proportional to something known in advance rather than to the content. `maxValueLength` also applies when values are extracted, so what each side holds in memory is bounded by `maxLines × maxValueLength`.
-
-When either cap is reached, the counters `bdiff:added`, `bdiff:removed` and `bdiff:changed` stay **exact** — counting continues past the budget — and `bdiff:truncated` is set. Only the rendering is shortened, never the accounting.
-
-`maxLines` cuts each side on its own, so the two windows do not end at the same place in the document. Past the last unit both windows share, a unit missing from a cut side may simply lie beyond its cut: it is neither reported nor counted. A cell filled near the top of a large workbook is therefore reported as one addition, not as one addition plus the removal of the cell it pushed out of the window. Before that point, both windows cover the same part of the document and every reported change is a fact.
-
-> [!NOTE]
-> A value longer than `maxValueLength` is shown as its beginning, followed by its length and a short SHA-256 of the whole (`X… [32767 chars, sha256:…]`). Two values that only differ past the beginning are still reported as a modification, and their digests tell them apart in the report.
-
-### Search Engine Prerequisite
-
-The **Content changes audit** search and the document history tab are backed by `BLOB_DIFFS_ADMIN`, which goes through the LTS 2025 `SearchService`. Where the query lands depends on the deployed search client:
-
-- with the OpenSearch (or Elasticsearch) search-client package installed, the query **and its four aggregates** — status, MIME type, xpath, user — run on the engine;
-- on a bare instance, the default client is `repository` (`nuxeo.search.client.default.name`), which does not support the `AGGREGATE` capability. The listing still works, but the facet panel comes back **silently empty**: the platform reports a `SearchLimitation` on the response rather than raising, and the page provider does not surface it.
-
-A search engine is therefore a practical prerequisite for the facet panel of the search form. No mapping or configuration template has to be deployed for it: the default index mapping maps every string property to a `keyword` through a dynamic template, so `bdiff:*` is queryable and aggregatable as soon as the documents are indexed.
-
-### Repository Indexes
-
-`bdiff:correlationId` and `bdiff:sourceId` are declared with `indexOrder="ascending"`. Both are the sole predicate of a query that would otherwise scan every `BlobDiff` of the instance — the idempotency guard of `BlobDiffWork`, and the `BLOB_DIFFS_FOR_DOCUMENT` core query page provider.
-
-> [!IMPORTANT]
-> `indexOrder` is a **MongoDB** mechanism. The platform's only consumer of it is `MongoDBIndexCreator`, which builds the indexes at repository initialisation, idempotently, over existing data. On **VCS (SQL)** it has no effect at all: the equivalent indexes would have to be created by hand. It has no effect on Elasticsearch/OpenSearch either — there is no per-field opt-in there, the index mapping decides.
+`maxLines` also bounds the cost of the alignment: a few edited paragraphs cost milliseconds whatever the size of the document, a document rewritten from end to end costs time quadratic in its length.
 
 ### Disabling the Listener
 
-The `<config enabled="...">` switch above is the global, static one: it requires a redeployment. For targeted, runtime control, the plugin follows the platform convention (`DublinCoreListener.DISABLE_DUBLINCORE_LISTENER`, `CoreSession.DISABLE_AUDIT_LOGGER`, `VersioningService.DISABLE_AUTO_CHECKOUT`) and offers two complementary mechanisms.
+The `enabled` switch is global and static. For targeted, runtime control, the plugin follows the platform convention (`DublinCoreListener.DISABLE_DUBLINCORE_LISTENER`, `CoreSession.DISABLE_AUDIT_LOGGER`, `VersioningService.DISABLE_AUTO_CHECKOUT`) and offers three mechanisms. When the listener is disabled, **nothing** happens — no audit entry, no work, no `BlobDiff` — and the version itself is created normally.
 
-**1. Per-operation, through the document context data**
+**1. Per operation, through the document context data**
 
 ```java
 import static org.nuxeo.audit.advanced.blob.BlobModificationListener.DISABLE_BLOB_DIFF_LISTENER;
@@ -483,7 +244,7 @@ doc.putContextData(VersioningService.VERSIONING_OPTION, VersioningOption.MINOR);
 session.saveDocument(doc);   // version created, no audit entry and no BlobDiff
 ```
 
-`CoreSession#saveDocument` copies the document context data into its option map, which it passes to `aboutToCheckIn` and `documentCheckedIn` — the two events the listener reads — for the version **it creates itself**, from the `VERSIONING_OPTION` set on the document. The same key also works when you fire the event yourself and set it as an event property.
+`CoreSession#saveDocument` copies the document context data into its option map, which it passes to `aboutToCheckIn` and `documentCheckedIn` — the two events the listener reads — for the version **it creates itself**, from the `VERSIONING_OPTION` set on the document. The same key also works as an event property when you fire the event yourself.
 
 > [!IMPORTANT]
 > The flag only covers **manual** versioning through `saveDocument`. Every other path that creates a version builds its own option map, so the flag never reaches the listener and the version is audited and diffed regardless:
@@ -512,166 +273,83 @@ The previous state is restored in a `finally` block, so nesting is safe and an e
 
 **3. Instance-wide, at runtime**
 
-The listener is named `blobModificationListener`, so the standard platform administration API applies:
-
 ```java
 Framework.getService(EventServiceAdmin.class).setListenerEnabledFlag("blobModificationListener", false);
 ```
 
-This is global and survives until it is set back or the node restarts. Prefer mechanisms 1 and 2 for anything scoped.
+Global, until it is set back or the node restarts. Prefer 1 and 2 for anything scoped.
 
-When the listener is disabled by any of these means, **nothing** happens: no `blobContentModified` audit entry and no `BlobDiffWork`. The version itself is created normally.
+## Web UI
 
-#### Image Analysis Level
+Shown to members of `administrators` and of the auditors group only. Hiding it is cosmetic: the protection is the ACL of `/change-diff` and the server checks of the operations. A user who is not an auditor and opens `#!/search/blobdiffs` by hand gets an empty pane.
 
-`imageAnalysisLevel` is optional and defaults to `0` when omitted.
+- **"Content changes audit"**, a drawer entry built like the platform searches: the form in the drawer, the results in the main area, one click opening both. Filters: date range, source document, user, truncated diffs only; facets: status, format, field, user. The results are a standard `nuxeo-results`: sort, selection, CSV export, saved searches, and per-user column settings kept in local storage. Row actions: open, go to the source, show only the diffs of this document, download the diff, retry (an `error` diff with both blob keys). Selection action: permanent deletion. Toolbar action: purge.
+- **"Content changes" tab** on documents holding files (`file` or `files` schema): one row per version transition. "Open in the content changes audit" opens the search on that document alone, dropping the filters of an earlier search.
+- **`BlobDiff` view**: source (a link when readable, badged *In trash* when it is; *Source deleted*, or *Source not accessible to you*), field, user, date, status and counters, similarity, files and digests, and the diff rendered in color (`+` / `-` / `~`, `# Images`), shown 1 000 lines at a time. Actions: download, retry, back to the list, delete. There is **no Edit action**: a diff is a record.
 
-- `0`: no image analysis. This preserves the text/cell-only behavior and adds no image-processing cost.
-- `1`: digest-based image inventory, reporting image additions, removals, and replacements. It is produced by the extractors contributed to the `imageExtractors` point (see above), which are selectable and disableable per MIME type.
+Wherever a status is shown, a **"Format: json → xml"** badge follows it when the two versions do not hold the same mime type, with both mime types in its tooltip.
 
-This version supports values from `0` to `1`. At component startup, an invalid value is clamped to the nearest supported bound and a `WARN` is logged. For example, `-1` becomes `0`, while `2` becomes `1`. Future versions may raise the maximum when richer image-analysis modes are implemented.
+Deletion and purge are **permanent** (no trash): both dialogs show a warning and require an explicit acknowledgment.
 
-At level 1, keys use `word:image:<media-part>`, `excel:image:<sheet>:<start-cell>:<end-cell>` (`<cell>` alone for a picture anchored on a single cell, `image:<ordinal>` for an absolute position), `pdf:page:<page>:image:<ordinal>` and `powerpoint:slide:<slide>:image:<media-part>`. Excel and PowerPoint keys are suffixed `#2`, `#3`… when several pictures share one. For PowerPoint, only pictures placed on slides (including inside groups) are inventoried; layouts/masters and linked pictures are ignored. Legacy `.ppt` gets text diff only. Values are SHA-256 digests. This level does not perform OCR or pixel-level visual comparison.
+## Operations and Purge
 
-## Build
+| Operation | Purpose |
+|---|---|
+| `BlobDiff.Delete` | Permanently deletes the input `BlobDiff` documents; any other type is refused (400) |
+| `BlobDiff.Purge(before, status?)` | Schedules the permanent deletion of the diffs dated before a day (UTC), optionally of one status, on the Bulk Action Framework. Returns `{"commandId": "...", "state": "SCHEDULED"}`; refused with 409 while a purge runs |
+| `BlobDiff.PurgeStatus(commandId)` | `{state, deleted, processed, total, errorCount, skipCount, queryLimitReached}`. Any id that is not a purge answers `UNKNOWN` |
+| `BlobDiff.PurgeAbort(commandId)` | Stops a purge at its next batch of 50 diffs. Deleted diffs are not restored; running the purge again finishes the job |
+| `BlobDiff.CleanEmptyFolders` | Removes the dated folders left empty under `/change-diff`. Returns `{"folders": n}` |
+| `BlobDiff.Retry` | Replays a diff in `error` from its stored blob keys. The new diff keeps user, date and correlation id and replaces it; the diff stays `error` meanwhile. Refused with 409 while a replay of the same diff is pending |
+
+Every operation is refused to anyone but an administrator or a member of `administrators` or of the auditors group. The `blobDiffSource` enricher gives the state of the source of a `BlobDiff` — `{uid, exists, trashed, readable, title, path, type}`, the last three only when the current user can read it.
+
+A purge is asynchronous; the Web UI runs this sequence for you, and a script scheduling a retention purge runs it too:
+
+1. `BlobDiff.Purge(before, status?)` → `commandId`;
+2. poll `BlobDiff.PurgeStatus(commandId)` until `state` is `COMPLETED` or `ABORTED`;
+3. `BlobDiff.CleanEmptyFolders`, once the command has emptied the folders.
+
+`deleted` is the exact count of removed diffs; `processed` counts the ids handed to the purge. A completed purge with failed or skipped diffs, or with `queryLimitReached`, needs another run. One purge runs at a time per repository, under the calling user, so the deletion stays subject to the ACL of `/change-diff`; it only ever removes `BlobDiff` documents under `/change-diff`.
+
+## Deployment and Prerequisites
+
+- **Package.** The marketplace package ships the plugin bundle only: Apache POI and PDFBox come with the LTS 2025 server. The bundle unzips its Web UI files into `nuxeo.war` and appends its translations to those of Web UI and of the server.
+- **Search engine, for the facets.** The audit search and the document tab use `BLOB_DIFFS_ADMIN`, which runs on the configured search client. With the OpenSearch (or Elasticsearch) search-client package, the query and its four facets run on the engine; no mapping has to be deployed. On a bare instance the default `repository` client still lists the diffs, but the facets come back **silently empty**.
+- **Repository indexes.** `bdiff:correlationId` and `bdiff:sourceId` are declared with `indexOrder`, which MongoDB applies at startup. On **VCS (SQL)**, create these two indexes by hand.
+- **Work queue.** The `blobDiff` queue runs 2 works at a time. Raise `maxThreads` only after measuring: each work can hold two extracted documents in memory.
+- **The container.** `/change-diff` is created at each repository initialisation, even with the feature disabled, partitioned by day in **UTC**. Its local ACL — the auditors group granted `Read`, `Remove` and `RemoveChildren`, inheritance blocked — is reset with a `WARN` at each startup if it was changed; dated folders inherit it.
+- **Security**, in short: the diffs are written with a system session; a `BlobDiff` cannot be created, moved or copied outside `/change-diff`, by anyone, administrators included; every reader of diffs only trusts what sits under `/change-diff`; `BlobDiff.Retry` only replays a stored diff from that container. The model, its reasons and its limits: [`docs/DESIGN.md`](docs/DESIGN.md#7-security-model).
+
+## Limitations
+
+- **Business content is copied** into `BlobDiff` documents, protected by other ACLs than the source. Review this design for regulated environments.
+- **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared.
+- **Scanned PDFs and image-only content** extract nothing without OCR: the status is `ok` and the diff is empty.
+- **PDF quality is indicative.** Units are the lines rendered by the converter; multi-column or complex layouts give noisy diffs.
+- **Converted formats** (Word, OpenDocument, RTF, PDF, `.ppt`): the conversion processes the whole document; only the reading of its output stops at `maxLines`.
+- **Excel**: keys are absolute cell references, so inserting a row or a column shifts every cell after it and inflates the diff, and renaming a sheet reports all its cells as removed and added. Legacy `.xls` is loaded whole.
+- **PowerPoint**: only OOXML is read in depth. SmartArt, charts, OLE objects, text inherited from layouts or masters, comments, alt-text and hidden-slide status are not extracted. A moved slide is a removal plus an addition; a slide without title placeholder gets a bare `## Slide` marker.
+- **Positional counters are not an exact edit script.** A removal followed by an addition is coalesced into a modification, so a rewritten block reports a mix of removals, additions and modifications; the totals stay consistent.
+- **Images**: digest-based. A re-encoded image, or a PDF image re-compressed by its producer, is reported as replaced; resizing or moving an image without changing its bytes is not detected (except an Excel picture changing cells); PowerPoint and PDF keys carry the slide or page number, so inserting a slide or a page reports the images after it as removed and added; a Word image used twice appears once. An image is read once per file however often it is placed. An image over 32 MB is skipped, a PDF form nested deeper than 16 levels or containing itself too, and the inventory stops past 256 MB of images or past `maxLines` images: in each case the diff is `truncated`. A failing inventory falls back to the text diff, with a `WARN`.
+- **No scheduled retention.** The purge is manual, or scheduled by your own script following the sequence above.
+- **Retry** needs the binaries to be still in the blob store.
+- **Diff-to-diff navigation in Web UI.** Opening a `BlobDiff` from another one — from the drawer queue or from a link — updates the URL, the title and the header, but the page keeps showing the previous diff; a reload shows the right one. Under investigation: the document never reaches the plugin's view layout.
+
+## Build and Tests
 
 ```bash
 mvn clean install
 ```
 
-The Marketplace package is generated under:
-
-```text
-nuxeo-advanced-document-blob-audit-package/target/
-```
-
-## Points of Attention
-
-### Retrieving the Exact Binary Pair
-
-`BlobDiffWork` does not transport `Blob` instances directly. When the work is scheduled, both sides of the comparison are frozen using their blob provider identifiers, storage keys, filenames, MIME types, digests, and lengths.
-
-Both blobs already belong to persisted Nuxeo versions and are `ManagedBlob` instances. Their existing provider IDs and storage keys are captured directly; the listener does not write either blob again. The work never reloads the current blob property from the live document. This guarantees that a queued comparison always uses the exact version pair that triggered the event, even if the live document is modified again before the asynchronous work starts.
-
-Both storage keys are resolved through `BlobManager` during work execution. If either frozen blob can no longer be resolved, the persistent `BlobDiff` is created with an `error` status instead of storing a misleading diff.
-
-### Confidentiality
-
-Business data is copied into a document protected by ACLs different from those of the source document.
-
-For sensitive deployments (SecNumCloud, personal data, regulated environments), this design should be explicitly reviewed and validated.
-
-### Scanned PDFs
-
-Without OCR, text extraction returns nothing. The status remains `ok` but the diff is empty.
-
-### PowerPoint Diff
-
-`PresentationExtractor` (reads each slide with SAX, the way Apache POI XSLF does) emits one `## Slide: <title>` marker per slide, then each text paragraph in drawing order (group shapes included), table rows as `[table] a | b | c`, and speaker notes as `[notes] ...` (disable with the `includeNotes=false` extractor property). Slide numbers are deliberately **not** part of the text: inserting or deleting a slide yields a compact diff instead of shifting every following slide. Image keys, on the other hand, do carry the slide number (see Known Limitations).
-
-### Excel Row Insertions
-
-Because keys are absolute cell references (`Sheet1!B12`), inserting a row shifts all cells below it and artificially inflates the diff.
-
-This behavior is covered by `TestExcelDiff#testInsertingARowShiftsCellsAndInflatesTheDiff`.
-
-Fixing it would require an additional row-alignment phase, making it a reasonable v2 enhancement.
-
-### Unrouted Events = Lost Entries
-
-`blobContentModified` must be declared both in the AuditRouter route and in the `eventTypes` vocabulary.
-
-Without the route, the audit entry is silently ignored.
-
-Without the vocabulary entry, it does not appear in Web UI filters.
-
-## Known Limitations
-
-### Text Extraction
-- **Textual diff only.** Formatting (bold, colors, fonts, layout, styles) is never compared: restyling a Word paragraph or a PowerPoint text box produces no diff.
-- **A change of format is not diffed.** A new version read by another extractor contribution than the previous one (`.xlsx` → `.docx`, `.docx` → `.pdf`, `.ppt` → `.pptx`) is audited as `skippedFormatChanged`, with no diff. A conversion within one contribution (`.xls` → `.xlsx`, `.doc` → `.docx`, `.txt` → `.json`) is diffed; between two text formats, that diff shows the real textual change. A text file replaced by an unrelated one of another format — or by the same data converted from `.json` to `.xml`, which shares almost no line — is filed `skippedContentReplaced`: counters and similarity, no body. Set `minSimilarity` to `0` to keep those bodies.
-- **Scanned PDFs / image-only content.** Without OCR, nothing is extracted: status stays `ok` with an empty diff.
-- **PDF quality is indicative.** Paragraph boundaries depend on Tika's layout reconstruction; multi-column or complex layouts may produce noisy diffs.
-- **Converted formats** (Word, PDF, OpenDocument, RTF...) are read line by line from the converter output, and reading stops at `maxLines`. The conversion itself still processes the whole document.
-- **Positional counters are not an exact edit script.** A removal immediately followed by an addition is coalesced into a modification, so fully rewritten blocks report a mix of removals, additions and modifications (totals remain consistent).
-- **Quadratic running time.** Hirschberg keeps memory linear, but time stays O(n × m): `maxLines` must remain bounded.
-- **Truncation.** Beyond `maxLines` (extraction), or `maxDiffEntries` / `maxDiffChars` / `maxValueLength` (reporting), the diff is partial and flagged `truncated`. The counters stay exact in every case.
-
-### Excel
-- **Row/column insertions inflate the diff.** Keys are absolute cell references, so inserting a row shifts every cell below it (see `TestExcelDiff#testInsertingARowShiftsCellsAndInflatesTheDiff`).
-- **Renaming a sheet** invalidates all its keys: every cell is reported as removed then added.
-- Formulas are compared as formulas (default), not on their computed value. With `<property name="useFormulas">false</property>` they are compared on the value cached in the file.
-- `.xlsx` and `.xlsm` are read sheet by sheet and reading stops at `maxLines`, so a large workbook costs what is extracted, not its size. Legacy `.xls` is loaded whole.
-
-### PowerPoint
-- **Only OOXML is analyzed in depth** (`.pptx`, `.pptm`, `.ppsx`, `.potx`). Legacy binary `.ppt` falls back to `any2text`: flat text, no slide structure, no image inventory.
-- **Not extracted:** SmartArt, charts, embedded OLE objects, text inherited from layouts/masters, comments, alt-text, hidden-slide status.
-- **Slide moves** are reported as a removal plus an addition of the same content.
-- **Slide titles** come from the title placeholder; slides without one get a bare `## Slide` marker, which may lower alignment quality on decks with many untitled slides.
-- Decks are read slide by slide and reading stops at `maxLines`, so a large deck costs what is extracted, not its size.
-
-### Images (`imageAnalysisLevel=1`)
-- **Digest-based only.** Detects additions, removals and byte-level replacements; no OCR, no visual/pixel comparison. Re-encoding an identical-looking image is reported as a change.
-- **PDF images are never decoded.** They are identified by their encoded stream and its encoding parameters, so a PDF producer that re-compresses an unchanged image reports it as replaced.
-- **Resizing, moving or cropping** an image without changing its bytes is not detected (except in Excel when the picture changes cells, since its anchor cells are part of the key).
-- **Position-sensitive keys.** PowerPoint keys include the slide number and PDF keys the page number and ordinal: inserting a slide/page before an image reports it as removed + added.
-- **Word** keys are media part names: the same image used in several places appears once.
-- **Linked (external) images** and images in PowerPoint layouts/masters are ignored.
-- **Bounded by `maxLines`**, like the text: past that many images the inventory stops and the diff is flagged `truncated`.
-- **Bounded in bytes.** An image is read once per file however many times it is placed, at most 32 MB per image (a larger one is skipped) and 256 MB for all the images of one file, past which the inventory stops and the diff is flagged `truncated`.
-- **PDF form XObjects** are walked once per document, however many times they are referenced. One that contains itself, or nests deeper than 16 levels, is skipped and the diff flagged `truncated`.
-- Image extraction failure silently falls back to the text-only result (logged as WARN). A format with no contributed image extractor simply gets no inventory.
-
-### Web UI
-- **Navigating directly from one `BlobDiff` to another leaves the page showing the previous diff.** The URL, the browser title and the Web UI header all update, but the content card does not; a page reload shows the right one. Reachable from the drawer queue and from any diff-to-diff link. Under investigation — the document never reaches the plugin's view layout, so the cause is upstream of this plugin. Browsing to a diff from anywhere else is unaffected.
-- **Opening a `BlobDiff` logs a 404** for `nuxeo-blobdiff-edit-layout.html`: Web UI offers an Edit action and a diff deliberately has no edit layout. Cosmetic.
-
-### Security and Operations
-- **Business content is copied** into `BlobDiff` documents protected by different ACLs than the source; review this for regulated environments.
-- **No scheduled retention.** Purge is manual (Web UI or `BlobDiff.Purge`); schedule it yourself for automatic retention, following the three-step asynchronous sequence described above.
-- **A search engine is a practical prerequisite** for the Web UI search and tab (`BLOB_DIFFS_ADMIN`). Without one the results still come back, but the facet panel of the search form is silently empty — see "Search Engine Prerequisite" above.
-- **Retry** only works for diffs created from 1.2 on (binary keys stored), and as long as the binaries are still in the blob store (the binaries garbage collector may have removed an unreferenced old version).
-- **Web UI access** is based on the auditors group name exposed in `Nuxeo.UI.config`: overriding `<auditorsGroup>` without the configuration property desynchronises the UI (the server stays correct).
-- `blobContentModified` must be declared both in the audit route and in the `eventTypes` vocabulary, or entries are lost / hidden.
-
-## Tests
-
-Run all tests:
+The marketplace package is built under `nuxeo-advanced-document-blob-audit-package/target/`. The tests that need no Nuxeo runtime run in about 20 seconds:
 
 ```bash
-mvn -pl nuxeo-advanced-document-blob-audit-core test
+mvn -pl nuxeo-advanced-document-blob-audit-core test \
+  -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferBounding,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection,TestSpreadsheetStreaming,TestPresentationStreaming,TestExtractedValueBounding,TestBlobDiffConfigDescriptor'
 ```
 
-Run only the fast tests (without a Nuxeo runtime):
-
-```bash
-mvn -pl nuxeo-advanced-document-blob-audit-core test     -Dtest='TestTextDiffer,TestTextDifferScaling,TestTextDifferSimilarity,TestExcelDiff,TestPresentationDiff,TestImageInventoryExtractor,TestPlainTextExtractor,TestExtractorSelection'
-```
-
-| Class | Runtime? | Purpose |
-|--------|--------|--------|
-| TestTextDiffer | No | Diff engine: keyed, positional, coalescing, truncation |
-| TestTextDifferScaling | No | Alignment optimality and memory budget |
-| TestTextDifferSimilarity | No | Similarity score: characters kept unchanged over the smaller side |
-| TestExcelDiff | No | Complete Excel processing chain |
-| TestSpreadsheetStreaming | No | Streamed `.xlsx` reading: same values as POI's usermodel, shared formulas, bounded memory |
-| TestPlainTextExtractor | No | txt / json / xml / csv |
-| TestExtractedValueBounding | No | Long values bounded at extraction, still compared exactly |
-| TestExtractorSelection | No | MIME type matching, merging of extractor contributions |
-| TestBlobDiffConfigDescriptor | No | Image analysis level, merging of configuration contributions, `file:content` and `*` defaults |
-| TestPresentationDiff | No | PowerPoint text (slides, tables, notes) and image diff |
-| TestPresentationStreaming | No | Streamed `.pptx` reading: same text and images as POI's usermodel, bounded memory |
-| TestConverterTextExtractor | Yes | Word / PDF extraction, using Assume |
-| TestBlobDiffService | Yes | Guardrails, eligibility of a pair, container, ACLs, persistence |
-| TestBlobDiffSkipReporting | Yes | Non-diffable changes audited without a diff (too large, unsupported, format changed, not managed), text content replaced under another format, silence when the bytes did not change |
-| TestBlobDiffLocationAndSecurity | Yes | Location under /change-diff, non-admin isolation, auditors access, ACL repair, concurrency, deleted source |
-| TestBlobDiffManagement | Yes | Binary keys, Delete / Retry operations and their access control, retry single-flight and recovery, blobDiffSource enricher |
-| TestBlobDiffPurgeAction | Yes | Asynchronous purge on the Bulk Action Framework: date and status filtering, exact counts, several buckets, type safety, exclusivity, abort, empty folder cleanup, access control |
-| TestBlobDiffAdminSearch | Yes | `BLOB_DIFFS_ADMIN` on the repository search client: each filter of the audit search narrows the result |
-| TestBlobDiffHardening | Yes | Full-text exclusion, dedicated work queue, deterministic work id, work idempotence, bounded version lookup |
-| TestBlobDiffListenerDisabling | Yes | Per-operation context data flag, thread-scoped `runDisabled`, no leak between operations |
-| TestBlobAuditIntegration | Yes | End-to-end validation |
-
+What each test class covers, and the test resources, are listed in [`AGENTS.md`](AGENTS.md#build-and-test).
 
 ## Support
 **These features are not part of the Nuxeo Production platform.**
