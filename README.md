@@ -89,7 +89,7 @@ Stored under `/change-diff/YYYY/MM/DD/`, dated in **UTC**, titled `<source title
 | `bdiff:similarity` | share of the smaller version kept unchanged in the other one, in characters, `0` to `1`; absent when not measured |
 | `bdiff:diff` | the diff, a `text/plain` blob, present on an `ok` diff that found changes |
 
-The body lists `+ added`, `- removed` and, for keyed content, `~ Sheet1!B2 : 1 -> 2` lines; the image inventory follows under a `# Images` line. `bdiff:summary` is a plain **English** sentence ("2 modifications, 1 addition", "No textual change detected"), written once and never translated: a localised summary is built from the counters, as Web UI does.
+The body lists `+ added`, `- removed` and, for keyed content, `~ Sheet1!B2 : 1 -> 2` lines; the image inventory follows under a `# Images` line. Each line is one entry: a line break inside a value (a cell typed with Alt+Enter, a PowerPoint soft line break) is written as a literal `\n`. `bdiff:summary` is a plain **English** sentence ("2 modifications, 1 addition", "No textual change detected"), written once and never translated: a localised summary is built from the counters, as Web UI does.
 
 ### Statuses
 

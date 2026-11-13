@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * The single diff engine of the plugin, shared by every format.
@@ -93,6 +94,12 @@ public class TextDiffer {
     /** Suffix appended to an elided value, before the character count. */
     protected static final String ELLIPSIS = "… [";
 
+    /**
+     * Every line break {@code \R} matches, {@code \r\n} counting as one: what {@link #renderValue}
+     * escapes.
+     */
+    protected static final Pattern LINE_BREAK = Pattern.compile("\\R");
+
     protected final int maxEntries;
 
     /**
@@ -149,6 +156,24 @@ public class TextDiffer {
     protected String elide(String value) {
         return value == null || value.length() <= maxValueLength ? value
                 : value.substring(0, maxValueLength) + ELLIPSIS + value.length() + " chars]";
+    }
+
+    /**
+     * Renders a key or a value inside an entry: elided by {@link #elide(String)}, then each of its
+     * line breaks written as the two characters {@code \n}.
+     * <p>
+     * The body is a line-oriented record: the viewer classifies each line by its {@code +}, {@code -},
+     * {@code ~} or {@code #} prefix. A raw break inside an Excel cell (Alt+Enter), a PowerPoint
+     * paragraph (Shift+Enter) or a table cell would split one entry into several lines, the next ones
+     * unprefixed or, typed on purpose, prefixed like entries that never happened. The break is
+     * escaped here, when the entry is rendered, so the extracted values, their comparison and the
+     * similarity stay unchanged.
+     *
+     * @since 2025.1
+     */
+    protected String renderValue(String value) {
+        String elided = elide(value);
+        return elided == null ? null : LINE_BREAK.matcher(elided).replaceAll("\\\\n");
     }
 
     /**
@@ -297,12 +322,12 @@ public class TextDiffer {
      */
     protected String keyedEntry(String key, String oldValue, String newValue) {
         if (oldValue == null) {
-            return "+ " + elide(key) + " = " + elide(newValue) + "\n";
+            return "+ " + renderValue(key) + " = " + renderValue(newValue) + "\n";
         }
         if (newValue == null) {
-            return "- " + elide(key) + " = " + elide(oldValue) + "\n";
+            return "- " + renderValue(key) + " = " + renderValue(oldValue) + "\n";
         }
-        return "~ " + elide(key) + " : " + elide(oldValue) + " -> " + elide(newValue) + "\n";
+        return "~ " + renderValue(key) + " : " + renderValue(oldValue) + " -> " + renderValue(newValue) + "\n";
     }
 
     protected static long keyedLength(String key, String value) {
@@ -377,9 +402,9 @@ public class TextDiffer {
      */
     protected String positionalEntry(Edit edit) {
         return switch (edit.type()) {
-            case ADD -> "+ " + elide(edit.newValue()) + "\n";
-            case REMOVE -> "- " + elide(edit.oldValue()) + "\n";
-            case CHANGE -> "- " + elide(edit.oldValue()) + "\n+ " + elide(edit.newValue()) + "\n";
+            case ADD -> "+ " + renderValue(edit.newValue()) + "\n";
+            case REMOVE -> "- " + renderValue(edit.oldValue()) + "\n";
+            case CHANGE -> "- " + renderValue(edit.oldValue()) + "\n+ " + renderValue(edit.newValue()) + "\n";
         };
     }
 

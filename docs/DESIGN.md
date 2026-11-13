@@ -332,6 +332,17 @@ strategies, which only count and offer each entry:
 the last complete line: each side is bounded on its own, so their sum could reach twice the cap.
 Coverage: `TestTextDifferBounding`.
 
+### One entry per line
+
+The body is a line-oriented record: the viewer classifies each line by its `+ `, `- `, `~ ` or `# `
+prefix. An extracted value may hold line breaks - an Excel cell typed with Alt+Enter, a PowerPoint
+soft line break, a table cell joined with `\n` - and, written raw, one entry would spread over
+several lines: the next ones unprefixed, or, typed on purpose, prefixed like entries that never
+happened. `TextDiffer#renderValue` writes every break `\R` matches (`\r\n` counting as one) as a
+literal `\n`, in keys and values, after `elide`. It does so at rendering only: the extracted values,
+their comparison, the counters and the similarity are those of the document. Coverage:
+`TestTextDiffer` (the "line breaks inside a value" cases).
+
 ### Values bounded at extraction
 
 `maxValueLength` is handed to every extractor (`BlobContentExtractor.MAX_VALUE_LENGTH`), and the

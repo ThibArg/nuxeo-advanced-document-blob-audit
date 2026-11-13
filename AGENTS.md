@@ -250,6 +250,13 @@ a contiguous prefix of the full diff). `added` / `removed` / `changed` are count
 is consulted, so they stay exact. `TextDiffer#merge` caps text plus images at `maxChars`. Coverage:
 `TestTextDifferBounding`. Why: `docs/DESIGN.md` §5.
 
+**One entry per line in the body.** `TextDiffer#renderValue` writes every line break of a key or a
+value (`\R`, `\r\n` counting as one) as a literal `\n`, after `elide`. Every entry renderer goes
+through it; a raw break would let a multi-line cell or paragraph spread over several lines, or forge
+prefixed ones. Rendering only: never escape in the extractors or in `ContentLine`, the values, their
+comparison and the similarity are the document's. Coverage: `TestTextDiffer` (the "line breaks
+inside a value" cases). Why: `docs/DESIGN.md` §5.
+
 **A unit missing from a cut side is unknown past the last shared unit.** Keyed:
 `TextDiffer#pastLastShared`; positional: `Alignment#tailStart`, the removals past it dropped when the
 new side is cut, the additions when the old side is. Both rely on extraction following document
@@ -368,7 +375,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 315 tests, 27 test classes
+mvn -o install                                     # full build: 318 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -519,4 +526,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 94.
+`git log --grep '^Item '`. Next free number: 95.

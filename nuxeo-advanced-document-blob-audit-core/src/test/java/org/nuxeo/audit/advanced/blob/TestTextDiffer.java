@@ -328,4 +328,37 @@ public class TestTextDiffer {
 
         assertEquals(1, result.removed());
     }
+
+    /* ------------------------------------------------ line breaks inside a value */
+
+    /**
+     * A cell typed with Alt+Enter keeps its line breaks. Written raw, its second line would read as
+     * an entry of its own: here, a change of a cell that never changed.
+     */
+    @Test
+    public void testALineBreakInAKeyedValueCannotForgeAnEntry() {
+        DiffResult result = differ.diff(keyed("S!A1", "ok", "S!B2", "1000"),
+                keyed("S!A1", "ok\n~ S!B2 : 1000 -> 999999", "S!B2", "1000"));
+
+        assertEquals(1, result.changed());
+        assertEquals("~ S!A1 : ok -> ok\\n~ S!B2 : 1000 -> 999999\n", result.unified());
+    }
+
+    /** Every line break, CRLF counting as one, is written as a literal {@code \n}, in keys as well. */
+    @Test
+    public void testEveryLineBreakIsEscapedInKeysAndValues() {
+        DiffResult result = differ.diff(keyed(), keyed("S\n!A1", "a\r\nb\rc\013d\fe\u0085f\u2028g\u2029h"));
+
+        assertEquals("+ S\\n!A1 = a\\nb\\nc\\nd\\ne\\nf\\ng\\nh\n", result.unified());
+    }
+
+    /** A PowerPoint paragraph with a soft line break (Shift+Enter) stays one line on each side. */
+    @Test
+    public void testALineBreakInAPositionalValueStaysOnItsLine() {
+        DiffResult result = differ.diff(positional("Title", "Page 3\nnext line"),
+                positional("Title", "Page 3\nother line"));
+
+        assertEquals(1, result.changed());
+        assertEquals("- Page 3\\nnext line\n+ Page 3\\nother line\n", result.unified());
+    }
 }
