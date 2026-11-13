@@ -176,11 +176,25 @@ public class PresentationExtractor implements BlobContentExtractor {
         /** Slide mode: the marker line, compacted, {@code null} until the title shape has been read. */
         protected String marker;
 
+        /**
+         * The table row being read, as its line: {@code TABLE_PREFIX} then its cells, whitespace
+         * collapsed, joined with {@code " | "}.
+         */
+        protected final BoundedText row;
+
+        /** Whether the row being read has a cell already. */
+        protected boolean rowStarted;
+
+        /** Whether a cell of the row being read holds text: a row of empty cells is no line. */
+        protected boolean rowHasText;
+
         protected SlideText(Collector collector, boolean notes) {
+            super(collector.maxValueLength);
             this.collector = collector;
             this.notes = notes;
             this.capacity = collector.remaining();
             this.titleText = new TitleText(collector.maxValueLength);
+            this.row = new BoundedText(collector.maxValueLength);
         }
 
         @Override
@@ -229,10 +243,27 @@ public class PresentationExtractor implements BlobContentExtractor {
         }
 
         @Override
-        protected void tableRow(List<String> cells) throws SAXException {
-            List<String> normalized = cells.stream().map(cell -> cell.replaceAll("\\s+", " ").trim()).toList();
-            if (normalized.stream().anyMatch(cell -> !cell.isEmpty())) {
-                add(TABLE_PREFIX + String.join(" | ", normalized));
+        protected void tableCell(String text) {
+            String normalized = text.replaceAll("\\s+", " ").trim();
+            row.append(rowStarted ? " | " : TABLE_PREFIX).append(normalized);
+            rowStarted = true;
+            rowHasText |= !normalized.isEmpty();
+        }
+
+        /**
+         * Adds the row as {@code TABLE_PREFIX + String.join(" | ", cells)}: whole, or already what
+         * {@link ContentLine#compact(String, int)} makes of it when it is longer than
+         * {@link BoundedText#HELD_LENGTH}.
+         */
+        @Override
+        protected void tableRowEnd() throws SAXException {
+            String line = row.toString();
+            boolean hasText = rowHasText;
+            row.clear();
+            rowStarted = false;
+            rowHasText = false;
+            if (hasText) {
+                add(line);
             }
         }
 

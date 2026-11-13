@@ -34,6 +34,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.sl.usermodel.PictureData.PictureType;
@@ -54,6 +55,7 @@ import org.apache.poi.xslf.usermodel.XSLFTextParagraph;
 import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.junit.After;
 import org.junit.Test;
+import org.nuxeo.audit.advanced.blob.extractor.BoundedText;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
 import org.nuxeo.audit.advanced.blob.extractor.SlideHandler;
 import org.nuxeo.audit.advanced.blob.image.PresentationImageInventory;
@@ -512,5 +514,45 @@ public class TestPresentationStreaming {
 
             assertEquals(expected, values(extractor.extract(onDisk(blob), MAX_LINES)));
         }
+    }
+
+    /** Random letters, which keep the part under POI's 100:1 inflation ratio. */
+    protected static String letters(long seed, int length) {
+        Random random = new Random(seed);
+        StringBuilder text = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            text.append((char) ('a' + random.nextInt(26)));
+        }
+        return text.toString();
+    }
+
+    /**
+     * Item 95: a paragraph was accumulated whole before it was compacted, and a table row as the list
+     * of its cells. A paragraph of millions of characters is now read without being held, and both it
+     * and a row longer than {@link BoundedText#HELD_LENGTH} still give the compacted usermodel lines.
+     */
+    @Test
+    public void testAnInflatedParagraphIsNeverHeldWhole() throws Exception {
+        int length = 8_000_000;
+        String table = "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/table\">"
+                + "<a:tbl><a:tblGrid><a:gridCol w=\"100\"/><a:gridCol w=\"100\"/><a:gridCol w=\"100\"/></a:tblGrid>"
+                + "<a:tr h=\"10\">" + cell(letters(2, 20_000)) + cell(letters(3, 20_000)) + cell("") + "</a:tr>"
+                + "</a:tbl></a:graphicData></a:graphic>";
+        Blob blob = onDisk(deck("inflated.pptx", false,
+                textShape(2, null, run(letters(1, length))) + frame(3, table)));
+        List<String> expected = usermodelText(blob, false).stream()
+                                                          .map(line -> ContentLine.compact(line, MAX_VALUE_LENGTH))
+                                                          .toList();
+        PresentationExtractor extractor = new PresentationExtractor();
+        extractor.init(Map.of("maxValueLength", String.valueOf(MAX_VALUE_LENGTH)));
+        long before = allocated();
+
+        DiffableContent content = extractor.extract(blob, MAX_LINES);
+
+        long allocated = allocated() - before;
+        assertEquals(expected, values(content));
+        assertEquals(3, content.size());
+        assertTrue("reading a paragraph of " + length + " characters allocated " + allocated + " bytes",
+                allocated < 16L * 1024 * 1024);
     }
 }

@@ -339,4 +339,49 @@ public class TestSpreadsheetStreaming {
         }
         return text.append("x".repeat(184)).toString();
     }
+
+    /** Random letters, which keep the part under POI's 100:1 inflation ratio. */
+    protected static String letters(long seed, int length) {
+        Random random = new Random(seed);
+        StringBuilder text = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            text.append((char) ('a' + random.nextInt(26)));
+        }
+        return text.toString();
+    }
+
+    /**
+     * Item 95: every budget applied to a finished value, and the character data of a single element
+     * was accumulated whole before any of them was consulted. A shared string, an inline string and a
+     * cached formula result of several million characters each are now read without being held, and
+     * still compared on the compacted form of the whole.
+     */
+    @Test
+    public void testAnInflatedTextNodeIsNeverHeldWhole() throws Exception {
+        int length = 4_000_000;
+        String shared = letters(1, length);
+        String inline = letters(2, length);
+        String cached = letters(3, length);
+        Blob blob = onDisk(workbook("inflated.xlsx", Map.of( //
+                SHARED_STRINGS, out -> out.write("<sst xmlns=\"" + SHEET_NAMESPACE + "\"><si><t>" + shared
+                        + "</t></si></sst>"), //
+                DATA_SHEET, out -> out.write("<worksheet xmlns=\"" + SHEET_NAMESPACE + "\"><sheetData><row r=\"1\">" //
+                        + "<c r=\"A1\" t=\"s\"><v>0</v></c>" //
+                        + "<c r=\"B1\" t=\"inlineStr\"><is><t>" + inline + "</t></is></c>" //
+                        + "<c r=\"C1\" t=\"str\"><v>" + cached + "</v></c>" //
+                        + "</row></sheetData></worksheet>"))));
+        ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long before = threads.getCurrentThreadAllocatedBytes();
+
+        DiffableContent content = new SpreadsheetExtractor().extract(blob, MAX_LINES);
+
+        long allocated = threads.getCurrentThreadAllocatedBytes() - before;
+        int max = TextDiffer.DEFAULT_MAX_VALUE_LENGTH;
+        Map<String, String> cells = byKey(content.lines());
+        assertEquals("the shared string", ContentLine.compact(shared, max), cells.get("Data!A1"));
+        assertEquals("the inline string", ContentLine.compact(inline, max), cells.get("Data!B1"));
+        assertEquals("the cached result", ContentLine.compact(cached, max), cells.get("Data!C1"));
+        assertTrue("reading 3 cells of " + length + " characters allocated " + allocated + " bytes",
+                allocated < 16L * 1024 * 1024);
+    }
 }

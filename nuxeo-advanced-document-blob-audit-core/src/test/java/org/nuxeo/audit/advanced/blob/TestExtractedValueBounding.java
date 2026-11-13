@@ -29,6 +29,7 @@ import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.Test;
+import org.nuxeo.audit.advanced.blob.extractor.BoundedText;
 import org.nuxeo.audit.advanced.blob.extractor.PlainTextExtractor;
 import org.nuxeo.audit.advanced.blob.extractor.PresentationExtractor;
 import org.nuxeo.audit.advanced.blob.extractor.SpreadsheetExtractor;
@@ -153,5 +154,60 @@ public class TestExtractedValueBounding {
                 extractor.extract(xlsx("b.xlsx", value), MAX_LINES));
 
         assertTrue(result.isEmpty());
+    }
+
+    /* ------------------------------------------------ text read piece by piece */
+
+    /**
+     * Item 95: what a SAX handler reads into a {@link BoundedText} is either the whole text, or exactly
+     * what {@link ContentLine#compact(String, int)} makes of it - whatever the pieces it arrives in,
+     * including a surrogate pair split between two of them and unpaired surrogates.
+     */
+    @Test
+    public void testABoundedTextIsTheWholeOrItsCompactedForm() {
+        int held = BoundedText.HELD_LENGTH;
+        Random random = new Random(95);
+        List<String> texts = List.of("", "short", "x".repeat(held), "x".repeat(held) + "y",
+                text(random, held - 1) + "\uD83D\uDE00" + text(random, 10), // a pair across the limit
+                text(random, 100_000), "\uDC00" + text(random, held) + "\uD83D", // unpaired at both ends
+                text(random, held) + "\uD83Dx\uDE00" + text(random, 50)); // unpaired in the middle
+        for (String text : texts) {
+            char[] chars = text.toCharArray();
+            for (int piece : new int[] { 1, 7, 8191, Integer.MAX_VALUE }) {
+                var bounded = new BoundedText(MAX_VALUE_LENGTH);
+                for (int start = 0; start < chars.length; start += piece) {
+                    int end = (int) Math.min(chars.length, (long) start + piece);
+                    bounded.append(chars, start, end - start);
+                }
+
+                String expected = text.length() <= held ? text : ContentLine.compact(text, MAX_VALUE_LENGTH);
+                assertEquals("pieces of " + piece, expected, bounded.toString());
+                assertEquals(text.length(), bounded.length());
+                assertEquals("read twice", expected, bounded.toString());
+            }
+        }
+    }
+
+    /** Once cleared, a bounded text reads the next one as if it were new. */
+    @Test
+    public void testAClearedBoundedTextStartsAgain() {
+        var bounded = new BoundedText(MAX_VALUE_LENGTH);
+        bounded.append("z".repeat(BoundedText.HELD_LENGTH + 10));
+
+        bounded.clear();
+        bounded.append("next");
+
+        assertEquals("next", bounded.toString());
+        assertEquals(4, bounded.length());
+    }
+
+    /** Letters and multi-byte characters, none of which a trim would remove. */
+    protected static String text(Random random, int length) {
+        StringBuilder text = new StringBuilder(length);
+        String alphabet = "abcdefghijklmnopqrstuvwxyzéàüßøΩЖ中文";
+        while (text.length() < length) {
+            text.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return text.toString();
     }
 }

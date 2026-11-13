@@ -26,6 +26,7 @@ import org.apache.poi.openxml4j.opc.PackagePart;
 import org.apache.poi.openxml4j.opc.PackageRelationship;
 import org.apache.poi.openxml4j.opc.PackageRelationshipTypes;
 import org.apache.poi.xslf.usermodel.XSLFRelation;
+import org.nuxeo.audit.advanced.blob.TextDiffer;
 import org.nuxeo.audit.advanced.blob.io.OoxmlPackages;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
@@ -38,8 +39,12 @@ import org.xml.sax.helpers.DefaultHandler;
  * Group shapes are walked at their position. Of an alternate content block, only the first element
  * of its first {@code mc:Choice} is read, as a shape in place of the block: that is what the usermodel
  * does, and it never reads the {@code mc:Fallback}. Text shapes report their paragraphs, tables their
- * rows, pictures the relationship of their embedded image. Subclasses keep what they need, and throw
- * {@link OoxmlPackages.Stop} to end the parse.
+ * cells and rows, pictures the relationship of their embedded image. Subclasses keep what they need,
+ * and throw {@link OoxmlPackages.Stop} to end the parse.
+ * <p>
+ * Paragraphs and cells are read through a {@link BoundedText}: one longer than
+ * {@link BoundedText#HELD_LENGTH} characters arrives compacted to {@code maxValueLength}, never held
+ * whole.
  *
  * @since 2025.1
  */
@@ -73,17 +78,32 @@ public class SlideHandler extends DefaultHandler {
 
     protected final Deque<Frame> stack = new ArrayDeque<>();
 
+    /** The length a paragraph or a cell past {@link BoundedText#HELD_LENGTH} characters is compacted to. */
+    protected final int maxValueLength;
+
     protected boolean shapeTopLevel;
 
     protected String placeholder;
 
-    protected StringBuilder paragraph;
+    protected BoundedText paragraph;
 
-    protected StringBuilder cell;
-
-    protected List<String> row;
+    protected BoundedText cell;
 
     protected String blip;
+
+    /** A handler compacting a long text to the default {@code maxValueLength}, or reading no text. */
+    public SlideHandler() {
+        this(TextDiffer.DEFAULT_MAX_VALUE_LENGTH);
+    }
+
+    /**
+     * @param maxValueLength the length a paragraph or a cell past {@link BoundedText#HELD_LENGTH}
+     *            characters is compacted to
+     * @since 2025.1
+     */
+    public SlideHandler(int maxValueLength) {
+        this.maxValueLength = maxValueLength;
+    }
 
     /**
      * Returns the slides of a presentation package, in presentation order, like
@@ -169,8 +189,17 @@ public class SlideHandler extends DefaultHandler {
         // for subclasses
     }
 
-    /** Receives a table row, one entry per cell, each as {@code XSLFTableCell#getText()} renders it. */
-    protected void tableRow(List<String> cells) throws SAXException {
+    /**
+     * Receives a cell of the table row being read, as {@code XSLFTableCell#getText()} renders it. The
+     * cells of a row are handed one by one rather than as a list, which a row of a crafted table could
+     * make as long as its part.
+     */
+    protected void tableCell(String text) throws SAXException {
+        // for subclasses
+    }
+
+    /** Receives the end of a table row, after its last cell. */
+    protected void tableRowEnd() throws SAXException {
         // for subclasses
     }
 
@@ -215,7 +244,7 @@ public class SlideHandler extends DefaultHandler {
                 return SKIP;
             case TEXT_BODY:
                 if ("p".equals(name)) {
-                    paragraph = new StringBuilder();
+                    paragraph = new BoundedText(maxValueLength);
                     return new Frame(Role.PARAGRAPH, top);
                 }
                 return SKIP;
@@ -238,14 +267,10 @@ public class SlideHandler extends DefaultHandler {
             case TABLE_DATA:
                 return "tbl".equals(name) ? first(parent, Role.TABLE) : SKIP;
             case TABLE:
-                if ("tr".equals(name)) {
-                    row = new ArrayList<>();
-                    return new Frame(Role.ROW, top);
-                }
-                return SKIP;
+                return "tr".equals(name) ? new Frame(Role.ROW, top) : SKIP;
             case ROW:
                 if ("tc".equals(name)) {
-                    cell = new StringBuilder();
+                    cell = new BoundedText(maxValueLength);
                     return new Frame(Role.CELL, top);
                 }
                 return SKIP;
@@ -308,10 +333,11 @@ public class SlideHandler extends DefaultHandler {
             case PARAGRAPH -> endParagraph();
             case SHAPE -> textShapeEnd(shapeTopLevel, placeholder);
             case CELL -> {
-                row.add(cell.toString());
+                String text = cell.toString();
                 cell = null;
+                tableCell(text);
             }
-            case ROW -> tableRow(row);
+            case ROW -> tableRowEnd();
             case PICTURE -> {
                 if (blip != null && !blip.isEmpty()) {
                     picture(blip);

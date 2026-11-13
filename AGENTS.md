@@ -52,7 +52,7 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
       `ExtractorDescriptor`.
     - `BlobContentExtractor` (the extension interface), `ContentLine`, `DiffableContent`, `TextDiffer`.
     - `extractor/`: `SpreadsheetExtractor`, `PresentationExtractor` + `SlideHandler`,
-      `PlainTextExtractor`, `ConverterTextExtractor`.
+      `PlainTextExtractor`, `ConverterTextExtractor`, `BoundedText` (the text a SAX handler reads).
     - `image/`: `AbstractImageInventory` and its four subclasses `WordImageInventory`,
       `SpreadsheetImageInventory`, `PresentationImageInventory`, `PdfImageInventory`.
     - `io/`: `MaterializedBlob`, `OoxmlPackages`, `BlobCharsets`, `BlobDiffSourceEnricher`.
@@ -273,8 +273,14 @@ measured figures have one home, the class Javadoc of `TextDiffer`. Why: `docs/DE
 `maxValueLength` to every extractor (`BlobContentExtractor.MAX_VALUE_LENGTH`) unless its contribution
 sets one, and the built-in extractors build every value through `ContentLine.of(key, value,
 maxValueLength)`. A new extractor must do the same, including for what it holds before a value is
-final (XLSX shared strings, the lines and the title of a slide). Coverage:
-`TestExtractedValueBounding`, `TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
+final (XLSX shared strings, the lines and the title of a slide). The character data a SAX handler
+accumulates goes through `BoundedText` (shared strings, cell values, inline strings, formulas,
+paragraphs, table cells and rows): whole up to `BoundedText.HELD_LENGTH`, the most an Excel cell
+holds, exactly `ContentLine#compact` of the whole past it, never a raw `StringBuilder` — every budget
+applies to a finished value, and one inflated text node would be held whole before any is consulted.
+Coverage: `TestExtractedValueBounding`, `TestSpreadsheetStreaming#testAnInflatedTextNodeIsNeverHeldWhole`,
+`TestPresentationStreaming#testAnInflatedParagraphIsNeverHeldWhole`,
+`TestConverterTextExtractor#testAConvertedLineIsBoundedByMaxValueLength`,
 `TestBlobDiffService#testTheConfiguredMaxValueLengthReachesTheExtractors`. Why: `docs/DESIGN.md` §5.
 
 **`BlobContentExtractor#extract` declares `throws IOException`, never wider.** A `throws Exception`
@@ -375,7 +381,7 @@ Repository-specific:
 ## Build and test
 
 ```bash
-mvn -o install                                     # full build: 318 tests, 27 test classes
+mvn -o install                                     # full build: 322 tests, 27 test classes
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest=TestBlobDiffHardening
 mvn -o test -pl nuxeo-advanced-document-blob-audit-core -Dtest='TestTextDiffer#testChangeOnTheFirstLine'
 mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
@@ -526,4 +532,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 95.
+`git log --grep '^Item '`. Next free number: 96.

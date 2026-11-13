@@ -224,7 +224,7 @@ Contributions **merge**: a later one only overrides what it sets, the rest keeps
 
 ### Bounding the Size of a Diff
 
-`maxBlobSize` bounds what may be opened at all, `maxLines` and `maxValueLength` what is extracted — at most `maxLines × maxValueLength` characters held per side — and `maxDiffEntries`, `maxDiffChars` and `maxValueLength` what is written. An Excel cell holds up to 32 767 characters and a Word paragraph is unbounded, so the count alone would not bound the body.
+`maxBlobSize` bounds what may be opened at all, `maxLines` and `maxValueLength` what is extracted — at most `maxLines × maxValueLength` characters held per side — and `maxDiffEntries`, `maxDiffChars` and `maxValueLength` what is written. An Excel cell holds up to 32 767 characters and a Word paragraph is unbounded, so the count alone would not bound the body. Inside an `.xlsx` or a `.pptx`, a single text longer than an Excel cell is never held whole while it is read, however much its compressed part inflates.
 
 When a cap is reached, `bdiff:truncated` is set and the counters `added`, `removed` and `changed` stay **exact**: only the rendering is shortened. `maxLines` cuts each side on its own, so past the last unit both windows share, a unit missing from one side may simply lie beyond its cut: it is neither reported nor counted. Before that point every reported change is a fact. A value longer than `maxValueLength` is shown as its beginning, its length and a short SHA-256 of the whole (`X… [32767 chars, sha256:…]`), so two values differing only past the beginning still render differently.
 

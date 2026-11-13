@@ -354,6 +354,20 @@ are, `elide` leaves the result alone, and what each side holds is bounded by
 *before* a value is final, like the XLSX shared strings and the lines of a slide waiting for its
 title (§6). Coverage: `TestExtractedValueBounding`.
 
+That bound applies to finished values, and a SAX handler only knows how long a text is once its
+element ends. POI's `ZipSecureFile` lets a part inflate up to 100 times its compressed size, so one
+text node of a file `maxBlobSize` accepts can reach a billion characters, which a `StringBuilder`
+would hold whole before any budget is consulted. Every OOXML handler therefore reads its character
+data into a `BoundedText`: the XLSX shared strings, cell values, inline strings and formulas, the
+PPTX paragraphs, table cells and rows (handed cell by cell, never as a list). Up to
+`BoundedText.HELD_LENGTH` characters — 32,767, the most an Excel cell holds — the text is held whole,
+so whatever Excel or PowerPoint writes is read, decoded, trimmed and parsed exactly as before. Past
+that, it keeps its beginning, its length and a running SHA-256 of its UTF-8 encoding, and gives
+exactly what `ContentLine#compact` makes of the whole: such a text is compared on its raw content,
+before decoding or trimming, and a formula that long is compared as text. Coverage:
+`TestExtractedValueBounding` (the "piece by piece" cases), `TestSpreadsheetStreaming` and
+`TestPresentationStreaming` (the inflated cases).
+
 ### Similarity
 
 `TextDiffer` measures, for free, the characters of the units kept unchanged: positional, every old

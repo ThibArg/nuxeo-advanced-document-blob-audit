@@ -360,7 +360,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
      * compared in - phonetic runs left out and escapes decoded like {@code XSSFRichTextString#getString},
      * then trimmed and compacted - and charged its length plus {@link #ENTRY_COST}, so that a table of
      * short strings is bounded too. The parse stops once {@code maxLines × maxValueLength} is spent; a
-     * cell needing a string past that point ends the extraction, the way {@code maxLines} does.
+     * cell needing a string past that point ends the extraction, the way {@code maxLines} does. A string
+     * is read through a {@link BoundedText}, so that one inflated string is never held whole either.
      *
      * @since 2025.1
      */
@@ -375,7 +376,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
 
         protected final List<String> strings = new ArrayList<>();
 
-        protected final StringBuilder text = new StringBuilder();
+        protected final BoundedText text;
 
         protected long spent;
 
@@ -391,6 +392,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
         protected SharedStringTable(int maxValueLength, long budget) {
             this.maxValueLength = maxValueLength;
             this.budget = budget;
+            this.text = new BoundedText(maxValueLength);
         }
 
         /** Reads the table of the package, like {@code ReadOnlySharedStringsTable} finds it. */
@@ -436,7 +438,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             }
             switch (localName) {
                 case "sst" -> inTable = true;
-                case "si" -> text.setLength(0);
+                case "si" -> text.clear();
                 case "t" -> inText = true;
                 case "rPh" -> inPhoneticRun = true;
                 default -> {
@@ -490,7 +492,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     /**
      * SAX handler of one worksheet, producing the same values as {@link #formatCell} does on the
      * usermodel: formula text when {@code useFormulas} is on, otherwise the cell formatted by
-     * {@link DataFormatter} from its cached value and style.
+     * {@link DataFormatter} from its cached value and style. Values, inline strings and formulas are
+     * read through a {@link BoundedText}: whole for any cell Excel writes, compacted past that.
      *
      * @since 2025.1
      */
@@ -516,14 +519,14 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
 
         protected final List<RangeFormula> arrayFormulas = new ArrayList<>();
 
-        protected final StringBuilder value = new StringBuilder();
+        protected final BoundedText value = new BoundedText(maxValueLength);
 
-        protected final StringBuilder inline = new StringBuilder();
+        protected final BoundedText inline = new BoundedText(maxValueLength);
 
-        protected final StringBuilder formula = new StringBuilder();
+        protected final BoundedText formula = new BoundedText(maxValueLength);
 
         /** Where character data currently goes, {@code null} outside of a value. */
-        protected StringBuilder text;
+        protected BoundedText text;
 
         protected boolean inInlineString;
 
@@ -626,9 +629,9 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             formulaType = null;
             formulaSi = null;
             formulaRef = null;
-            value.setLength(0);
-            inline.setLength(0);
-            formula.setLength(0);
+            value.clear();
+            inline.clear();
+            formula.clear();
         }
 
         protected void endCell() throws SAXException {
@@ -712,7 +715,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             }
             return switch (type) {
                 case "s" -> raw.isEmpty() ? "" : sharedString(raw);
-                case "inlineStr" -> inline.length() > 0 ? inline.toString() : raw;
+                case "inlineStr" -> inline.isEmpty() ? raw : inline.toString();
                 case "b" -> {
                     if (raw.isEmpty()) {
                         yield "";
