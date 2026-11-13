@@ -59,6 +59,7 @@ public class BlobDiffCleanEmptyFoldersOp {
     @Context
     protected CoreSession session;
 
+    /** Removes the empty dated folders and returns their count, as {@code {"folders": n}}. */
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
@@ -70,7 +71,7 @@ public class BlobDiffCleanEmptyFoldersOp {
     }
 
     protected long removeEmptyFolders() {
-        PathRef rootRef = new PathRef("/" + BlobAuditConstants.CONTAINER_NAME);
+        var rootRef = new PathRef("/" + BlobAuditConstants.CONTAINER_NAME);
         if (!session.exists(rootRef)) {
             return 0;
         }

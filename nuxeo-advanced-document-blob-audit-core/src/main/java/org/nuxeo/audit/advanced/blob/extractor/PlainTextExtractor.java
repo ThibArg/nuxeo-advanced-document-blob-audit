@@ -59,7 +59,7 @@ public class PlainTextExtractor implements BlobContentExtractor {
         List<ContentLine> lines = new ArrayList<>();
         boolean truncated = false;
         try (InputStream in = blob.getStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in, charsetOf(blob)))) {
+                var reader = new BufferedReader(new InputStreamReader(in, charsetOf(blob)))) {
             String line;
             boolean first = true;
             while ((line = reader.readLine()) != null) {
@@ -82,7 +82,7 @@ public class PlainTextExtractor implements BlobContentExtractor {
     }
 
     /**
-     * Charset declared on the blob, falling back to UTF-8.
+     * Returns the charset declared on the blob, falling back to UTF-8.
      * <p>
      * Delegates to {@link BlobCharsets#of(Blob)}, which is shared with
      * {@link ConverterTextExtractor}: {@code blob.getEncoding()} can be empty, or a name no JVM

@@ -68,14 +68,17 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
      */
     protected static final long MAX_IMAGE_BYTES = 32L * 1024 * 1024;
 
-    /** Overridable so a test can lower the cap instead of building a real multi-gigabyte bomb. */
+    /**
+     * Returns {@link #MAX_IMAGE_BYTES}; overridable so a test can lower the cap instead of building a
+     * real multi-gigabyte bomb.
+     */
     protected long maxImageBytes() {
         return MAX_IMAGE_BYTES;
     }
 
     /**
-     * Upper bound on the bytes read from all the images of one file together: eight images at
-     * {@link #maxImageBytes()}, so 256 MB by default.
+     * Returns the upper bound on the bytes read from all the images of one file together: eight
+     * images at {@link #maxImageBytes()}, so 256 MB by default.
      *
      * @since 2025.1
      */
@@ -118,7 +121,7 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
             }
         }
 
-        /** A view of the stream that spends every byte read from it. */
+        /** Returns a view of the stream that spends every byte read from it. */
         protected InputStream meter(InputStream in) {
             return new FilterInputStream(in) {
                 @Override
@@ -227,8 +230,8 @@ public abstract class AbstractImageInventory implements BlobContentExtractor {
     }
 
     /**
-     * SHA-256 of the stream, continuing a digest that may already hold a header, computed in 8 KB
-     * chunks and abandoned past {@link #maxImageBytes()}.
+     * Returns the SHA-256 of the stream, continuing a digest that may already hold a header, computed
+     * in 8 KB chunks and abandoned past {@link #maxImageBytes()}.
      * <p>
      * Does <b>not</b> close the stream: the Word path iterates over a shared {@code ZipInputStream}.
      *

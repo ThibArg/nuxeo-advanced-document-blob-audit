@@ -38,16 +38,32 @@ public class BlobDiffConfigDescriptor implements Descriptor {
 
     public static final String DEFAULT_ID = "default";
 
-    /** @since 2025.1 */
+    /**
+     * Wildcard of {@code docTypes} and {@code xpaths}: every document type, every blob xpath.
+     *
+     * @since 2025.1
+     */
     public static final String ANY = "*";
 
-    /** @since 2025.1 */
+    /**
+     * Blob xpath diffed when none is configured.
+     *
+     * @since 2025.1
+     */
     public static final String DEFAULT_XPATH = "file:content";
 
-    /** @since 2025.1 */
+    /**
+     * Default of {@code maxBlobSize}: 10 MB.
+     *
+     * @since 2025.1
+     */
     public static final long DEFAULT_MAX_BLOB_SIZE = 10L * 1024 * 1024;
 
-    /** @since 2025.1 */
+    /**
+     * Default of {@code maxLines}.
+     *
+     * @since 2025.1
+     */
     public static final int DEFAULT_MAX_LINES = 10000;
 
     @XNode("@enabled")
@@ -126,8 +142,8 @@ public class BlobDiffConfigDescriptor implements Descriptor {
      */
     @Override
     public Descriptor merge(Descriptor o) {
-        BlobDiffConfigDescriptor other = (BlobDiffConfigDescriptor) o;
-        BlobDiffConfigDescriptor merged = new BlobDiffConfigDescriptor();
+        var other = (BlobDiffConfigDescriptor) o;
+        var merged = new BlobDiffConfigDescriptor();
         merged.enabled = either(other.enabled, enabled);
         merged.maxBlobSize = either(other.maxBlobSize, maxBlobSize);
         merged.maxLines = either(other.maxLines, maxLines);
@@ -144,48 +160,65 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return value != null ? value : fallback;
     }
 
+    /** Returns whether the feature is on; off unless a contribution sets {@code enabled="true"}. */
     public boolean isEnabled() {
         return Boolean.TRUE.equals(enabled);
     }
 
+    /** Returns the size in bytes past which a blob is never extracted. */
     public long getMaxBlobSize() {
         return either(maxBlobSize, DEFAULT_MAX_BLOB_SIZE);
     }
 
+    /** Returns the maximum number of units extracted from each side. */
     public int getMaxLines() {
         return either(maxLines, DEFAULT_MAX_LINES);
     }
 
+    /** Returns the maximum number of differences written to the diff body. */
     public int getMaxDiffEntries() {
         return either(maxDiffEntries, TextDiffer.DEFAULT_MAX_DIFF_ENTRIES);
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns the maximum length of the diff body, in characters.
+     *
+     * @since 2025.1
+     */
     public int getMaxDiffChars() {
         return either(maxDiffChars, TextDiffer.DEFAULT_MAX_DIFF_CHARS);
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns the length past which a single extracted unit is compacted and elided.
+     *
+     * @since 2025.1
+     */
     public int getMaxValueLength() {
         return either(maxValueLength, TextDiffer.DEFAULT_MAX_VALUE_LENGTH);
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns whether the image inventory runs next to the text diff.
+     *
+     * @since 2025.1
+     */
     public boolean isImageInventory() {
         return Boolean.TRUE.equals(imageInventory);
     }
 
+    /** Returns the document types diffed as configured; empty or {@value #ANY} means every type. */
     public List<String> getDocTypes() {
         return docTypes;
     }
 
-    /** The blob xpaths diffed, {@value #DEFAULT_XPATH} when none is configured. */
+    /** Returns the blob xpaths diffed, {@value #DEFAULT_XPATH} when none is configured. */
     public List<String> getXPaths() {
         return xpaths.isEmpty() ? List.of(DEFAULT_XPATH) : xpaths;
     }
 
     /**
-     * Whether every blob xpath of the document type is diffed.
+     * Returns whether every blob xpath of the document type is diffed.
      *
      * @since 2025.1
      */
@@ -193,10 +226,12 @@ public class BlobDiffConfigDescriptor implements Descriptor {
         return xpaths.contains(ANY);
     }
 
+    /** Returns whether documents of this type are diffed. */
     public boolean acceptsDocType(String docType) {
         return docTypes.isEmpty() || docTypes.contains(ANY) || docTypes.contains(docType);
     }
 
+    /** Returns whether the blob at this xpath is diffed. */
     public boolean acceptsXPath(String xpath) {
         return isEveryXPath() || getXPaths().contains(xpath);
     }

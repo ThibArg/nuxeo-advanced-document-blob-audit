@@ -38,6 +38,10 @@ public final class BlobDiffAccess {
         // utility class
     }
 
+    /**
+     * Returns whether the principal may manage diffs: an administrator, or a member of the
+     * {@code administrators} group or of the auditors group.
+     */
     public static boolean isAuditor(NuxeoPrincipal principal) {
         if (principal == null) {
             return false;
@@ -52,6 +56,11 @@ public final class BlobDiffAccess {
         return groups.contains(BlobAuditConstants.DEFAULT_AUDITORS_GROUP) || groups.contains(auditorsGroup());
     }
 
+    /**
+     * Refuses a principal that may not manage diffs.
+     *
+     * @throws DocumentSecurityException if {@link #isAuditor(NuxeoPrincipal)} is {@code false}
+     */
     public static void checkAuditor(NuxeoPrincipal principal) {
         if (!isAuditor(principal)) {
             throw new DocumentSecurityException(
@@ -69,7 +78,7 @@ public final class BlobDiffAccess {
     public static String auditorsGroup() {
         String property = null;
         if (Framework.isInitialized()) {
-            ConfigurationService configuration = Framework.getService(ConfigurationService.class);
+            var configuration = Framework.getService(ConfigurationService.class);
             if (configuration != null) {
                 property = configuration.getString(BlobAuditConstants.AUDITORS_GROUP_PROPERTY).orElse(null);
             }

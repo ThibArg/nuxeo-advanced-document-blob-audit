@@ -142,7 +142,8 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * Value-returning variant of {@link #runDisabled(Runnable)}.
+     * Runs the given code with this listener disabled on the current thread, and returns its result,
+     * like {@link #runDisabled(Runnable)}.
      *
      * @since 2025.1
      */
@@ -161,7 +162,7 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * {@code true} when the thread-scoped switch is currently on.
+     * Returns whether the thread-scoped switch is currently on.
      *
      * @since 2025.1
      */
@@ -187,7 +188,7 @@ public class BlobModificationListener implements EventListener {
         if (liveDoc == null || liveDoc.isProxy() || liveDoc.isVersion()) {
             return;
         }
-        BlobDiffService service = Framework.getService(BlobDiffService.class);
+        var service = Framework.getService(BlobDiffService.class);
         if (service == null) {
             return;
         }
@@ -255,9 +256,9 @@ public class BlobModificationListener implements EventListener {
             return;
         }
 
-        VersionContext versionContext = new VersionContext(previousVersion.getId(), previousVersion.getVersionLabel(),
+        var versionContext = new VersionContext(previousVersion.getId(), previousVersion.getVersionLabel(),
                 newVersion.getId(), newVersion.getVersionLabel(), newVersion.getVersionSeriesId());
-        EventService eventService = Framework.getService(EventService.class);
+        var eventService = Framework.getService(EventService.class);
         String principal = session.getPrincipal().getName();
         for (VersionBlobPairs.BlobPair blobs : VersionBlobPairs.of(previousVersion, newVersion, config)) {
             BlobDiffTrigger.Outcome outcome = blobs.unattributed()
@@ -272,7 +273,8 @@ public class BlobModificationListener implements EventListener {
     }
 
     /**
-     * Previous version when {@code ABOUT_TO_CHECKIN} could not hand it over.
+     * Returns the previous version when {@code ABOUT_TO_CHECKIN} could not hand it over, or
+     * {@code null} when there is none.
      * <p>
      * Ordered by {@code ecm:versionCreated}, which is a fact about when the version was created,
      * not an assumption about how its label was numbered. Two rows are fetched because the newest
@@ -292,7 +294,7 @@ public class BlobModificationListener implements EventListener {
 
     protected Event buildAuditEvent(DocumentModel liveDoc, CoreSession session, String xpath, Blob oldBlob,
             Blob newBlob, BlobDiffTrigger.Outcome outcome) {
-        DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), liveDoc);
+        var ctx = new DocumentEventContext(session, session.getPrincipal(), liveDoc);
         ctx.setCategory(AUDIT_CATEGORY);
         ctx.setComment(xpath + " : " + commentSuffix(outcome));
         ctx.setProperty(EXT_XPATH, xpath);
@@ -316,7 +318,11 @@ public class BlobModificationListener implements EventListener {
         return blob != null && blob.getFilename() != null ? blob.getFilename() : "";
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns the mime type of the blob, or an empty string.
+     *
+     * @since 2025.1
+     */
     protected String mimeTypeOf(Blob blob) {
         return blob != null && blob.getMimeType() != null ? blob.getMimeType() : "";
     }

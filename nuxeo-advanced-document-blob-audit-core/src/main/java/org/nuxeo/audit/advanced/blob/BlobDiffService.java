@@ -25,10 +25,12 @@ import org.nuxeo.ecm.core.api.NuxeoException;
  */
 public interface BlobDiffService {
 
+    /** Returns the effective configuration, every contribution merged. */
     BlobDiffConfigDescriptor getConfig();
 
     /**
-     * Whether the change from {@code oldBlob} to {@code newBlob} can be content-diffed.
+     * Returns whether the change from {@code oldBlob} to {@code newBlob} can be content-diffed, and
+     * if not, why.
      * <p>
      * Combines the verdict of each side, then returns {@link DiffEligibility#FORMAT_CHANGED} when
      * both are eligible but resolve to different extractor contributions. Each contribution is a

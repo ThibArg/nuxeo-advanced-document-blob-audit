@@ -76,10 +76,18 @@ public class TextDiffer {
 
     public static final int DEFAULT_MAX_DIFF_ENTRIES = 5000;
 
-    /** @since 2025.1 */
+    /**
+     * Default cap on the length of the diff body, in characters.
+     *
+     * @since 2025.1
+     */
     public static final int DEFAULT_MAX_DIFF_CHARS = 4 * 1024 * 1024;
 
-    /** @since 2025.1 */
+    /**
+     * Default length past which a single unit is elided.
+     *
+     * @since 2025.1
+     */
     public static final int DEFAULT_MAX_VALUE_LENGTH = 4096;
 
     /** Suffix appended to an elided value, before the character count. */
@@ -87,10 +95,18 @@ public class TextDiffer {
 
     protected final int maxEntries;
 
-    /** @since 2025.1 */
+    /**
+     * Cap on the length of the diff body, in characters.
+     *
+     * @since 2025.1
+     */
     protected final int maxChars;
 
-    /** @since 2025.1 */
+    /**
+     * Length past which a single unit is elided in the diff body.
+     *
+     * @since 2025.1
+     */
     protected final int maxValueLength;
 
     public TextDiffer() {
@@ -102,6 +118,8 @@ public class TextDiffer {
     }
 
     /**
+     * Creates a differ whose diff body is bounded by the given caps.
+     *
      * @param maxEntries how many entries may be written to the diff body
      * @param maxChars hard cap on the length of the produced unified diff
      * @param maxValueLength a single extracted unit longer than this is elided in the diff body
@@ -245,7 +263,7 @@ public class TextDiffer {
         int added = 0;
         int removed = 0;
         int changed = 0;
-        Body body = new Body();
+        var body = new Body();
 
         for (String key : keys) {
             String oldValue = oldMap.get(key);
@@ -308,9 +326,9 @@ public class TextDiffer {
     }
 
     /**
-     * Keys of {@code side}, in extraction order, that come after the last one {@code other} also
-     * holds, and that {@code other} does not hold. Both windows follow the order of the document, so
-     * a key before a shared one would have been extracted on both sides.
+     * Returns the keys of {@code side} that come, in extraction order, after the last one
+     * {@code other} also holds, and that {@code other} does not hold. Both windows follow the order of
+     * the document, so a key before a shared one would have been extracted on both sides.
      */
     protected static Set<String> pastLastShared(Map<String, String> side, Map<String, String> other) {
         Set<String> past = new HashSet<>();
@@ -336,7 +354,7 @@ public class TextDiffer {
         int added = 0;
         int removed = 0;
         int changed = 0;
-        Body body = new Body();
+        var body = new Body();
 
         for (Edit edit : edits) {
             // See diffKeyed: counted before the budget check.
@@ -427,7 +445,7 @@ public class TextDiffer {
         }
 
         List<Edit> edits = new ArrayList<>();
-        Alignment alignment = new Alignment(a.subList(prefix, n - suffix), b.subList(prefix, m - suffix), edits);
+        var alignment = new Alignment(a.subList(prefix, n - suffix), b.subList(prefix, m - suffix), edits);
         alignment.align(0, n - prefix - suffix, 0, m - prefix - suffix);
         long kept = length(a);
         for (Edit edit : edits) {

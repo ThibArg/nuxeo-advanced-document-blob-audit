@@ -43,12 +43,13 @@ public record DiffResult(int added, int removed, int changed, boolean truncated,
         return new DiffResult(added, removed, changed, truncated, unified, similarity, true);
     }
 
+    /** Returns whether nothing was added, removed nor changed. */
     public boolean isEmpty() {
         return added == 0 && removed == 0 && changed == 0;
     }
 
     /**
-     * Short, index-friendly description stored on the BlobDiff document.
+     * Returns a short, index-friendly description, stored on the BlobDiff document.
      * <p>
      * <b>Deliberately English, a product decision: do not localise it here.</b> This string is built
      * once, when the diff is computed, and persisted as is in {@code bdiff:summary}. Composing it in
@@ -62,7 +63,7 @@ public record DiffResult(int added, int removed, int changed, boolean truncated,
         if (isEmpty()) {
             return "No textual change detected";
         }
-        StringBuilder sb = new StringBuilder();
+        var sb = new StringBuilder();
         appendCount(sb, changed, "modification");
         appendCount(sb, added, "addition");
         appendCount(sb, removed, "deletion");

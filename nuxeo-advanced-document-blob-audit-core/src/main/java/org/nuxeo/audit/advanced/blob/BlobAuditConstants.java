@@ -72,7 +72,11 @@ public class BlobAuditConstants {
 
     public static final String XP_STATUS = "bdiff:status";
 
-    /** @since 2025.1 */
+    /**
+     * Share of the smaller version kept unchanged in the other, in characters, from 0 to 1.
+     *
+     * @since 2025.1
+     */
     public static final String XP_SIMILARITY = "bdiff:similarity";
 
     public static final String XP_DIFF_BLOB = "bdiff:diff";
@@ -84,7 +88,11 @@ public class BlobAuditConstants {
 
     public static final String XP_OLD_MIMETYPE = "bdiff:oldMimeType";
 
-    /** @since 2025.1 */
+    /**
+     * Mime type of the new blob.
+     *
+     * @since 2025.1
+     */
     public static final String XP_NEW_MIMETYPE = "bdiff:newMimeType";
 
     public static final String XP_OLD_LENGTH = "bdiff:oldLength";

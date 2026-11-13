@@ -104,7 +104,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     }
 
     /**
-     * OOXML workbooks are streamed sheet by sheet, and the parse stops at {@code maxLines}.
+     * Extracts the non-empty cells, streaming OOXML workbooks sheet by sheet and stopping the parse
+     * at {@code maxLines}.
      * <p>
      * POI's usermodel builds the XMLBeans tree of <b>every</b> sheet as soon as the workbook is
      * opened - from a file or not, which only spares buffering the compressed package - so its
@@ -138,7 +139,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
      */
     protected boolean stream(OPCPackage pkg, int maxLines, List<ContentLine> lines) throws IOException {
         try {
-            XSSFReader reader = new XSSFReader(pkg);
+            var reader = new XSSFReader(pkg);
             CTWorkbook workbook;
             try (InputStream in = reader.getWorkbookData()) {
                 workbook = WorkbookDocument.Factory.parse(in, DEFAULT_XML_OPTIONS).getWorkbook();
@@ -146,8 +147,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             boolean date1904 = workbook.isSetWorkbookPr() && workbook.getWorkbookPr().getDate1904();
             SharedStringTable strings = SharedStringTable.read(pkg, maxLines, maxValueLength);
             StylesTable styles = reader.getStylesTable();
-            SharedFormulas formulas = new SharedFormulas(workbook);
-            DataFormatter formatter = new DataFormatter();
+            var formulas = new SharedFormulas(workbook);
+            var formatter = new DataFormatter();
             XSSFReader.SheetIterator sheets = reader.getSheetIterator();
             while (sheets.hasNext()) {
                 try (InputStream sheet = sheets.next()) {
@@ -168,12 +169,12 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     }
 
     /**
-     * Usermodel path, for binary {@code .xls}.
+     * Collects the cells through the usermodel, for binary {@code .xls}.
      *
      * @return {@code true} once maxLines has been reached
      */
     protected boolean collect(Workbook workbook, int maxLines, List<ContentLine> lines) {
-        DataFormatter formatter = new DataFormatter();
+        var formatter = new DataFormatter();
         // Without it, a formula cell renders as its formula text whatever useFormulas says.
         formatter.setUseCachedValuesForFormulaCells(!useFormulas);
         for (int s = 0; s < workbook.getNumberOfSheets(); s++) {
@@ -197,6 +198,8 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
     }
 
     /**
+     * Returns the text a cell is compared on, {@code null} for no cell.
+     * <p>
      * Formula cells are compared on their formula when {@code useFormulas} is on: an auditor wants
      * to know that {@code =SUM(A1:A10)} became {@code =SUM(A1:A20)}, not only that the result moved
      * - and especially when the result did <em>not</em> move.
@@ -246,7 +249,11 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             this.workbook = workbook;
         }
 
-        /** @return the formula of the cell, or {@code null} when it cannot be rebuilt */
+        /**
+         * Rebuilds the formula of a cell from the master of its shared formula group.
+         *
+         * @return the formula of the cell, or {@code null} when it cannot be rebuilt
+         */
         protected String translate(String sheetName, String si, RangeFormula master, int row, int column) {
             XSSFEvaluationWorkbook book = context();
             if (book == null) {
@@ -289,7 +296,7 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return shifted;
         }
 
-        /** Wraps past the last row, as Excel and POI do. */
+        /** Shifts a relative row, wrapping past the last row as Excel and POI do. */
         protected static int shiftRow(int row, int offset, boolean relative) {
             return relative ? (row + offset) & VERSION.getLastRowIndex() : row;
         }
@@ -389,12 +396,12 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
         /** Reads the table of the package, like {@code ReadOnlySharedStringsTable} finds it. */
         protected static SharedStringTable read(OPCPackage pkg, int maxLines, int maxValueLength)
                 throws IOException, SAXException {
-            SharedStringTable table = new SharedStringTable(maxValueLength, (long) maxLines * maxValueLength);
+            var table = new SharedStringTable(maxValueLength, (long) maxLines * maxValueLength);
             List<PackagePart> parts = pkg.getPartsByContentType(XSSFRelation.SHARED_STRINGS.getContentType());
             if (parts.isEmpty()) {
                 return table;
             }
-            try (PushbackInputStream in = new PushbackInputStream(parts.get(0).getInputStream(), 1)) {
+            try (var in = new PushbackInputStream(parts.get(0).getInputStream(), 1)) {
                 // An empty part is no table, not an unreadable one.
                 int first = in.read();
                 if (first >= 0) {
@@ -407,7 +414,11 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return table;
         }
 
-        /** @return the string, or {@code null} when the budget left it unread */
+        /**
+         * Returns the shared string at the index.
+         *
+         * @return the string, or {@code null} when the budget left it unread
+         */
         protected String get(int index) {
             if (index >= 0 && index < strings.size()) {
                 return strings.get(index);
@@ -641,7 +652,11 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return formattedValue().trim();
         }
 
-        /** @return the formula of the cell as {@code XSSFCell#getCellFormula} returns it, or {@code null} */
+        /**
+         * Returns the formula of the cell being read.
+         *
+         * @return the formula as {@code XSSFCell#getCellFormula} returns it, or {@code null}
+         */
         protected String formulaText() {
             if (!hasFormula) {
                 return arrayFormulaCovering();
@@ -672,7 +687,10 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             return null;
         }
 
-        /** The master of a group is the cell carrying its range; every member is rebuilt from it. */
+        /**
+         * Returns the formula of a cell of a shared formula group, or {@code null}. The master of a
+         * group is the cell carrying its range; every member is rebuilt from it.
+         */
         protected String sharedFormula() {
             String written = formula.toString();
             if (formulaRef != null) {
@@ -705,7 +723,10 @@ public class SpreadsheetExtractor implements BlobContentExtractor {
             };
         }
 
-        /** Ends the extraction at a string the budget left unread, the way {@code maxLines} does. */
+        /**
+         * Returns the shared string a cell refers to, or ends the extraction at a string the budget
+         * left unread, the way {@code maxLines} does.
+         */
         protected String sharedString(String raw) throws SAXException {
             String text = strings.get(Integer.parseInt(raw.trim()));
             if (text == null) {

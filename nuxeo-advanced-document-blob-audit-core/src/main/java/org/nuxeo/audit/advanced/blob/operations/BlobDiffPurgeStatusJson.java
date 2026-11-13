@@ -33,6 +33,8 @@ public class BlobDiffPurgeStatusJson {
     }
 
     /**
+     * Renders the status as the JSON the purge dialog reads.
+     * <p>
      * {@code deleted} is the exact number of removed documents, published by the action in the
      * status result; {@code processed} counts the ids handed to the computation, which is not the
      * same thing as soon as the query matched something the purge refuses to touch.

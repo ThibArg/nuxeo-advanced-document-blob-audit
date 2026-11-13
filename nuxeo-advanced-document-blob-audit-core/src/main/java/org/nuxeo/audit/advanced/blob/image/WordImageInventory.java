@@ -57,11 +57,11 @@ public class WordImageInventory extends AbstractImageInventory {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Inventory inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
+        var inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
         ImageBudget budget = inventory.budget;
         // Two resources on purpose: if the ZipInputStream constructor throws - it allocates a
         // buffer and an Inflater - the underlying stream must still be closed.
-        try (InputStream source = blob.getStream(); ZipInputStream zip = new ZipInputStream(source)) {
+        try (InputStream source = blob.getStream(); var zip = new ZipInputStream(source)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory() || !entry.getName().startsWith("word/media/")) {
@@ -98,7 +98,8 @@ public class WordImageInventory extends AbstractImageInventory {
     }
 
     /**
-     * Cheap pre-check on the declared sizes, before a single byte is inflated.
+     * Returns whether the declared sizes of the entry betray a zip bomb: a cheap pre-check, before a
+     * single byte is inflated.
      * <p>
      * Deliberately opportunistic: read through a {@link ZipInputStream}, an entry whose sizes live
      * in a trailing data descriptor rather than in the local header reports {@code -1} for both, and

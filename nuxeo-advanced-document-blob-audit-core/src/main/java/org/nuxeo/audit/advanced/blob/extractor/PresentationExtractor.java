@@ -82,7 +82,7 @@ public class PresentationExtractor implements BlobContentExtractor {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Collector collector = new Collector(maxLines, maxValueLength);
+        var collector = new Collector(maxLines, maxValueLength);
         try (MaterializedBlob local = MaterializedBlob.of(blob)) {
             OPCPackage pkg = OoxmlPackages.open(local.file());
             try {
@@ -100,13 +100,17 @@ public class PresentationExtractor implements BlobContentExtractor {
         return DiffableContent.positional(collector.lines, collector.truncated);
     }
 
-    /** @return {@code false} once maxLines has been reached */
+    /**
+     * Collects the lines of a slide, then those of its notes.
+     *
+     * @return {@code false} once maxLines has been reached
+     */
     protected boolean collectSlide(PackagePart slide, Collector collector) throws IOException, SAXException {
         if (collector.remaining() <= 0) {
             collector.truncated = true;
             return false;
         }
-        SlideText content = new SlideText(collector, false);
+        var content = new SlideText(collector, false);
         try {
             OoxmlPackages.parse(slide, content);
         } catch (OoxmlPackages.Stop e) {
@@ -132,8 +136,8 @@ public class PresentationExtractor implements BlobContentExtractor {
     }
 
     /**
-     * Whether a text shape is the title of its slide, like {@code XSLFSlide#getTitle()}: a top-level
-     * shape whose placeholder type is {@code title}.
+     * Returns whether a text shape is the title of its slide, like {@code XSLFSlide#getTitle()}: a
+     * top-level shape whose placeholder type is {@code title}.
      */
     protected static boolean isTitle(boolean topLevel, String placeholder) {
         return topLevel && "title".equals(placeholder);

@@ -72,7 +72,7 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Inventory inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
+        var inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
         boolean truncated;
         try (MaterializedBlob local = MaterializedBlob.of(blob)) {
             File file = local.file();
@@ -247,7 +247,7 @@ public class SpreadsheetImageInventory extends AbstractImageInventory {
     }
 
     /**
-     * Usermodel path, for binary {@code .xls}.
+     * Lists the pictures through the usermodel, for binary {@code .xls}.
      *
      * @return {@code true} if the {@code maxLines} budget was exhausted
      */

@@ -65,7 +65,7 @@ public class BlobDiffSourceEnricher extends AbstractJsonEnricher<DocumentModel> 
             jg.writeNull();
             return;
         }
-        IdRef ref = new IdRef(sourceId.toString());
+        var ref = new IdRef(sourceId.toString());
         try (SessionWrapper wrapper = ctx.getSession(document)) {
             CoreSession session = wrapper.getSession();
             boolean[] state = CoreInstance.doPrivileged(session, s -> {

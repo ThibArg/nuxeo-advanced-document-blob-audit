@@ -58,7 +58,8 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
     public static final String RESULT_DELETED = "deleted";
 
     /**
-     * Status of a purge command, or {@code UNKNOWN} when the id belongs to any other action.
+     * Returns the status of a purge command, or {@code UNKNOWN} when the id belongs to any other
+     * action.
      * <p>
      * {@code BulkService} checks neither the action nor the owner of a command id, so without this
      * the purge operations would let any auditor read and abort every bulk command of the instance.
@@ -98,9 +99,10 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
         }
 
         /**
-         * Only {@code BlobDiff} documents are removed, whatever the query the command was built
-         * with. The type check is what makes this action harmless by construction: it can never be
-         * turned into a generic delete-by-NXQL, not even by an administrator submitting it by hand.
+         * Removes the {@code BlobDiff} documents of the batch, and only them, whatever the query the
+         * command was built with. The type check is what makes this action harmless by construction:
+         * it can never be turned into a generic delete-by-NXQL, not even by an administrator
+         * submitting it by hand.
          * <p>
          * Removal goes through {@code session.removeDocument}, not through the core
          * {@code deletion} action: events, ACLs and blob dereferencing all matter here, and
@@ -135,6 +137,8 @@ public class BlobDiffPurgeAction implements StreamProcessorTopology {
         }
 
         /**
+         * Publishes the exact deletion count of the bucket, and its skip count.
+         * <p>
          * {@code processed} counts the ids handed to the computation, not the documents actually
          * removed. The purge dialog reports "N content diffs purged", so the exact count is
          * published in the status result, where {@code BulkStatus} sums the numeric values of every

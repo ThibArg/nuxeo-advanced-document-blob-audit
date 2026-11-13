@@ -61,7 +61,11 @@ public final class VersionBlobPairs {
         // utility class
     }
 
-    /** @since 2025.1 */
+    /**
+     * Clears the blob xpath templates, so that they are computed again from the current schemas.
+     *
+     * @since 2025.1
+     */
     public static void clearCache() {
         BLOB_XPATH_TEMPLATES.clear();
     }
@@ -77,7 +81,7 @@ public final class VersionBlobPairs {
     }
 
     /**
-     * The blobs to compare between the two versions.
+     * Returns the blobs to compare between the two versions.
      * <p>
      * Unless {@code <xpaths>} lists {@code *}, the configured paths - {@code file:content} by
      * default - are compared verbatim: a path holding no blob simply yields {@code null} in
@@ -168,17 +172,20 @@ public final class VersionBlobPairs {
         return digests;
     }
 
-    /** A blob with no digest is never found on the other side: nothing proves it unchanged. */
+    /**
+     * Returns whether the digest of the blob is among the given ones. A blob with no digest is never
+     * found on the other side: nothing proves it unchanged.
+     */
     protected static boolean holds(Set<String> digests, Blob blob) {
         return blob.getDigest() != null && digests.contains(blob.getDigest());
     }
 
     /**
-     * Blob xpaths of a schema, as <b>templates</b>: a {@code *} stands for the index of a list entry,
-     * which only a document can resolve.
+     * Returns the blob xpaths of a schema, as <b>templates</b>: a {@code *} stands for the index of a
+     * list entry, which only a document can resolve.
      */
     protected static List<String> computeBlobXPathTemplates(String schemaName) {
-        SchemaManager schemaManager = Framework.getService(SchemaManager.class);
+        var schemaManager = Framework.getService(SchemaManager.class);
         Schema schema = schemaManager == null ? null : schemaManager.getSchema(schemaName);
         if (schema == null) {
             return List.of();

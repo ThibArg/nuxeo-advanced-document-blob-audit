@@ -38,7 +38,11 @@ import org.nuxeo.runtime.model.Descriptor;
 @XObject("extractor")
 public class ExtractorDescriptor implements Descriptor {
 
-    /** @since 2025.1 */
+    /**
+     * Order of a contribution that sets none.
+     *
+     * @since 2025.1
+     */
     public static final int DEFAULT_ORDER = 100;
 
     /**
@@ -59,7 +63,11 @@ public class ExtractorDescriptor implements Descriptor {
      */
     public static final String MIN_SIMILARITY_LINES = "minSimilarityLines";
 
-    /** @since 2025.1 */
+    /**
+     * Default of {@link #MIN_SIMILARITY_LINES}.
+     *
+     * @since 2025.1
+     */
     public static final int DEFAULT_MIN_SIMILARITY_LINES = 5;
 
     @XNode("@name")
@@ -96,8 +104,8 @@ public class ExtractorDescriptor implements Descriptor {
      */
     @Override
     public Descriptor merge(Descriptor o) {
-        ExtractorDescriptor other = (ExtractorDescriptor) o;
-        ExtractorDescriptor merged = new ExtractorDescriptor();
+        var other = (ExtractorDescriptor) o;
+        var merged = new ExtractorDescriptor();
         merged.name = either(other.name, name);
         merged.klass = either(other.klass, klass);
         merged.enabled = either(other.enabled, enabled);
@@ -112,27 +120,32 @@ public class ExtractorDescriptor implements Descriptor {
         return value != null ? value : fallback;
     }
 
+    /** Returns whether the contribution is enabled; it is unless {@code enabled="false"}. */
     public boolean isEnabled() {
         return enabled == null || enabled;
     }
 
+    /** Returns the order of the contribution, {@value #DEFAULT_ORDER} when not set. */
     public int getOrder() {
         return order == null ? DEFAULT_ORDER : order;
     }
 
+    /** Returns the mime types the contribution handles, as contributed. */
     public List<String> getMimeTypes() {
         return mimeTypes;
     }
 
+    /** Returns the properties handed to {@link BlobContentExtractor#init(Map)}. */
     public Map<String, String> getProperties() {
         return properties;
     }
 
+    /** Returns the extractor class. */
     public Class<? extends BlobContentExtractor> getKlass() {
         return klass;
     }
 
-    /** {@code true} if this extractor handles the mime type, {@code *} acting as a catch-all. */
+    /** Returns whether this extractor handles the mime type, {@code *} acting as a catch-all. */
     public boolean accepts(String mimeType) {
         if (mimeType == null) {
             return mimeTypes.contains("*");

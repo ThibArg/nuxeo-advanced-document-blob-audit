@@ -53,6 +53,10 @@ public interface BlobContentExtractor {
     /**
      * Extracts the comparable content of the given blob.
      * <p>
+     * Implementations stop past {@code maxLines} units and flag the result as truncated. Each value
+     * should also be bounded when it is created, through {@link ContentLine#of(String, String, int)}:
+     * past {@code maxLines}, its length is what the extraction holds in heap.
+     * <p>
      * <b>Declares {@code IOException}, deliberately not {@code Exception}.</b> The latter would force
      * every caller into a {@code catch (Exception)} - the shape the Nuxeo guidelines call out, because
      * it also catches {@code InterruptedException} and swallows the cooperative-cancellation signal of
@@ -62,14 +66,14 @@ public interface BlobContentExtractor {
      * @param blob the blob to read, never {@code null}; an extractor needing a file reads it through
      *            {@link org.nuxeo.audit.advanced.blob.io.MaterializedBlob}, a pass-through when the
      *            blob is already local
-     * @param maxLines the maximum number of {@link ContentLine} to produce; implementations must
-     *            stop past this limit and flag the result as truncated. Each value should also be
-     *            bounded at creation, through {@link ContentLine#of(String, String, int)}: past
-     *            {@code maxLines}, its length is what the extraction holds in heap
+     * @param maxLines the maximum number of {@link ContentLine} to produce
      */
     DiffableContent extract(Blob blob, int maxLines) throws IOException;
 
-    /** Optional initialisation hook, called once with the contributed descriptor properties. */
+    /**
+     * Initialises the extractor with the contributed descriptor properties. Called once; optional to
+     * implement.
+     */
     default void init(Map<String, String> properties) {
         // NOP
     }

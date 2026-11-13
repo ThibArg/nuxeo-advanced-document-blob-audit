@@ -91,7 +91,7 @@ public class MaterializedBlob implements AutoCloseable {
         }
     }
 
-    /** The local blob, or {@code null} if the source was {@code null}. */
+    /** Returns the local blob, or {@code null} if the source was {@code null}. */
     public Blob blob() {
         return blob;
     }

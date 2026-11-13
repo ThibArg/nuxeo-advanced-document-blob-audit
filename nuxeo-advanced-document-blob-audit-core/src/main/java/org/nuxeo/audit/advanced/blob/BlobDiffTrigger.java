@@ -52,19 +52,22 @@ public final class BlobDiffTrigger {
 
         protected static final Outcome NONE = new Outcome(null, null);
 
+        /** Returns the outcome of a scheduled {@link BlobDiffWork}. */
         public static Outcome scheduled(String correlationId) {
             return new Outcome(correlationId, null);
         }
 
+        /** Returns the outcome of a change audited without a diff, for the given reason. */
         public static Outcome skipped(String skipReason) {
             return new Outcome(null, skipReason);
         }
 
+        /** Returns the outcome of a pair with nothing to audit. */
         public static Outcome none() {
             return NONE;
         }
 
-        /** {@code true} when an audit entry must be written, whichever the case. */
+        /** Returns whether an audit entry must be written, whichever the case. */
         public boolean isAuditable() {
             return correlationId != null || skipReason != null;
         }
@@ -111,7 +114,7 @@ public final class BlobDiffTrigger {
             return Outcome.skipped(STATUS_SKIPPED_NOT_MANAGED);
         }
 
-        DiffRequest request = new DiffRequest(liveDoc.getRepositoryName(), liveDoc.getId(), liveDoc.getTitle(),
+        var request = new DiffRequest(liveDoc.getRepositoryName(), liveDoc.getId(), liveDoc.getTitle(),
                 xpath, FrozenBlob.of(oldBlob), FrozenBlob.of(newBlob), versions, principal, eventTime,
                 UUID.randomUUID().toString());
 

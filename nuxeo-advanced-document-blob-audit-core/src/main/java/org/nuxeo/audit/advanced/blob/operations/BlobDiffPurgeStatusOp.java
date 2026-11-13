@@ -53,6 +53,7 @@ public class BlobDiffPurgeStatusOp {
     @Param(name = "commandId")
     protected String commandId;
 
+    /** Returns the progress of the purge as JSON, {@code UNKNOWN} for any other command. */
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());

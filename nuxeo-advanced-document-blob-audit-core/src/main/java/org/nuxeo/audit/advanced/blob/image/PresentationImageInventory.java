@@ -39,12 +39,12 @@ import org.xml.sax.SAXException;
 public class PresentationImageInventory extends AbstractImageInventory {
 
     /**
-     * Slides are streamed one by one with SAX: {@code XMLSlideShow} would parse the whole deck into
-     * XMLBeans trees before the first picture is read.
+     * Lists the pictures of every slide, streaming the slides one by one with SAX: {@code XMLSlideShow}
+     * would parse the whole deck into XMLBeans trees before the first picture is read.
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Inventory inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
+        var inventory = new Inventory(maxLines, new ImageBudget(new HashMap<>()));
         try (MaterializedBlob local = MaterializedBlob.of(blob)) {
             OPCPackage pkg = OoxmlPackages.open(local.file());
             try {

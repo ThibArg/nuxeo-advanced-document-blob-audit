@@ -59,14 +59,14 @@ public enum DiffEligibility {
     }
 
     /**
-     * The {@code skipReason} to record in the audit entry, or {@code null} when nothing must be
-     * reported.
+     * Returns the {@code skipReason} to record in the audit entry, or {@code null} when nothing must
+     * be reported.
      */
     public String getSkipReason() {
         return status == null ? null : status.value();
     }
 
-    /** {@code true} when the binary change must be audited even though it cannot be diffed. */
+    /** Returns whether the binary change must be audited even though it cannot be diffed. */
     public boolean isReportable() {
         return status != null;
     }

@@ -34,16 +34,19 @@ import org.nuxeo.ecm.core.api.NuxeoException;
  */
 public record ContentLine(String key, String value) {
 
+    /** Creates a positional unit, with no key. */
     public static ContentLine of(String value) {
         return new ContentLine(null, value);
     }
 
+    /** Creates a unit, keyed unless {@code key} is {@code null}. */
     public static ContentLine of(String key, String value) {
         return new ContentLine(key, value);
     }
 
     /**
-     * Same as {@link #of(String, String)}, with the value bounded by {@link #compact(String, int)}.
+     * Creates a unit like {@link #of(String, String)}, with the value bounded by
+     * {@link #compact(String, int)}.
      *
      * @since 2025.1
      */
@@ -95,7 +98,7 @@ public record ContentLine(String key, String value) {
         }
     }
 
-    /** Human readable rendering used in the unified diff output. */
+    /** Returns the human readable rendering used in the unified diff output. */
     public String render() {
         return key == null ? value : key + " = " + value;
     }

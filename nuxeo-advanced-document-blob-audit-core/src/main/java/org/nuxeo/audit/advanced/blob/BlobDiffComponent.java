@@ -68,7 +68,12 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
 
     protected List<ResolvedExtractor> imageExtractors;
 
-    /** @since 2025.1 */
+    /**
+     * Creates the restricted container at repository initialisation, installed while the component
+     * runs.
+     *
+     * @since 2025.1
+     */
     protected RepositoryInitializationHandler repositoryInitHandler;
 
     /**
@@ -109,7 +114,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
      * @since 2025.1
      */
     protected void registerAuditEventType() {
-        DirectoryService ds = Framework.getService(DirectoryService.class);
+        var ds = Framework.getService(DirectoryService.class);
         if (ds == null || ds.getDirectory(EVENT_TYPES_DIRECTORY) == null) {
             log.debug("No {} directory on this runtime; {} will not appear in the audit filter",
                     EVENT_TYPES_DIRECTORY, EVENT_BLOB_MODIFIED);
@@ -159,8 +164,11 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * Parsed apart from {@code init()} and leniently: a typo in this property must cost the rule,
-     * not the extractor, whose formats would otherwise all become unsupported.
+     * Parses the {@link ExtractorDescriptor#MIN_SIMILARITY} property of a contribution, apart from
+     * {@code init()} and leniently: a typo in this property must cost the rule, not the extractor,
+     * whose formats would otherwise all become unsupported.
+     *
+     * @return the threshold, {@code 0} when absent or invalid, which disables the rule
      */
     protected static double minSimilarity(ExtractorDescriptor descriptor) {
         String value = descriptor.getProperties().get(ExtractorDescriptor.MIN_SIMILARITY);
@@ -200,9 +208,10 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * The extractor lists are kept: a work still running past the WorkManager drain needs them. Only
-     * the blob xpath templates of {@link VersionBlobPairs} go, a hot reload can redefine the schemas
-     * they are derived from, and the repository initialization handler is uninstalled.
+     * Clears the blob xpath templates of {@link VersionBlobPairs}, which a hot reload can make stale
+     * by redefining the schemas they are derived from, and uninstalls the repository initialization
+     * handler. The extractor lists are kept: a work still running past the WorkManager drain needs
+     * them.
      */
     @Override
     public void stop(ComponentContext context) throws InterruptedException {
@@ -220,7 +229,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return config == null ? new BlobDiffConfigDescriptor() : config;
     }
 
-    /** The verdict for one side of a pair; {@link #getEligibility(String, String, Blob, Blob)} combines two. */
+    /** Returns the verdict for one side of a pair; {@link #getEligibility(String, String, Blob, Blob)} combines two. */
     protected DiffEligibility getEligibility(String docType, String xpath, Blob blob) {
         BlobDiffConfigDescriptor config = getConfig();
         if (!config.isEnabled() || blob == null) {
@@ -239,6 +248,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
+     * Returns the verdict for the pair, as {@link BlobDiffService#getEligibility} describes it.
+     * <p>
      * Extractor instances are compared by identity, on one snapshot of the list: there is one instance
      * per contribution, and a concurrent {@link #start} replacing the list must not make two lookups
      * of the same contribution look different.
@@ -260,7 +271,11 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return findExtractor(extractors, mimeType);
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns the image inventory extractor contributed for the mime type, or {@code null}.
+     *
+     * @since 2025.1
+     */
     protected BlobContentExtractor findImageExtractor(String mimeType) {
         return findExtractor(imageExtractors, mimeType);
     }
@@ -270,7 +285,12 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
         return resolved == null ? null : resolved.extractor();
     }
 
-    /** @since 2025.1 */
+    /**
+     * Returns the first candidate, in order, whose contribution accepts the mime type, or
+     * {@code null}.
+     *
+     * @since 2025.1
+     */
     protected ResolvedExtractor findResolved(List<ResolvedExtractor> candidates, String mimeType) {
         if (candidates == null) {
             return null;
@@ -284,6 +304,8 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
+     * Extracts the comparable content of the blob with the extractor contributed for its mime type.
+     * <p>
      * {@code null} means <b>no extractor is registered</b> for the mime type, and nothing else.
      * <p>
      * A failing extractor raises instead. Reported the same way, it would make {@code BlobDiffWork}
@@ -307,10 +329,12 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * Both binaries are materialised locally <b>once</b> and every extraction pass reads the local
-     * copy: the {@link MaterializedBlob#of(Blob)} each extractor needing a file goes through is then
-     * a pass-through. Without this, a pair of S3-backed blobs would mean one download per pass: four
-     * for two files as soon as the image inventory is on.
+     * Compares the two blobs, each materialised locally <b>once</b>.
+     * <p>
+     * Every extraction pass then reads the local copy: the {@link MaterializedBlob#of(Blob)} each
+     * extractor needing a file goes through is a pass-through. Without this, a pair of S3-backed
+     * blobs would mean one download per pass: four for two files as soon as the image inventory is
+     * on.
      */
     @Override
     public DiffResult diff(Blob oldBlob, Blob newBlob) {
@@ -328,7 +352,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
             return null;
         }
         BlobDiffConfigDescriptor config = getConfig();
-        TextDiffer differ = new TextDiffer(config.getMaxDiffEntries(), config.getMaxDiffChars(),
+        var differ = new TextDiffer(config.getMaxDiffEntries(), config.getMaxDiffChars(),
                 config.getMaxValueLength());
         DiffResult textResult = differ.diff(oldContent, newContent);
         if (isReplaced(candidates, oldBlob, newBlob, oldContent, newContent, textResult)) {
@@ -356,7 +380,7 @@ public class BlobDiffComponent extends DefaultComponent implements BlobDiffServi
     }
 
     /**
-     * Whether the pair changed mime type and shares too little to be worth a diff.
+     * Returns whether the pair changed mime type and shares too little to be worth a diff.
      * <p>
      * Only a pair read by one contribution reaches this point - two contributions are
      * {@code FORMAT_CHANGED} - so the rule of the new side's contribution is the rule of both. A

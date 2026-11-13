@@ -70,7 +70,8 @@ public class PdfImageInventory extends AbstractImageInventory {
     protected static final int MAX_FORM_DEPTH = 16;
 
     /**
-     * PDFBox reads the document straight from the local file, so nothing of it is held in heap.
+     * Lists the images placed on every page. PDFBox reads the document straight from the local file,
+     * so nothing of it is held in heap.
      * <p>
      * The {@code PDDocument} is a resource of <b>this</b> method, not an argument built in the call
      * to {@link #collectPdf}: closed by the callee, it would leak as soon as a guard is inserted
@@ -78,7 +79,7 @@ public class PdfImageInventory extends AbstractImageInventory {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        Inventory inventory = new Inventory(maxLines, new ImageBudget(new IdentityHashMap<>()));
+        var inventory = new Inventory(maxLines, new ImageBudget(new IdentityHashMap<>()));
         boolean truncated;
         try (MaterializedBlob local = MaterializedBlob.of(blob); PDDocument document = Loader.loadPDF(local.file())) {
             truncated = collectPdf(document, inventory);
@@ -90,7 +91,7 @@ public class PdfImageInventory extends AbstractImageInventory {
     }
 
     protected boolean collectPdf(PDDocument document, Inventory inventory) throws IOException {
-        PdfWalk walk = new PdfWalk(inventory);
+        var walk = new PdfWalk(inventory);
         int pageNumber = 0;
         for (PDPage page : document.getPages()) {
             pageNumber++;
@@ -143,6 +144,8 @@ public class PdfImageInventory extends AbstractImageInventory {
     }
 
     /**
+     * Lists the images of a resource dictionary, and those of the form XObjects it holds.
+     *
      * @param ordinal per-page counter; advanced even for a skipped image, because keys are positional
      *            and renumbering one side would make every following image look changed
      * @param record placements of the enclosing form, {@code null} at page level
@@ -220,8 +223,8 @@ public class PdfImageInventory extends AbstractImageInventory {
     }
 
     /**
-     * Identity of a PDF image: SHA-256 of its encoding parameters followed by its <b>encoded</b>
-     * bytes.
+     * Returns the identity of a PDF image: the SHA-256 of its encoding parameters followed by its
+     * <b>encoded</b> bytes.
      * <p>
      * Nothing is decoded, on purpose. PDFBox 3 runs every filter to completion into a heap buffer
      * ({@code Filter#decode}) before {@code createInputStream()} returns its first byte, so no budget
@@ -249,8 +252,8 @@ public class PdfImageInventory extends AbstractImageInventory {
     }
 
     /**
-     * Stable text form of a filter or decode parameter value: dictionaries with sorted keys, arrays in
-     * order, indirect references followed up to {@link #MAX_COS_DEPTH}.
+     * Returns a stable text form of a filter or decode parameter value: dictionaries with sorted
+     * keys, arrays in order, indirect references followed up to {@link #MAX_COS_DEPTH}.
      *
      * @since 2025.1
      */
@@ -263,7 +266,7 @@ public class PdfImageInventory extends AbstractImageInventory {
             return "/" + name.getName();
         }
         if (resolved instanceof COSArray array) {
-            StringJoiner items = new StringJoiner(",", "[", "]");
+            var items = new StringJoiner(",", "[", "]");
             for (COSBase item : array) {
                 items.add(canonical(item, depth + 1));
             }

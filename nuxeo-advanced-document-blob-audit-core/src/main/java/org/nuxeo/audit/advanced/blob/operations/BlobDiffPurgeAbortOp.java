@@ -56,10 +56,14 @@ public class BlobDiffPurgeAbortOp {
     @Param(name = "commandId")
     protected String commandId;
 
+    /**
+     * Aborts the purge, unless the id is unknown or not a purge, and returns its status in the
+     * {@code BlobDiff.PurgeStatus} format.
+     */
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
-        BulkService bulk = Framework.getService(BulkService.class);
+        var bulk = Framework.getService(BulkService.class);
         BulkStatus status = BlobDiffPurgeAction.purgeStatus(bulk, commandId);
         if (status.getState() == BulkStatus.State.UNKNOWN) {
             log.warn("Not aborting {} for {}: unknown, or not a BlobDiff purge", commandId,

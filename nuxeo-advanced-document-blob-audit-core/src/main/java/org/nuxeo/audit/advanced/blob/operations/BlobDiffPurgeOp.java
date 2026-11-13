@@ -92,6 +92,11 @@ public class BlobDiffPurgeOp {
     @Param(name = "status", required = false)
     protected String status;
 
+    /**
+     * Submits the purge and returns its command id.
+     *
+     * @throws NuxeoException (409) if a purge is already running on the repository
+     */
     @OperationMethod
     public Blob run() {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
@@ -118,9 +123,10 @@ public class BlobDiffPurgeOp {
     }
 
     /**
-     * Selects the diffs to purge: only those under {@code /change-diff}, neither proxies nor versions,
-     * like every reader of {@code BlobDiff} documents. A document of that type anywhere else was not
-     * created by the plugin, and the purge runs under the caller, who may hold Remove there.
+     * Returns the query selecting the diffs to purge: only those under {@code /change-diff}, neither
+     * proxies nor versions, like every reader of {@code BlobDiff} documents. A document of that type
+     * anywhere else was not created by the plugin, and the purge runs under the caller, who may hold
+     * Remove there.
      */
     protected String query() {
         String day = BOUNDARY_FORMAT.format(before.toInstant());

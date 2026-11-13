@@ -28,14 +28,17 @@ import java.util.List;
  */
 public record DiffableContent(List<ContentLine> lines, boolean keyed, boolean truncated) {
 
+    /** Creates a sequence of units, aligned by position. */
     public static DiffableContent positional(List<ContentLine> lines, boolean truncated) {
         return new DiffableContent(lines, false, truncated);
     }
 
+    /** Creates a set of units identified by their key, compared key by key. */
     public static DiffableContent keyed(List<ContentLine> lines, boolean truncated) {
         return new DiffableContent(lines, true, truncated);
     }
 
+    /** Returns the number of units extracted. */
     public int size() {
         return lines.size();
     }

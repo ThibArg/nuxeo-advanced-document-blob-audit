@@ -125,17 +125,20 @@ public record DiffRequest(String repository, String sourceId, String sourceTitle
     public static DiffRequest readFrom(DocumentModel diff) {
         String repository = string(diff, XP_SOURCE_REPO);
         String xpath = string(diff, XP_XPATH);
-        VersionContext versions = new VersionContext(string(diff, XP_PREVIOUS_VERSION_ID),
+        var versions = new VersionContext(string(diff, XP_PREVIOUS_VERSION_ID),
                 string(diff, XP_PREVIOUS_VERSION_LABEL), string(diff, XP_NEW_VERSION_ID),
                 string(diff, XP_NEW_VERSION_LABEL), string(diff, XP_VERSION_SERIES_ID));
-        Calendar date = (Calendar) diff.getPropertyValue(XP_DATE);
+        var date = (Calendar) diff.getPropertyValue(XP_DATE);
         return new DiffRequest(repository == null ? diff.getRepositoryName() : repository,
                 string(diff, XP_SOURCE_ID), sourceTitle(diff, xpath), xpath, Side.OLD.read(diff),
                 Side.NEW.read(diff), versions, string(diff, XP_USER),
                 date == null ? System.currentTimeMillis() : date.getTimeInMillis(), string(diff, XP_CORRELATION_ID));
     }
 
-    /** The diff is titled {@code <source title> - <xpath>}; passed whole, every retry would append the xpath again. */
+    /**
+     * Returns the source title the diff was written with, or {@code null}. The diff is titled
+     * {@code <source title> - <xpath>}; passed whole, every retry would append the xpath again.
+     */
     private static String sourceTitle(DocumentModel diff, String xpath) {
         String title = diff.getTitle();
         String suffix = " - " + xpath;

@@ -82,7 +82,7 @@ public class ConverterTextExtractor implements BlobContentExtractor {
      */
     @Override
     public DiffableContent extract(Blob blob, int maxLines) throws IOException {
-        ConversionService conversionService = Framework.getService(ConversionService.class);
+        var conversionService = Framework.getService(ConversionService.class);
         BlobHolder result = conversionService.convert(converter, new SimpleBlobHolder(blob), null);
         Blob textBlob = result == null ? null : result.getBlob();
         if (textBlob == null) {
@@ -90,7 +90,7 @@ public class ConverterTextExtractor implements BlobContentExtractor {
         }
         List<ContentLine> lines = new ArrayList<>();
         try (InputStream in = textBlob.getStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in, BlobCharsets.of(textBlob)))) {
+                var reader = new BufferedReader(new InputStreamReader(in, BlobCharsets.of(textBlob)))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 for (String raw : OTHER_LINE_BREAKS.split(line, -1)) {

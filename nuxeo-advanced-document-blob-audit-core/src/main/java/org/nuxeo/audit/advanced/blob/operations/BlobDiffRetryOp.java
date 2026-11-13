@@ -57,6 +57,12 @@ public class BlobDiffRetryOp {
     @Context
     protected CoreSession session;
 
+    /**
+     * Schedules the replay of the stored diff the input designates, and returns it.
+     *
+     * @throws NuxeoException (400) when the diff is not a stored {@code BlobDiff} in {@code error}
+     *             under {@code /change-diff} with both binary keys, (409) when a replay is pending
+     */
     @OperationMethod
     public DocumentModel run(DocumentModel input) {
         BlobDiffAccess.checkAuditor(session.getPrincipal());
@@ -75,7 +81,7 @@ public class BlobDiffRetryOp {
             throw new NuxeoException("This BlobDiff has no stored binary keys, it cannot be retried", 400);
         }
         BlobDiffWork work = new BlobDiffWork(request).withReplaceDiffId(diff.getId());
-        WorkManager workManager = Framework.getService(WorkManager.class);
+        var workManager = Framework.getService(WorkManager.class);
         if (isPending(workManager.getWorkState(work.getId()))) {
             throw new NuxeoException("A retry of this BlobDiff is already pending", 409);
         }
@@ -105,6 +111,8 @@ public class BlobDiffRetryOp {
     }
 
     /**
+     * Returns whether the WorkManager reports the replay as scheduled or running.
+     * <p>
      * A {@code null} state is not proof that nothing runs: the stream WorkManager only knows states
      * when it stores them. Two replays are then harmless, though, as they run one after the other on
      * the same partition and the second finds the diff of the first.

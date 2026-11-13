@@ -65,7 +65,11 @@ public class BlobDiffWork extends AbstractWork {
      */
     protected String replaceDiffId;
 
-    /** @since 2025.1 */
+    /**
+     * Creates the work comparing the pair the request describes, named after it.
+     *
+     * @since 2025.1
+     */
     public BlobDiffWork(DiffRequest request) {
         super(request.workId());
         setDocument(request.repository(), request.sourceId());
@@ -88,9 +92,9 @@ public class BlobDiffWork extends AbstractWork {
     }
 
     /**
-     * Transient failures are the common case here: an S3 read timing out, a converter temporarily
-     * unavailable, a concurrent update on the dated container. Retrying is safe because
-     * {@link #existingDiffId()} makes the work idempotent.
+     * Returns {@code 2}: transient failures are the common case here - an S3 read timing out, a
+     * converter temporarily unavailable, a concurrent update on the dated container. Retrying is safe
+     * because {@link #existingDiffId()} makes the work idempotent.
      *
      * @since 2025.1
      */
@@ -100,7 +104,8 @@ public class BlobDiffWork extends AbstractWork {
     }
 
     /**
-     * Id of an already recorded {@code BlobDiff} for this exact correlation id, or {@code null}.
+     * Returns the id of an already recorded {@code BlobDiff} for this exact correlation id, or
+     * {@code null}.
      * <p>
      * The WorkManager is <b>at-least-once</b>: a node crash, a redeployment or a retry can run the
      * same work twice. Without this guard the second run would create a second document - the
@@ -136,7 +141,7 @@ public class BlobDiffWork extends AbstractWork {
         if (replaceDiffId == null) {
             return;
         }
-        IdRef ref = new IdRef(replaceDiffId);
+        var ref = new IdRef(replaceDiffId);
         if (session.exists(ref)) {
             session.removeDocument(ref);
             log.debug("Replaced BlobDiff {} removed", replaceDiffId);
@@ -172,7 +177,7 @@ public class BlobDiffWork extends AbstractWork {
         }
 
         String xpath = request.xpath();
-        IdRef sourceRef = new IdRef(docId);
+        var sourceRef = new IdRef(docId);
         if (!session.exists(sourceRef)) {
             // Deleted (or permanently purged) between the save and this work: the audit entry
             // already exists, so leave a trace instead of failing silently.
@@ -193,7 +198,7 @@ public class BlobDiffWork extends AbstractWork {
         // DiffRequest allows a side with no stored blob: it is as unreadable as a key that resolves to nothing.
         Blob oldBlob = oldSide == null ? null : oldSide.resolve();
         Blob newBlob = newSide == null ? null : newSide.resolve();
-        BlobDiffService service = Framework.getService(BlobDiffService.class);
+        var service = Framework.getService(BlobDiffService.class);
 
         commitOrRollbackTransaction();
         DiffResult result = null;
@@ -244,8 +249,9 @@ public class BlobDiffWork extends AbstractWork {
     }
 
     /**
-     * Whether a run of this very work already recorded the diff, in which case there is nothing to add
-     * and above all nothing to duplicate. The diff this work replaces is removed all the same.
+     * Returns whether a run of this very work already recorded the diff, in which case there is
+     * nothing to add and above all nothing to duplicate. The diff this work replaces is removed all
+     * the same.
      *
      * @since 2025.1
      */

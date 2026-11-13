@@ -140,7 +140,7 @@ public class SlideHandler extends DefaultHandler {
     }
 
     /**
-     * Whether the paragraphs of this text shape are read; {@code false} skips them unparsed.
+     * Returns whether the paragraphs of this text shape are read; {@code false} skips them unparsed.
      *
      * @param topLevel whether the shape is in the shape tree itself rather than in a group
      * @param placeholder the {@code type} of the placeholder of the shape, {@code null} if not given
@@ -149,13 +149,13 @@ public class SlideHandler extends DefaultHandler {
         return true;
     }
 
-    /** Whether tables are read; {@code false} skips them unparsed. */
+    /** Returns whether tables are read; {@code false} skips them unparsed. */
     protected boolean readsTables() {
         return true;
     }
 
     /**
-     * A paragraph of a text shape, as {@code XSLFTextParagraph#getText()} renders it.
+     * Receives a paragraph of a text shape, as {@code XSLFTextParagraph#getText()} renders it.
      *
      * @param topLevel whether the shape is in the shape tree itself rather than in a group
      * @param placeholder the {@code type} of the placeholder of the shape, {@code null} if not given
@@ -164,17 +164,17 @@ public class SlideHandler extends DefaultHandler {
         // for subclasses
     }
 
-    /** The end of a text shape, after its last paragraph. */
+    /** Receives the end of a text shape, after its last paragraph. */
     protected void textShapeEnd(boolean topLevel, String placeholder) throws SAXException {
         // for subclasses
     }
 
-    /** A table row, one entry per cell, each as {@code XSLFTableCell#getText()} renders it. */
+    /** Receives a table row, one entry per cell, each as {@code XSLFTableCell#getText()} renders it. */
     protected void tableRow(List<String> cells) throws SAXException {
         // for subclasses
     }
 
-    /** An embedded picture, by the id of its relationship from the part being parsed. */
+    /** Receives an embedded picture, by the id of its relationship from the part being parsed. */
     protected void picture(String relationshipId) throws SAXException {
         // for subclasses
     }
@@ -263,7 +263,7 @@ public class SlideHandler extends DefaultHandler {
         }
     }
 
-    /** A child of the shape tree or of a group, read as the usermodel types it. */
+    /** Returns the frame of a child of the shape tree or of a group, read as the usermodel types it. */
     protected Frame shape(String name, boolean top) {
         switch (name) {
             case "sp":

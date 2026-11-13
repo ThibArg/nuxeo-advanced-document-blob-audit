@@ -47,11 +47,17 @@ public class BlobDiffDeleteOp {
     @Context
     protected CoreSession session;
 
+    /** Permanently deletes a single {@code BlobDiff}. */
     @OperationMethod
     public void run(DocumentModel doc) {
         run(new DocumentModelListImpl(List.of(doc)));
     }
 
+    /**
+     * Permanently deletes the given {@code BlobDiff} documents, checked before any is deleted.
+     *
+     * @throws NuxeoException (400) if one of them is not a {@code BlobDiff}
+     */
     @OperationMethod
     public void run(DocumentModelList docs) {
         BlobDiffAccess.checkAuditor(session.getPrincipal());

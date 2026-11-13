@@ -80,7 +80,7 @@ public record FrozenBlob(String providerId, String key, String filename, String 
                 log.warn("No blob provider {} to resolve {}", providerId, filename);
                 return null;
             }
-            BlobInfo info = new BlobInfo();
+            var info = new BlobInfo();
             info.key = key;
             info.filename = filename;
             info.mimeType = mimeType;

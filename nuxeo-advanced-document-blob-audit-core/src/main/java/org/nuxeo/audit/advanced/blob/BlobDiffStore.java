@@ -112,7 +112,7 @@ public final class BlobDiffStore {
         String year = parts[0];
         String month = parts[1];
         String day = parts[2];
-        PathRef dayRef = new PathRef("/" + CONTAINER_NAME + "/" + year + "/" + month + "/" + day);
+        var dayRef = new PathRef("/" + CONTAINER_NAME + "/" + year + "/" + month + "/" + day);
         if (session.exists(dayRef)) {
             return session.getDocument(dayRef);
         }
@@ -134,7 +134,7 @@ public final class BlobDiffStore {
      * ACL is the expected one. The session must be privileged.
      */
     public static DocumentModel ensureRootContainer(CoreSession session) {
-        PathRef ref = new PathRef("/" + CONTAINER_NAME);
+        var ref = new PathRef("/" + CONTAINER_NAME);
         DocumentModel root = null;
         for (int attempt = 1; attempt <= ROOT_CREATION_ATTEMPTS && root == null; attempt++) {
             if (session.exists(ref)) {
@@ -215,9 +215,12 @@ public final class BlobDiffStore {
         return true;
     }
 
-    /** Dated sub-folders inherit the root ACL: no local ACL of their own. */
+    /**
+     * Returns (creating it if needed) a dated sub-folder. Dated sub-folders inherit the root ACL: no
+     * local ACL of their own.
+     */
     protected static DocumentModel getOrCreateFolder(CoreSession session, String parentPath, String name) {
-        PathRef ref = new PathRef(parentPath + (parentPath.endsWith("/") ? "" : "/") + name);
+        var ref = new PathRef(parentPath + (parentPath.endsWith("/") ? "" : "/") + name);
         if (session.exists(ref)) {
             return session.getDocument(ref);
         }
@@ -241,7 +244,7 @@ public final class BlobDiffStore {
      */
     public static DocumentModel createDiffDocument(CoreSession session, DiffRequest request, String status,
             DiffResult result) {
-        Date date = new Date(request.eventTime());
+        var date = new Date(request.eventTime());
         DocumentModel container = getOrCreateContainer(session, date);
         String name = diffDocumentName(request.sourceId(), date, request.correlationId());
         DocumentModel diffDoc = session.createDocumentModel(container.getPathAsString(), name, DIFF_DOCTYPE);
@@ -265,8 +268,9 @@ public final class BlobDiffStore {
     }
 
     /**
-     * {@code <sourceId>-<eventTime>-<correlationId>}: one version touching two blob xpaths produces two
-     * diffs with the same source and time, so the correlation id is what keeps names unique.
+     * Returns the name of a diff, {@code <sourceId>-<eventTime>-<correlationId>}: one version touching
+     * two blob xpaths produces two diffs with the same source and time, so the correlation id is what
+     * keeps names unique.
      */
     protected static String diffDocumentName(String sourceId, Date date, String correlationId) {
         return sourceId + "-" + date.getTime() + (correlationId == null ? "" : "-" + correlationId);
