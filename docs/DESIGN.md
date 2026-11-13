@@ -784,7 +784,8 @@ access.
 `nuxeo-blobdiff-metadata-layout.html` is empty on purpose: Web UI loads it, and would get a 404.
 
 `nuxeo-blobdiff-viewer` aborts the request in flight when it is handed another diff and ignores any
-response that is not the current one. The purge dialog is a small state machine because the purge is
+response that is not the current one. It aborts it too when it leaves the page (`detached`), and
+restarts it if it comes back with the same diff (`attached`): the `url` observer would not fire again. The purge dialog is a small state machine because the purge is
 asynchronous: it polls with a doubling delay, and after five failures in a row or an `UNKNOWN` state
 it closes saying the purge keeps running on the server; it reports failed and skipped diffs and a
 reached query limit; an abort branches on the state it returns (a command that completed meanwhile

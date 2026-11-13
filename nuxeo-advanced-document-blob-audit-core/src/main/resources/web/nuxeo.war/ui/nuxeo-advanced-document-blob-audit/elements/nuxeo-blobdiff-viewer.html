@@ -61,6 +61,7 @@
       // returns is ignored, so its lines can never be rendered under the metadata of the new one.
       // Same rule as nuxeo-resource, which aborts superseded requests.
       _load: function (url) {
+        this._interrupted = false;
         if (this._controller) {
           this._controller.abort();
           this._controller = null;
@@ -100,6 +101,21 @@
       },
       _more: function () {
         this.set('_visible', this._lines.slice(0, this._visible.length + this.pageSize));
+      },
+      // Out of the page, a download still in flight is of no use: it is aborted. The url observer
+      // does not fire again if the element comes back with the same diff, so attached restarts it.
+      detached: function () {
+        if (this._controller) {
+          this._controller.abort();
+          this._controller = null;
+          this.loading = false;
+          this._interrupted = true;
+        }
+      },
+      attached: function () {
+        if (this._interrupted) {
+          this._load(this.url);
+        }
       },
       _hasMore: function (shown, total) { return shown < total; },
       _count: function (shown, total) { return this.i18n('label.blobaudit.viewer.count', shown, total); },
