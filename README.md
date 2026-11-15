@@ -13,8 +13,6 @@ Audit changes inside a file between two versions.
 * It is off by default: Turn it on only for the document types that need it.
 * The design notes, for whoever forks or maintains the plugin, are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-<img src="README-Pictures/blob-audit-BigPicture-all.png" alt="Compressed LDT" width="900">
-
 ![How it flows: during the check-in, a new version (v1.0 → v1.1) leads to "File changed?", which compares the two fingerprints (digests); if not, nothing happens. If yes, in the background: an audit entry "file X changed", visible in History, and the diff is computed (both files read by format, their contents compared) and stored as a BlobDiff in /change-diff, auditors only. The audit entry and the BlobDiff share the same correlation id.](README-Pictures/blob-audit-BigPicture-all.png)
 
 > [!NOTE]
