@@ -48,14 +48,13 @@ Versions are kept, and the [Nuxeo Enhanced Viewer](https://doc.nuxeo.com/nxdoc/n
 add-on shows two of them side by side, text differences highlighted. That is the right tool to *look at* a
 change you already know about. It is not an audit trail:
 
+- **Versions do not last forever.** A user with `Write` on a document can delete its versions, and permanently
+  deleting a document deletes its versions (unless retention rules prevent it.) Once a version is gone there
+  is nothing left to compare; the audit entry and the `BlobDiff` remain.
 - **Knowing what to compare.** A version is created whether its file changed or only its metadata did, and
   the document history does not say which. This plugin writes an audit entry only when the bytes of the
   file changed, and its audit search lists every content change over a period, across documents. Reviewing
   one month on demand means opening every pair of versions of every document.
-- **Versions do not last forever.** A user with `Write` on a document can delete its versions (except one a
-  proxy points to, and the base version of a checked-in document), and permanently deleting a document
-  deletes its versions, unless retention rules prevent it. Once a version is gone there is nothing left to
-  compare; the audit entry and the `BlobDiff` remain.
 - **Recorded when it happened.** The audit entry is written by the system, in the transaction of the
   check-in, and the previous version is captured at that moment. An on-demand comparison is a
   reconstruction made later, by someone.
@@ -74,10 +73,11 @@ processing, and an unsupported plugin someone has to own.
 
 ## Quick Start
 
-1. Install the package (it requires `nuxeo-web-ui`): `nuxeoctl mp-install nuxeo-advanced-document-blob-audit-<version>.zip`.
+1. Install the package (it requires `nuxeo-web-ui`), either from your local build or from the Nuxeo marketplace
 2. Enable the feature, **disabled by default**, and scope it:
 
 ```xml
+<!-- Reminder: component and required _must not be used_ if you declare this extension in Nuxeo Studio -->
 <component name="com.example.blobaudit.config">
   <require>org.nuxeo.audit.advanced.blob.BlobDiffComponent</require>
   <extension target="org.nuxeo.audit.advanced.blob.BlobDiffComponent" point="config">
