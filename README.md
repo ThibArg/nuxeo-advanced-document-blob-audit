@@ -6,7 +6,7 @@ Audit changes inside a file between two versions.
 
 * Audit what actually changed inside a file between two successive versions
 * Each time a version is created, this plugin records what changed *inside* its file.
-  * (Excel cells, PowerPoint slides, Word paragraphs, PDF and text lines - jon, xml, txt, ...).
+  * (Excel cells, PowerPoint slides, Word paragraphs, PDF and text lines - json, xml, txt, ...).
   * When the content of the file changed:
     * The document gets an audit entry with the diff info (not the diff itself)
     * The changes go into a `BlobDiff` document that only auditors/administrators can read
@@ -16,7 +16,7 @@ Audit changes inside a file between two versions.
 ![How it flows: during the check-in, a new version (v1.0 → v1.1) leads to "File changed?", which compares the two fingerprints (digests); if not, nothing happens. If yes, in the background: an audit entry "file X changed", visible in History, and the diff is computed (both files read by format, their contents compared) and stored as a BlobDiff in /change-diff, auditors only. The audit entry and the BlobDiff share the same correlation id.](README-Pictures/blob-audit-BigPicture-all.png)
 
 > [!NOTE]
-> Its a standalone plugin with no dependency on [`nuxeo-advanced-document-audit`](https://github.com/nuxeo-sandbox/nuxeo-advanced-document-audit), which handles scalar fields. Both plugins can coexist.
+> It's a standalone plugin with no dependency on [`nuxeo-advanced-document-audit`](https://github.com/nuxeo-sandbox/nuxeo-advanced-document-audit), which handles scalar fields. Both plugins can coexist.
 
 > [!IMPORTANT]
 > By essence, this plugin is complex. With listeners, asynchronous work, different code for extractors
@@ -24,9 +24,53 @@ Audit changes inside a file between two versions.
 >
 > It is a **Nuxeo Presales Sandbox plugin**, showing art of the possible but not included as part of the
 > Nuxeo Platform and, so, **not supported**. The need for this feature is very rare and mostly limited to
-> strict regulation constraints. So, if you need it **we strongly recommend a Nuxeo Partner forks the code
-> and takes ownership** (tuning, maintenance, support)
+> strict regulation constraints (see [Use Cases](#use-cases)). So, if you need it **we strongly recommend a
+> Nuxeo Partner forks the code and takes ownership** (tuning, maintenance, support)
 
+
+## Use Cases
+
+This plugin is meant for strongly regulated businesses, which must be able to show, for each release of a
+controlled document, exactly what changed inside its file, and to have those changes reviewed. For example:
+
+- **Pharmaceutical and biotech manufacturing**, under EU and US manufacturing-quality and data-integrity
+  rules (EU GMP Annex 11, FDA 21 CFR Part 11, FDA data integrity guidance).
+- **Medical device manufacturing**, under document-control requirements (ISO 13485, FDA quality
+  management system regulation).
+- **Financial reporting**, where the spreadsheets feeding the accounts fall under internal controls
+  (Sarbanes-Oxley in the US).
+
+Outside such constraints, comparing two versions on demand is usually enough: see below.
+
+## Why Not Compare on Demand?
+
+Versions are kept, and the [Nuxeo Enhanced Viewer](https://doc.nuxeo.com/nxdoc/nuxeo-enhanced-viewer/)
+add-on shows two of them side by side, text differences highlighted. That is the right tool to *look at* a
+change you already know about. It is not an audit trail:
+
+- **Knowing what to compare.** A version is created whether its file changed or only its metadata did, and
+  the document history does not say which. This plugin writes an audit entry only when the bytes of the
+  file changed, and its audit search lists every content change over a period, across documents. Reviewing
+  one month on demand means opening every pair of versions of every document.
+- **Versions do not last forever.** A user with `Write` on a document can delete its versions (except one a
+  proxy points to, and the base version of a checked-in document), and permanently deleting a document
+  deletes its versions, unless retention rules prevent it. Once a version is gone there is nothing left to
+  compare; the audit entry and the `BlobDiff` remain.
+- **Recorded when it happened.** The audit entry is written by the system, in the transaction of the
+  check-in, and the previous version is captured at that moment. An on-demand comparison is a
+  reconstruction made later, by someone.
+- **The structure of the file, not its rendering.** An Excel formula is compared as a formula, even when its
+  displayed value did not change; hidden sheets and PowerPoint speaker notes are read; images can be
+  compared by fingerprint.
+- **Never silent.** A change to a file that cannot be compared (an image, a zip, a file over `maxBlobSize`)
+  is still recorded.
+- **Review without access to every document.** The auditors group reviews the changes in `/change-diff`
+  without read access to each source document. The flip side: business content is copied under other ACLs,
+  see [Limitations](#limitations).
+
+When the need is only "an editor sometimes wants to see what changed", comparing on demand is enough and
+this plugin is not worth its cost: storage (one `BlobDiff` per changed file per version), background
+processing, and an unsupported plugin someone has to own.
 
 ## Quick Start
 

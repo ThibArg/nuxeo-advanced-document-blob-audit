@@ -67,7 +67,9 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
     under `search/blobdiffs/`, layouts under `document/blobdiff/`, client i18n under `i18n/`.
 - `nuxeo-advanced-document-blob-audit-package/` — the marketplace package (the bundle only).
 - `docs/DESIGN.md` — design notes. `README-Summary/` — two HTML overviews, maintained by hand: mirror
-  any user-visible change there.
+  any user-visible change there. `README-Pictures/blob-audit-BigPicture-all.png`, the picture of the
+  README TL;DR, is a capture of the three sections of `README-Summary/blob-audit-BigPicture.html`:
+  nothing regenerates it, retake it whenever that page changes.
 - `test-campaign/` — the end-to-end campaign against a running Nuxeo, outside the Maven build:
   `runbook.md` (by hand, Web UI), `runbook-by-agents.md` (an agent, over the REST API) and its
   `agent/blobaudit-helpers.sh`, the configuration to deploy (`nuxeo-config/`), one folder of test files
@@ -416,10 +418,17 @@ Repository-specific:
   confidentiality as a first-class concern in every change.
 - Comments keep the *why*, never the history ("used to", item numbers, review ids): the commit
   message is the record.
-- Documentation homes: `README.md` for users and administrators (statuses, configuration, Web UI,
-  operations, limitations), `docs/DESIGN.md` for the reasons, this file for the rules. A rule here
-  points to its section of `docs/DESIGN.md`; a user-visible change updates the README and
-  `README-Summary/`.
+- Documentation homes: `README.md` for users and administrators (use cases, why not compare on
+  demand, statuses, configuration, Web UI, operations, limitations), `docs/DESIGN.md` for the reasons,
+  this file for the rules. A rule here points to its section of `docs/DESIGN.md`; a user-visible change
+  updates the README and `README-Summary/`, and the TL;DR picture when it changes the big-picture page.
+- The README "Use Cases" names regulations, never quotes them and never claims compliance: keep it so.
+  Its financial-reporting example was not checked against the primary texts. "Why Not Compare on
+  Demand?" states facts of the platform, checked against LTS 2025 (a user with `Write` can delete
+  versions, `WriteVersion` being part of it; `StreamDocumentGC` removes the versions of a permanently
+  deleted document) and of the plugin (formulas compared as formulas, `useFormulas`; every sheet read,
+  hidden ones included; `includeNotes` on by default; an undiffable binary still audited). A change to
+  one of them updates that section.
 - A change of what the REST API or Web UI shows (an outcome, a status, a counter, a comment, a
   refusal) updates the expectations of `test-campaign/runbook.md` **and** `runbook-by-agents.md` in
   the same commit: they state the same expected results.
@@ -439,7 +448,7 @@ mvn -o dependency:analyze -pl nuxeo-advanced-document-blob-audit-core
 public repository). `nuxeo.skip.enforcer` is `true` in the parent pom, so the Nuxeo enforcer rules do
 not run: rely on `dependency:analyze` instead, whose "Used undeclared dependencies" must stay empty.
 Do not run the build when a commit only touches `README.md`, `AGENTS.md`, `docs/`, `README-Summary/`,
-`test-campaign/` or `.gitignore`.
+`README-Pictures/`, `test-campaign/` or `.gitignore`.
 
 Tests needing no Nuxeo runtime (pure JUnit, about 20 seconds):
 
