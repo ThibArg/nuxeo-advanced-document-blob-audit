@@ -4,23 +4,21 @@ Audit changes inside a file between two versions.
 
 ## TL;DR
 
+* Audit what actually changed inside a file between two successive versions
 * Each time a version is created, this plugin records what changed *inside* its file.
   * (Excel cells, PowerPoint slides, Word paragraphs, PDF and text lines - jon, xml, txt, ...).
   * When the content of the file changed:
     * The document gets an audit entry with the diff info (not the diff itself)
     * The changes go into a `BlobDiff` document that only auditors/administrators can read
 * It is off by default: Turn it on only for the document types that need it.
+* The design notes, for whoever forks or maintains the plugin, are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
+<img src="README-Pictures/blob-audit-BigPicture-all.png" alt="Compressed LDT" width="900">
 
+![How it flows: during the check-in, a new version (v1.0 → v1.1) leads to "File changed?", which compares the two fingerprints (digests); if not, nothing happens. If yes, in the background: an audit entry "file X changed", visible in History, and the diff is computed (both files read by format, their contents compared) and stored as a BlobDiff in /change-diff, auditors only. The audit entry and the BlobDiff share the same correlation id.](README-Pictures/blob-audit-BigPicture-all.png)
 
-
-
-Audit **what actually changed inside a file** between two successive versions of a document: Excel spreadsheets cell by cell, PowerPoint decks slide by slide, Word documents paragraph by paragraph, PDFs line by line as rendered, and text formats line by line.
-
-
-
-
-A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, which handles scalar fields. Both plugins can coexist.
+> [!NOTE]
+> Its a standalone plugin with no dependency on [`nuxeo-advanced-document-audit`](https://github.com/nuxeo-sandbox/nuxeo-advanced-document-audit), which handles scalar fields. Both plugins can coexist.
 
 > [!IMPORTANT]
 > By essence, this plugin is complex. With listeners, asynchronous work, different code for extractors
@@ -31,14 +29,6 @@ A **standalone plugin** with no dependency on `nuxeo-advanced-document-audit`, w
 > strict regulation constraints. So, if you need it **we strongly recommend a Nuxeo Partner forks the code
 > and takes ownership** (tuning, maintenance, support)
 
-| Step | Where | When |
-|---|---|---|
-| Detect a binary change | `BlobModificationListener`, on each check-in | synchronous: a digest comparison |
-| Write the `blobContentModified` audit entry | the audit log | same transaction, **no business content** |
-| Extract and compare both binaries | `BlobDiffWork`, queue `blobDiff` | asynchronous, after commit, outside any transaction |
-| Store the result | a `BlobDiff` document under `/change-diff` | readable by the auditors only |
-
-Only the creation of a version is audited, never an ordinary save. The design notes, for whoever forks or maintains the plugin, are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Quick Start
 
