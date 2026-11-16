@@ -71,6 +71,7 @@ Maven multi-module, parent `org.nuxeo:nuxeo-parent:2025.24`, version `2025.1.0-S
   README TL;DR, is a capture of the three sections of `README-Summary/blob-audit-BigPicture.html`:
   nothing regenerates it, retake it whenever that page changes.
 - `test-campaign/` — the end-to-end campaign against a running Nuxeo, outside the Maven build:
+  `README.md` (its index: what it covers, prerequisites, the two ways to run it, the folder contents),
   `runbook.md` (by hand, Web UI), `runbook-by-agents.md` (an agent, over the REST API) and its
   `agent/blobaudit-helpers.sh`, the configuration to deploy (`nuxeo-config/`), one folder of test files
   per scenario (`S01-…` to `S28-…`), `MANIFEST.tsv` (size, SHA-256 and upload mime type of each file),
@@ -432,6 +433,10 @@ Repository-specific:
 - A change of what the REST API or Web UI shows (an outcome, a status, a counter, a comment, a
   refusal) updates the expectations of `test-campaign/runbook.md` **and** `runbook-by-agents.md` in
   the same commit: they state the same expected results.
+- `test-campaign/README.md` is the index of the campaign, the main README only points to it. A change
+  to the setup of the campaign (configuration, prerequisites, inputs of the agent), to its scenarios or
+  to the files of the folder updates it in the same commit. Expected results never go there: they
+  live in the two runbooks only.
 - `AGENTS.md` is **not** in `.gitignore` for this repository, so it is pushed. Keep it free of any
   sensitive information: no login, password, key, e-mail address, personal name or local path.
 
@@ -599,4 +604,4 @@ fallback anyway. Never use the search engine for this guard: indexing is asynchr
 ## Numbering
 
 Work is numbered and cited in commit messages (`Item NN: ...`); history:
-`git log --grep '^Item '`. Next free number: 111.
+`git log --grep '^Item '`. Next free number: 112.

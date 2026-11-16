@@ -3,17 +3,8 @@
 Manual end-user test of `nuxeo-advanced-document-blob-audit` on a local Docker Compose deployment:
 Nuxeo LTS 2025 + MongoDB + OpenSearch, Web UI.
 
-Everything lives in `test-campaign/`, at the root of the repository:
-
-| Path | What |
-|---|---|
-| `S01-…` to `S28-…` | the test files, one folder per scenario, `xxx-00` is the first upload, `-01`, `-02`, `-03` the next ones |
-| `nuxeo-config/blobaudit-runbook-config.xml` | the configuration to deploy (feature on, `File` only, every blob xpath, image inventory, `auditors` group) |
-| `MANIFEST.tsv` | every file with its size, SHA-256 and the mime type a browser sends |
-| `_generator/` | the Python scripts that produced the files (to regenerate or tweak them), and `make-large-files.sh` |
-| `runbook-by-agents.md` | the same campaign, scripted over the REST API for an agent |
-| `agent/blobaudit-helpers.sh` | the bash functions (curl, jq) the agent runbook uses |
-| `results/` | what an agent run writes (log, raw responses, report); ignored by git |
+What this folder holds, the prerequisites and the agent version of this campaign: [`README.md`](README.md),
+in the same folder.
 
 The two S16 files over 10 MB (`too-large-00.txt`, `too-large-01.txt`) are not in git. Before S16, run
 once, from the root of the repository:

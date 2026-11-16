@@ -404,7 +404,7 @@ What each test class covers, and the test resources, are listed in [`AGENTS.md`]
 
 ### End-to-End Test Campaign
 
-[`test-campaign/`](test-campaign/) tests the installed package on a running Nuxeo (Docker Compose, with MongoDB and OpenSearch): 28 scenarios, one folder of test files each, run by hand in Web UI with [`runbook.md`](test-campaign/runbook.md), or by an agent over the REST API with [`runbook-by-agents.md`](test-campaign/runbook-by-agents.md). Both give the expected outcome of every step. The two S16 files over 10 MB are not stored: `bash test-campaign/_generator/make-large-files.sh` writes them.
+The campaign under `test-campaign/` tests the installed package on a running Nuxeo (Docker Compose, with MongoDB and OpenSearch): 28 scenarios, run by hand in Web UI or by an agent over the REST API, each step with its expected outcome. Use a local, disposable instance only. Prerequisites and how to run it: [`test-campaign/README.md`](test-campaign/README.md).
 
 ## Support
 **These features are not part of the Nuxeo Production platform.**
