@@ -11,7 +11,9 @@ Audit changes inside a file between two versions.
     * The document gets an audit entry with the diff info (not the diff itself)
     * The changes go into a `BlobDiff` document that only auditors/administrators can read
 * It is off by default: Turn it on only for the document types that need it.
-* The design notes, for whoever forks or maintains the plugin, are in [`docs/DESIGN.md`](docs/DESIGN.md).
+* For whoever forks/maintains the plugin:
+  * Design notes are in [docs/DESIGN.md](docs/DESIGN.md)
+  * A full [Test campaign](test-campaign/README.md), runnable manually from WebUI or with an agent via the REST API
 
 ![How it flows: during the check-in, a new version (v1.0 → v1.1) leads to "File changed?", which compares the two fingerprints (digests); if not, nothing happens. If yes, in the background: an audit entry "file X changed", visible in History, and the diff is computed (both files read by format, their contents compared) and stored as a BlobDiff in /change-diff, auditors only. The audit entry and the BlobDiff share the same correlation id.](README-Pictures/blob-audit-BigPicture-all.png)
 
