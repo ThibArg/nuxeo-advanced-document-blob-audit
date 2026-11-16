@@ -1,5 +1,10 @@
 # nuxeo-advanced-document-blob-audit
 
+> [!IMPORTANT]
+> This repository has moved to
+> [nuxeo-sandbox/nuxeo-advanced-document-blob-audit](https://github.com/nuxeo-sandbox/nuxeo-advanced-document-blob-audit)
+> and is archived. Please use the new location.
+
 Audit changes inside a file between two versions.
 
 ## TL;DR
