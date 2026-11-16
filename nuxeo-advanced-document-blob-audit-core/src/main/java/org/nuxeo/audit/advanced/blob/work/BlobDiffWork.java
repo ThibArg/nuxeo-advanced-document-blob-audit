@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2026 Nuxeo SA (http://nuxeo.com/) and others.
+ * (C) Copyright 2026 Hyland (http://hyland.com/) and others.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,6 +12,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Contributors:
+ *     Thibaud Arguillere (with the help of opencode/Copilot - Claude Opus 5.5)
  */
 package org.nuxeo.audit.advanced.blob.work;
 
